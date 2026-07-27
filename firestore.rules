@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Trips Collection
+    match /trips/{tripId} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.userId == "public" ||
+        (request.auth.token.email != null && resource.data.sharedWithEmails != null && request.auth.token.email in resource.data.sharedWithEmails)
+      );
+
+      allow create: if isSignedIn() &&
+        incoming().userId == request.auth.uid &&
+        incoming().destination is string &&
+        incoming().destination.size() <= 300 &&
+        incoming().startDate is string &&
+        incoming().endDate is string;
+
+      allow update: if isSignedIn() && (
+        existing().userId == request.auth.uid ||
+        (request.auth.token.email != null && existing().sharedWithEmails != null && request.auth.token.email in existing().sharedWithEmails)
+      ) && incoming().userId == existing().userId;
+
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // Buddy Invitations Collection
+    match /buddy_invitations/{invitationId} {
+      allow read: if isSignedIn() && request.auth.token.email != null && (
+        resource.data.senderEmail == request.auth.token.email ||
+        resource.data.recipientEmail == request.auth.token.email
+      );
+
+      allow create: if isSignedIn() &&
+        incoming().senderEmail is string &&
+        incoming().recipientEmail is string &&
+        incoming().tripId is string;
+
+      allow update: if isSignedIn() && request.auth.token.email != null && (
+        existing().recipientEmail == request.auth.token.email ||
+        existing().senderEmail == request.auth.token.email
+      );
+
+      allow delete: if isSignedIn() && request.auth.token.email != null && (
+        existing().senderEmail == request.auth.token.email ||
+        existing().recipientEmail == request.auth.token.email
+      );
+    }
+  }
+}

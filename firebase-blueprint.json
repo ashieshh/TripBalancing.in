@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "TripRecord": {
+      "title": "Trip Record",
+      "description": "Stores user created travel trips and detailed itineraries",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "User UID who created the trip"
+        },
+        "destination": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Trip destination"
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Start date YYYY-MM-DD"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date YYYY-MM-DD"
+        },
+        "budgetAmount": {
+          "type": "string",
+          "description": "Budget amount string"
+        },
+        "travelers": {
+          "type": "number",
+          "description": "Number of travelers"
+        },
+        "travelStyle": {
+          "type": "string",
+          "description": "Style of travel (Budget, Luxury, Family, Solo, Adventure)"
+        },
+        "category": {
+          "type": "string",
+          "description": "Category or tag for trip"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation"
+        }
+      },
+      "required": ["userId", "destination", "startDate", "endDate"]
+    },
+    "BuddyInvitation": {
+      "title": "Buddy Invitation",
+      "description": "Invitation sent to travel companions for read/write access to trips",
+      "type": "object",
+      "properties": {
+        "tripId": {
+          "type": "string",
+          "description": "ID of the trip being shared"
+        },
+        "senderEmail": {
+          "type": "string",
+          "description": "Email address of the sender"
+        },
+        "recipientEmail": {
+          "type": "string",
+          "description": "Email address of the recipient"
+        },
+        "accessType": {
+          "type": "string",
+          "enum": ["read", "write"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "declined"]
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation"
+        }
+      },
+      "required": ["tripId", "senderEmail", "recipientEmail", "accessType", "status"]
+    }
+  },
+  "firestore": {
+    "/trips/{tripId}": {
+      "schema": {
+        "$ref": "#/entities/TripRecord"
+      },
+      "description": "User travel trips collection"
+    },
+    "/buddy_invitations/{invitationId}": {
+      "schema": {
+        "$ref": "#/entities/BuddyInvitation"
+      },
+      "description": "Trip buddy invitation records"
+    }
+  }
+}

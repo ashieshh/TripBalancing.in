@@ -1,0 +1,6 @@
+{
+  "name": "TripBalancing",
+  "description": "TripBalancing is an AI-powered travel planner that helps travelers create personalized itineraries while balancing their travel budget.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
