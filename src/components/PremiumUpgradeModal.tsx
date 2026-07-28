@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { 
-  Crown, Check, Sparkles, Zap, ShieldCheck, 
-  ArrowRight, Compass, Landmark, Heart,
+  Crown, Sparkles, Zap, ShieldCheck, 
+  ArrowRight, Landmark, Heart,
   Lock, Loader2, AlertCircle, Globe
 } from "lucide-react";
 
@@ -22,65 +22,87 @@ export default function PremiumUpgradeModal({
   userEmail,
   currentPlan = "free",
   remainingFreeTrips = 2,
-  paidTripsBalance = 0
 }: PremiumUpgradeModalProps) {
-  const [step, setStep] = useState<"pricing" | "checkout" | "success">("pricing");
+  const [step, setStep] = useState<"pricing" | "success">("pricing");
   const [selectedPlan, setSelectedPlan] = useState<"pay_per_trip" | "yearly" | "lifetime">("yearly");
   const [currency, setCurrency] = useState<"USD" | "INR">("USD");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [paymentError, setPaymentError] = useState<string>("");
 
-  // Razorpay Gateway integration states
+  // Razorpay Gateway config state
   const [razorpayConfig, setRazorpayConfig] = useState<{ keyId: string; isConfigured: boolean } | null>(null);
-  const [isConfigLoading, setIsConfigLoading] = useState(false);
-  const [paymentLog, setPaymentLog] = useState<string>("");
-  const [razorpayError, setRazorpayError] = useState<string>("");
-  const [isScriptLoaded, setIsScriptLoaded] = useState(false);
 
-  // Load Razorpay config and checkout script on modal open
+  // Load Razorpay config on modal open
   useEffect(() => {
     if (!isOpen) return;
 
-    setIsConfigLoading(true);
-    setRazorpayError("");
-    setPaymentLog("");
+    setPaymentError("");
+    setStep("pricing");
 
     fetch("/api/razorpay/config")
       .then((res) => res.json())
       .then((data) => {
         setRazorpayConfig(data);
-        setIsConfigLoading(false);
       })
       .catch((err) => {
         console.error("Failed to fetch Razorpay config:", err);
         setRazorpayConfig({ keyId: "", isConfigured: false });
-        setIsConfigLoading(false);
       });
 
-    // Inject Razorpay standard checkout script dynamically
+    // Inject Razorpay standard checkout script dynamically if not present
     if (!(window as any).Razorpay) {
       const script = document.createElement("script");
       script.src = "https://checkout.razorpay.com/v1/checkout.js";
       script.async = true;
-      script.onload = () => setIsScriptLoaded(true);
-      script.onerror = () => {
-        console.warn("Failed to load Razorpay SDK dynamically.");
-        setIsScriptLoaded(false);
-      };
       document.body.appendChild(script);
-    } else {
-      setIsScriptLoaded(true);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const handleProceedWithRazorpayReal = async () => {
+  const getPlanDetails = (plan: "pay_per_trip" | "yearly" | "lifetime", curr: "USD" | "INR") => {
+    const isUsd = curr === "USD";
+    if (plan === "pay_per_trip") {
+      return {
+        name: isUsd ? "2 Trips Pass ($2)" : "Pay Per Trip (₹99)",
+        description: isUsd ? "2 AI Trip Plans Pass" : "1 AI Trip Plan Pass",
+        priceLabel: isUsd ? "$2" : "₹99"
+      };
+    }
+    if (plan === "yearly") {
+      return {
+        name: isUsd ? "Yearly Premium ($7)" : "Yearly Premium (₹499)",
+        description: "Yearly Unlimited AI Trip Planning Subscription",
+        priceLabel: isUsd ? "$7/yr" : "₹499/yr"
+      };
+    }
+    return {
+      name: isUsd ? "Lifetime Premium ($19)" : "Lifetime Premium (₹1,499)",
+      description: "Lifetime Unlimited AI Trip Planning Pass",
+      priceLabel: isUsd ? "$19" : "₹1,499"
+    };
+  };
+
+  const handleProceedWithRazorpay = async () => {
+    if (isSubmitting) return; // Prevent double-clicks and duplicate orders
     setIsSubmitting(true);
-    setRazorpayError("");
-    setPaymentLog("Initializing secure Razorpay gateway...");
+    setPaymentError("");
 
     try {
-      // 1. Create order on backend
+      // Ensure Razorpay SDK script is loaded
+      if (!(window as any).Razorpay) {
+        await new Promise<void>((resolve, reject) => {
+          if ((window as any).Razorpay) return resolve();
+          const script = document.createElement("script");
+          script.src = "https://checkout.razorpay.com/v1/checkout.js";
+          script.async = true;
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error("Unable to load Razorpay SDK"));
+          document.body.appendChild(script);
+        });
+      }
+
+      // 1. First call /api/razorpay/create-order
       const res = await fetch("/api/razorpay/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -88,27 +110,24 @@ export default function PremiumUpgradeModal({
       });
 
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "Failed to create order on the server.");
+        throw new Error("Unable to start payment. Please try again.");
       }
 
       const orderData = await res.json();
 
-      if (orderData.isSimulated) {
-        setRazorpayError("Payment gateway is temporarily unavailable.");
-        setIsSubmitting(false);
-        return;
+      if (!orderData || !orderData.id) {
+        throw new Error("Unable to start payment. Please try again.");
       }
 
-      setPaymentLog(`Order created successfully on server: ${orderData.id}`);
+      const planInfo = getPlanDetails(selectedPlan, currency);
 
-      // 2. Setup standard Razorpay options for official popup
+      // 2. Configure official Razorpay Checkout popup
       const options = {
-        key: razorpayConfig?.keyId,
+        key: razorpayConfig?.keyId || "",
         amount: orderData.amount,
         currency: orderData.currency,
         name: "TripBalancing",
-        description: `${selectedPlan.replace(/_/g, " ").toUpperCase()} Plan Upgrade (${currency})`,
+        description: `${planInfo.name} - ${planInfo.description}`,
         order_id: orderData.id,
         image: "https://cdn-icons-png.flaticon.com/512/3125/3125848.png",
         prefill: {
@@ -116,11 +135,11 @@ export default function PremiumUpgradeModal({
           contact: ""
         },
         theme: {
-          color: "#0d9488" // Emerald-Teal accent
+          color: "#0d9488"
         },
         handler: async (response: any) => {
-          setPaymentLog("Payment authorized! Verifying signature...");
           try {
+            // 3. Call /api/razorpay/verify-payment after payment
             const verifyRes = await fetch("/api/razorpay/verify-payment", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -133,29 +152,28 @@ export default function PremiumUpgradeModal({
             });
 
             if (!verifyRes.ok) {
-              const verifyErr = await verifyRes.json();
-              throw new Error(verifyErr.error || "Signature verification failed.");
+              throw new Error("Signature verification failed.");
             }
 
             const verifyData = await verifyRes.json();
+            // 4. Activate plan ONLY after successful server-side signature verification
             if (verifyData.verified) {
-              setPaymentLog("Payment verified successfully!");
               setIsSubmitting(false);
               setStep("success");
               const tripsToAdd = (selectedPlan === "pay_per_trip" && currency === "USD") ? 2 : 1;
               onUpgradeSuccess(selectedPlan, tripsToAdd);
             } else {
-              throw new Error("Payment verification failed on the server.");
+              throw new Error("Payment signature verification failed.");
             }
           } catch (err: any) {
             console.error("Verification error:", err);
-            setRazorpayError(`Verification failed: ${err.message}`);
+            setPaymentError("Unable to start payment. Please try again.");
             setIsSubmitting(false);
           }
         },
         modal: {
           ondismiss: () => {
-            setPaymentLog("Payment window closed by user.");
+            // If user closes Razorpay Checkout, keep them on plan selection page and do not activate plan
             setIsSubmitting(false);
           }
         }
@@ -163,17 +181,19 @@ export default function PremiumUpgradeModal({
 
       const rzp = new (window as any).Razorpay(options);
       rzp.on("payment.failed", (response: any) => {
-        setRazorpayError(`Payment failed: ${response.error?.description || "Transaction failed"}`);
+        console.error("Razorpay Payment failed:", response.error);
+        setPaymentError("Unable to start payment. Please try again.");
         setIsSubmitting(false);
       });
+
+      // 5. Immediately launch Razorpay Checkout popup
       rzp.open();
     } catch (err: any) {
-      console.error("Razorpay Popup Launch Error:", err);
-      setRazorpayError(err.message || "Payment gateway is temporarily unavailable.");
+      console.error("Razorpay Order Creation Error:", err);
+      setPaymentError("Unable to start payment. Please try again.");
       setIsSubmitting(false);
     }
   };
-
 
   const premiumFeatures = [
     {
@@ -495,18 +515,38 @@ export default function PremiumUpgradeModal({
                 </div>
               </div>
 
-              {/* Upgrade Trigger */}
+              {/* Error banner */}
+              {paymentError && (
+                <div className="flex items-center gap-2.5 p-3.5 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 rounded-2xl border border-rose-200 dark:border-rose-900 text-xs font-bold animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+                  <span>{paymentError}</span>
+                </div>
+              )}
+
+              {/* Upgrade Trigger Button */}
               <button
                 id="modal-proceed-to-checkout-btn"
-                onClick={() => setStep("checkout")}
-                className="w-full flex items-center justify-center gap-2 h-14 bg-gradient-to-r from-teal-500 via-emerald-500 to-cyan-500 text-white font-bold rounded-2xl hover:shadow-lg hover:shadow-teal-500/10 active:scale-[0.99] transition-all cursor-pointer text-sm shadow-md"
+                type="button"
+                onClick={handleProceedWithRazorpay}
+                disabled={isSubmitting}
+                className="w-full flex items-center justify-center gap-2 h-14 bg-gradient-to-r from-teal-500 via-emerald-500 to-cyan-500 text-white font-bold rounded-2xl hover:shadow-lg hover:shadow-teal-500/10 active:scale-[0.99] transition-all cursor-pointer text-sm shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <span>
-                  Proceed with {currency === "USD" 
-                    ? (selectedPlan === "pay_per_trip" ? "2 Trips Pass ($2)" : selectedPlan === "yearly" ? "Yearly Premium ($7)" : "Lifetime Premium ($19)") 
-                    : (selectedPlan === "pay_per_trip" ? "Pay Per Trip (₹99)" : selectedPlan === "yearly" ? "Yearly Premium (₹499)" : "Lifetime Premium (₹1,499)")}
-                </span>
-                <ArrowRight className="w-4 h-4" />
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Preparing Secure Checkout...</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    <span>
+                      Proceed with {currency === "USD" 
+                        ? (selectedPlan === "pay_per_trip" ? "2 Trips Pass ($2)" : selectedPlan === "yearly" ? "Yearly Premium ($7)" : "Lifetime Premium ($19)") 
+                        : (selectedPlan === "pay_per_trip" ? "Pay Per Trip (₹99)" : selectedPlan === "yearly" ? "Yearly Premium (₹499)" : "Lifetime Premium (₹1,499)")}
+                    </span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
 
               <div className="text-center">
@@ -516,108 +556,6 @@ export default function PremiumUpgradeModal({
               </div>
             </div>
           )}
-
-          {step === "checkout" && (
-            <div className="space-y-5 text-left">
-              <div className="flex items-center gap-2.5 p-3.5 bg-slate-50 dark:bg-slate-900/40 rounded-2xl border border-slate-100 dark:border-slate-900 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                <Compass className="w-4 h-4 text-teal-500 flex-shrink-0" />
-                <span>
-                  You are upgrading to <strong>
-                    {currency === "USD"
-                      ? (selectedPlan === "pay_per_trip" ? "2 Trips Pass ($2)" : selectedPlan === "yearly" ? "Yearly Premium ($7/yr)" : "Lifetime Premium ($19)")
-                      : (selectedPlan === "pay_per_trip" ? "Pay Per Trip (₹99)" : selectedPlan === "yearly" ? "Yearly Premium (₹499/yr)" : "Premium Lifetime (₹1,499)")}
-                  </strong> for <strong>{userEmail}</strong>.
-                </span>
-              </div>
-
-              {/* API Configuration & Popup Banner */}
-              {isConfigLoading ? (
-                <div className="flex items-center justify-center p-6 bg-slate-50 dark:bg-slate-900/40 rounded-2xl border border-slate-100 dark:border-slate-900">
-                  <Loader2 className="w-5 h-5 text-teal-500 animate-spin mr-2" />
-                  <span className="text-xs text-slate-500 font-bold">Checking payment gateway status...</span>
-                </div>
-              ) : razorpayConfig?.isConfigured ? (
-                <div className="flex flex-col gap-4 p-5 bg-emerald-500/10 dark:bg-emerald-950/20 border border-emerald-500/20 rounded-2xl">
-                  <div className="flex items-center justify-between">
-                    <div className="flex gap-2.5 items-center">
-                      <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse" />
-                      <div>
-                        <h5 className="text-xs font-black text-emerald-800 dark:text-emerald-300">Razorpay Secure Gateway Active</h5>
-                        <p className="text-[10px] text-emerald-600/90 dark:text-emerald-400 font-medium">Official encrypted payment channel.</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {isScriptLoaded ? (
-                    <button
-                      type="button"
-                      onClick={handleProceedWithRazorpayReal}
-                      disabled={isSubmitting}
-                      className="w-full h-12 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
-                    >
-                      {isSubmitting ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Processing payment...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Lock className="w-4 h-4" />
-                          <span>Launch Official Razorpay Checkout</span>
-                        </>
-                      )}
-                    </button>
-                  ) : (
-                    <div className="flex items-center justify-center gap-2 p-3 text-xs text-amber-600 font-semibold bg-amber-50 dark:bg-amber-950/30 rounded-xl">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Loading payment gateway script...</span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="p-5 bg-amber-500/10 dark:bg-amber-950/20 border border-amber-500/20 rounded-2xl flex items-center gap-3">
-                  <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
-                  <div>
-                    <h5 className="text-xs font-black text-amber-800 dark:text-amber-300">Payment gateway is temporarily unavailable.</h5>
-                  </div>
-                </div>
-              )}
-
-              {/* Server Route logs / feedback */}
-              {(paymentLog || razorpayError) && (
-                <div className="p-3 bg-slate-900 text-slate-300 rounded-xl font-mono text-[9px] leading-relaxed border border-slate-800 shadow-inner">
-                  {paymentLog && (
-                    <p className="text-emerald-400">
-                      <span className="text-slate-500">▶</span> {paymentLog}
-                    </p>
-                  )}
-                  {razorpayError && (
-                    <p className="text-rose-400">
-                      <span className="text-rose-600">✗</span> {razorpayError}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Action Buttons */}
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setStep("pricing")}
-                  disabled={isSubmitting}
-                  className="px-6 py-3 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-850 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold cursor-pointer transition-all flex items-center justify-center disabled:opacity-50"
-                >
-                  Back
-                </button>
-              </div>
-
-              <div className="flex items-center justify-center gap-1.5 text-[9px] text-slate-400 font-semibold">
-                <ShieldCheck className="w-3.5 h-3.5 text-teal-600" />
-                <span>PCI-DSS Secured • SSL Encrypted Handshake</span>
-              </div>
-            </div>
-          )}
-
 
           {step === "success" && (
             <div className="text-center py-6 space-y-6">

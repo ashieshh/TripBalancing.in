@@ -259,14 +259,8 @@ app.post("/api/razorpay/create-order", async (req, res) => {
     const { keyId, keySecret } = getRazorpayKeys();
 
     if (!keyId || !keySecret) {
-      console.log(`[Razorpay Simulator] Creating mock order for plan: ${planType}, currency: ${targetCurrency}, amount: ${isUsd ? '$' : '₹'}${amount / 100}`);
-      const mockOrderId = "order_mock_" + Math.random().toString(36).substring(2, 15);
-      return res.json({
-        id: mockOrderId,
-        amount,
-        currency: targetCurrency,
-        isSimulated: true
-      });
+      console.warn("[Razorpay API] Missing key_id or key_secret in environment variables.");
+      return res.status(400).json({ error: "Razorpay payment gateway is not configured." });
     }
 
     const razorpay = new Razorpay({
@@ -284,8 +278,7 @@ app.post("/api/razorpay/create-order", async (req, res) => {
     return res.json({
       id: order.id,
       amount: order.amount,
-      currency: order.currency,
-      isSimulated: false
+      currency: order.currency
     });
   } catch (error: any) {
     console.error("Razorpay Order Creation Failed:", error);
@@ -296,14 +289,9 @@ app.post("/api/razorpay/create-order", async (req, res) => {
 // Verify Razorpay Payment Signature
 app.post("/api/razorpay/verify-payment", async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, planType } = req.body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
-    const { keySecret, keyId } = getRazorpayKeys();
-
-    if (razorpay_order_id && razorpay_order_id.startsWith("order_mock_")) {
-      console.log(`[Razorpay Simulator] Verifying mock payment for order: ${razorpay_order_id}`);
-      return res.json({ status: "success", verified: true, isSimulated: true });
-    }
+    const { keySecret } = getRazorpayKeys();
 
     if (!keySecret) {
       return res.status(400).json({ error: "Razorpay keys are not configured on the server." });
