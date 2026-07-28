@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { CheckSquare, Square, Luggage, Sparkles, Check, RotateCcw, Info, HelpCircle } from "lucide-react";
 import { TripRecord } from "../types";
+import { db } from "../lib/supabase";
 
 interface GlobalPackingChecklistProps {
   trips: TripRecord[];
@@ -13,19 +14,61 @@ interface AggregatedItem {
 }
 
 export default function GlobalPackingChecklist({ trips }: GlobalPackingChecklistProps) {
-  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(() => {
-    try {
-      const saved = localStorage.getItem("tripbalancing_global_packing_checked");
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
 
-  // Save checked states to localStorage
   useEffect(() => {
-    localStorage.setItem("tripbalancing_global_packing_checked", JSON.stringify(checkedItems));
-  }, [checkedItems]);
+    async function loadCheckedState() {
+      try {
+        const user = await db.getSessionUser();
+        if (user) {
+          const profile = await db.getUserProfile(user.id, user.email);
+          if (profile && profile.global_packing_checked) {
+            setCheckedItems(profile.global_packing_checked);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn("Error loading global packing from Supabase:", e);
+      }
+      try {
+        const saved = localStorage.getItem("tripbalancing_global_packing_checked");
+        if (saved) setCheckedItems(JSON.parse(saved));
+      } catch {
+        setCheckedItems({});
+      }
+    }
+    loadCheckedState();
+  }, []);
+
+  const saveCheckedState = async (newChecked: Record<string, boolean>) => {
+    setCheckedItems(newChecked);
+    try {
+      const user = await db.getSessionUser();
+      if (user) {
+        await db.upsertUserProfile({
+          id: user.id,
+          global_packing_checked: newChecked
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to save global packing state to Supabase:", e);
+    }
+    localStorage.setItem("tripbalancing_global_packing_checked", JSON.stringify(newChecked));
+  };
+
+  const toggleItem = (name: string) => {
+    const updated = {
+      ...checkedItems,
+      [name]: !checkedItems[name],
+    };
+    saveCheckedState(updated);
+  };
+
+  const handleReset = () => {
+    if (confirm("Are you sure you want to reset your packed items?")) {
+      saveCheckedState({});
+    }
+  };
 
   if (trips.length === 0) {
     return null;
@@ -78,19 +121,6 @@ export default function GlobalPackingChecklist({ trips }: GlobalPackingChecklist
     // Then alphabetically
     return a.name.localeCompare(b.name);
   });
-
-  const toggleItem = (name: string) => {
-    setCheckedItems((prev) => ({
-      ...prev,
-      [name]: !prev[name],
-    }));
-  };
-
-  const handleReset = () => {
-    if (confirm("Are you sure you want to reset your packed items?")) {
-      setCheckedItems({});
-    }
-  };
 
   const totalItems = aggregatedItems.length;
   const packedCount = aggregatedItems.filter((item) => checkedItems[item.name]).length;

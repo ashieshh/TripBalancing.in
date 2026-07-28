@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { Itinerary, TripRecord, TravelStyle, BuddyInvitation } from "../types";
+import { Itinerary, TripRecord, TravelStyle, BuddyInvitation, UserProfile } from "../types";
 
 const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL;
 const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY;
@@ -160,7 +160,7 @@ class LocalMockClient {
       id: Math.random().toString(36).substring(2, 11),
       tripId,
       senderEmail,
-      recipientEmail,
+      recipientEmail: recipientEmail.toLowerCase(),
       accessType,
       status: "pending",
       createdAt: new Date().toISOString(),
@@ -168,7 +168,8 @@ class LocalMockClient {
         destination: trip.destination,
         startDate: trip.startDate,
         endDate: trip.endDate
-      } : undefined
+      } : undefined,
+      fullTrip: trip
     };
 
     invitations.push(newInvitation);
@@ -197,12 +198,76 @@ class LocalMockClient {
 
   async getSharedTripsForUser(email: string): Promise<TripRecord[]> {
     const invitations = this.getInvitationsLocal();
-    const acceptedTripIds = invitations
-      .filter(inv => inv.recipientEmail.toLowerCase() === email.toLowerCase() && inv.status === "accepted")
-      .map(inv => inv.tripId);
+    const acceptedInvs = invitations.filter(
+      inv => inv.recipientEmail.toLowerCase() === email.toLowerCase() && inv.status === "accepted"
+    );
     
     const allTrips = this.getTripsLocal();
-    return allTrips.filter(t => acceptedTripIds.includes(t.id));
+    const resultTrips: TripRecord[] = [];
+
+    for (const inv of acceptedInvs) {
+      const existingTrip = allTrips.find(t => t.id === inv.tripId);
+      if (existingTrip) {
+        resultTrips.push(existingTrip);
+      } else if (inv.fullTrip) {
+        resultTrips.push(inv.fullTrip);
+      } else if (inv.tripDetails) {
+        // Fallback reconstructed trip if trip record was created on another device/account
+        resultTrips.push({
+          id: inv.tripId,
+          userId: inv.senderEmail,
+          createdAt: inv.createdAt,
+          destination: inv.tripDetails.destination || "Shared Trip",
+          startDate: inv.tripDetails.startDate || new Date().toISOString().split("T")[0],
+          endDate: inv.tripDetails.endDate || new Date().toISOString().split("T")[0],
+          budgetAmount: "$1,000",
+          travelers: 2,
+          travelStyle: "Adventure",
+          itinerary: {
+            destination: inv.tripDetails.destination || "Shared Trip",
+            startDate: inv.tripDetails.startDate || new Date().toISOString().split("T")[0],
+            endDate: inv.tripDetails.endDate || new Date().toISOString().split("T")[0],
+            budgetAmount: "$1,000",
+            travelers: 2,
+            travelStyle: "Adventure",
+            days: [
+              {
+                dayNumber: 1,
+                theme: "Arrival & Exploration",
+                activities: [
+                  {
+                    time: "10:00 AM",
+                    title: `Explore ${inv.tripDetails.destination || "Shared Destination"}`,
+                    description: `Shared itinerary with your travel buddy (${inv.senderEmail}).`
+                  }
+                ]
+              }
+            ],
+            estimatedBudgetBreakdown: {
+              accommodation: "$400",
+              food: "$300",
+              activities: "$200",
+              transport: "$100",
+              miscellaneous: "$0",
+              total: "$1,000"
+            },
+            placesToVisit: [
+              {
+                name: `${inv.tripDetails.destination || "City"} Highlights`,
+                description: "Must-visit local landmark.",
+                bestTimeToVisit: "Morning",
+                entryFee: "Free"
+              }
+            ],
+            localFood: [],
+            packingChecklist: ["Passports & ID", "Travel Documents", "Camera & Chargers"],
+            transportationSuggestions: [],
+            travelTips: ["Stay hydrated and enjoy your journey!"]
+          }
+        });
+      }
+    }
+    return resultTrips;
   }
 }
 
@@ -269,6 +334,210 @@ export const db = {
     } else {
       const session = localMock.getSession();
       return session?.user || null;
+    }
+  },
+
+  async getUserProfile(userId: string, email?: string): Promise<UserProfile | null> {
+    if (isRealSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (error) {
+          console.warn("Supabase fetch user_profile warning:", error);
+          return null;
+        }
+        if (!data) return null;
+
+        return {
+          id: data.id,
+          email: data.email || email,
+          plan: data.plan || "free",
+          is_premium: data.is_premium || false,
+          free_trips_used: data.free_trips_used ?? 0,
+          paid_trips_balance: data.paid_trips_balance ?? 0,
+          global_packing_checked: data.global_packing_checked || {},
+          created_at: data.created_at,
+          updated_at: data.updated_at
+        };
+      } catch (err) {
+        console.warn("Failed to fetch user_profile from Supabase:", err);
+        return null;
+      }
+    } else {
+      const mockProfiles = JSON.parse(localStorage.getItem("tripbalancing_mock_profiles") || "{}");
+      return mockProfiles[userId] || null;
+    }
+  },
+
+  async upsertUserProfile(profile: Partial<UserProfile> & { id: string }): Promise<UserProfile | null> {
+    if (isRealSupabaseConfigured && supabase) {
+      try {
+        const payload: any = {
+          id: profile.id,
+          updated_at: new Date().toISOString()
+        };
+        if (profile.email !== undefined) payload.email = profile.email;
+        if (profile.plan !== undefined) {
+          payload.plan = profile.plan;
+          payload.is_premium = profile.plan === "yearly" || profile.plan === "lifetime";
+        }
+        if (profile.free_trips_used !== undefined) payload.free_trips_used = profile.free_trips_used;
+        if (profile.paid_trips_balance !== undefined) payload.paid_trips_balance = profile.paid_trips_balance;
+        if (profile.global_packing_checked !== undefined) payload.global_packing_checked = profile.global_packing_checked;
+
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .upsert(payload, { onConflict: 'id' })
+          .select();
+
+        if (error) {
+          console.warn("Supabase upsert user_profile error:", error);
+          return null;
+        }
+
+        const row = data[0];
+        return {
+          id: row.id,
+          email: row.email,
+          plan: row.plan || "free",
+          is_premium: row.is_premium || false,
+          free_trips_used: row.free_trips_used ?? 0,
+          paid_trips_balance: row.paid_trips_balance ?? 0,
+          global_packing_checked: row.global_packing_checked || {},
+          created_at: row.created_at,
+          updated_at: row.updated_at
+        };
+      } catch (err) {
+        console.warn("Failed to upsert user_profile in Supabase:", err);
+        return null;
+      }
+    } else {
+      const mockProfiles = JSON.parse(localStorage.getItem("tripbalancing_mock_profiles") || "{}");
+      const existing = mockProfiles[profile.id] || {
+        id: profile.id,
+        email: profile.email,
+        plan: "free",
+        is_premium: false,
+        free_trips_used: 0,
+        paid_trips_balance: 0,
+        global_packing_checked: {}
+      };
+
+      const updated: UserProfile = {
+        ...existing,
+        ...profile,
+        plan: profile.plan || existing.plan || "free",
+        is_premium: profile.plan ? (profile.plan === "yearly" || profile.plan === "lifetime") : existing.is_premium,
+        free_trips_used: profile.free_trips_used ?? existing.free_trips_used,
+        paid_trips_balance: profile.paid_trips_balance ?? existing.paid_trips_balance,
+        global_packing_checked: profile.global_packing_checked ?? existing.global_packing_checked
+      };
+
+      mockProfiles[profile.id] = updated;
+      localStorage.setItem("tripbalancing_mock_profiles", JSON.stringify(mockProfiles));
+      return updated;
+    }
+  },
+
+  async syncLocalStorageToSupabase(userId: string, email?: string): Promise<UserProfile | null> {
+    if (isRealSupabaseConfigured && supabase) {
+      try {
+        const existing = await this.getUserProfile(userId, email);
+        let finalProfile: UserProfile | null = existing;
+
+        if (!existing) {
+          const oldPlan = (localStorage.getItem(`tripbalancing_plan_${userId}`) || "free") as any;
+          const oldPremium = localStorage.getItem(`tripbalancing_premium_${userId}`);
+          const oldFreeUsedStr = localStorage.getItem(`tripbalancing_free_trips_used_${userId}`);
+          const oldPaidBalanceStr = localStorage.getItem(`tripbalancing_paid_trips_balance_${userId}`);
+          const oldGlobalPackingStr = localStorage.getItem("tripbalancing_global_packing_checked");
+
+          const plan = oldPlan === "lifetime" || oldPlan === "yearly" || oldPlan === "pay_per_trip" ? oldPlan : (oldPremium === "true" ? "lifetime" : "free");
+          const free_trips_used = oldFreeUsedStr ? parseInt(oldFreeUsedStr, 10) : 0;
+          const paid_trips_balance = oldPaidBalanceStr ? parseInt(oldPaidBalanceStr, 10) : 0;
+          let global_packing_checked = {};
+          if (oldGlobalPackingStr) {
+            try { global_packing_checked = JSON.parse(oldGlobalPackingStr); } catch (e) {}
+          }
+
+          finalProfile = await this.upsertUserProfile({
+            id: userId,
+            email,
+            plan,
+            is_premium: plan === "yearly" || plan === "lifetime",
+            free_trips_used,
+            paid_trips_balance,
+            global_packing_checked
+          });
+        }
+
+        const migrationFlag = `tripbalancing_migrated_trips_${userId}`;
+        if (!localStorage.getItem(migrationFlag)) {
+          try {
+            const localTripsStr = localStorage.getItem("tripbalancing_mock_trips");
+            if (localTripsStr) {
+              const localTrips: TripRecord[] = JSON.parse(localTripsStr);
+              const userLocalTrips = localTrips.filter(t => t.userId === userId || !t.userId);
+              if (userLocalTrips.length > 0) {
+                const { data: existingTrips } = await supabase
+                  .from('trips')
+                  .select('id, destination, start_date')
+                  .eq('user_id', userId);
+
+                const existingSet = new Set((existingTrips || []).map(t => `${t.destination}_${t.start_date}`));
+
+                for (const trip of userLocalTrips) {
+                  const key = `${trip.destination}_${trip.startDate}`;
+                  if (!existingSet.has(key)) {
+                    await supabase.from('trips').insert([{
+                      user_id: userId,
+                      destination: trip.destination,
+                      start_date: trip.startDate,
+                      end_date: trip.endDate,
+                      budget_amount: trip.budgetAmount,
+                      travelers: trip.travelers,
+                      travel_style: trip.travelStyle,
+                      itinerary: trip.itinerary
+                    }]);
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.warn("Local trips migration warning:", e);
+          }
+          localStorage.setItem(migrationFlag, "true");
+        }
+
+        return finalProfile;
+      } catch (err) {
+        console.warn("syncLocalStorageToSupabase error:", err);
+        return null;
+      }
+    } else {
+      const oldPlan = (localStorage.getItem(`tripbalancing_plan_${userId}`) || "free") as any;
+      const oldFreeUsedStr = localStorage.getItem(`tripbalancing_free_trips_used_${userId}`);
+      const oldPaidBalanceStr = localStorage.getItem(`tripbalancing_paid_trips_balance_${userId}`);
+      const oldGlobalPackingStr = localStorage.getItem("tripbalancing_global_packing_checked");
+
+      let global_packing_checked = {};
+      if (oldGlobalPackingStr) {
+        try { global_packing_checked = JSON.parse(oldGlobalPackingStr); } catch (e) {}
+      }
+
+      return this.upsertUserProfile({
+        id: userId,
+        email,
+        plan: oldPlan,
+        is_premium: oldPlan === "yearly" || oldPlan === "lifetime",
+        free_trips_used: oldFreeUsedStr ? parseInt(oldFreeUsedStr, 10) : 0,
+        paid_trips_balance: oldPaidBalanceStr ? parseInt(oldPaidBalanceStr, 10) : 0,
+        global_packing_checked
+      });
     }
   },
 

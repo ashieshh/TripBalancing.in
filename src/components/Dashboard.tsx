@@ -82,6 +82,39 @@ export default function Dashboard({
   const [tempNote, setTempNote] = useState("");
   const [tempRating, setTempRating] = useState(0);
   const [tempCategory, setTempCategory] = useState("");
+  const [processingInvId, setProcessingInvId] = useState<string | null>(null);
+  const [invitationNotification, setInvitationNotification] = useState<string | null>(null);
+
+  const handleAcceptInvite = async (invId: string, destination?: string) => {
+    setProcessingInvId(invId);
+    try {
+      if (onAcceptInvitation) {
+        await onAcceptInvitation(invId);
+        setInvitationNotification(`🎉 Accepted invitation to explore ${destination || "trip"}! Added under Shared Adventures below.`);
+        setActiveTab("trips");
+        setTimeout(() => setInvitationNotification(null), 6000);
+      }
+    } catch (err) {
+      console.error("Failed to accept invitation:", err);
+    } finally {
+      setProcessingInvId(null);
+    }
+  };
+
+  const handleDeclineInvite = async (invId: string) => {
+    setProcessingInvId(invId);
+    try {
+      if (onDeclineInvitation) {
+        await onDeclineInvitation(invId);
+        setInvitationNotification("Invitation declined.");
+        setTimeout(() => setInvitationNotification(null), 4000);
+      }
+    } catch (err) {
+      console.error("Failed to decline invitation:", err);
+    } finally {
+      setProcessingInvId(null);
+    }
+  };
   
   // Live Travel Tips States
   const [tips, setTips] = useState<any[]>([]);
@@ -406,6 +439,22 @@ export default function Dashboard({
   return (
     <div className="space-y-8">
       
+      {/* Invitation Toast Banner */}
+      {invitationNotification && (
+        <div className="p-4 bg-teal-500/10 border border-teal-500/30 rounded-2xl flex items-center justify-between gap-3 text-teal-700 dark:text-teal-300 font-bold text-xs animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-teal-500 stroke-[3]" />
+            <span>{invitationNotification}</span>
+          </div>
+          <button 
+            onClick={() => setInvitationNotification(null)}
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Incoming Travel Buddy Invitations */}
       {incomingInvitations.length > 0 && (
         <div className="space-y-3 animate-in fade-in slide-in-from-top-4 duration-300">
@@ -452,17 +501,23 @@ export default function Dashboard({
                 <div className="flex items-center gap-2.5 self-end md:self-center">
                   <button
                     id={`decline-invite-btn-${inv.id}`}
-                    onClick={() => onDeclineInvitation && onDeclineInvitation(inv.id)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-rose-50 dark:bg-slate-850 dark:hover:bg-rose-950/20 text-slate-600 hover:text-rose-650 dark:text-slate-300 dark:hover:text-rose-400 text-xs font-extrabold rounded-xl cursor-pointer transition-colors"
+                    disabled={processingInvId === inv.id}
+                    onClick={() => handleDeclineInvite(inv.id)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-rose-50 dark:bg-slate-850 dark:hover:bg-rose-950/20 text-slate-600 hover:text-rose-650 dark:text-slate-300 dark:hover:text-rose-400 text-xs font-extrabold rounded-xl cursor-pointer transition-colors disabled:opacity-50"
                   >
                     Decline
                   </button>
                   <button
                     id={`accept-invite-btn-${inv.id}`}
-                    onClick={() => onAcceptInvitation && onAcceptInvitation(inv.id)}
-                    className="px-4.5 py-2.5 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white text-xs font-black rounded-xl cursor-pointer transition-all shadow-sm shadow-teal-500/10 active:scale-95 flex items-center gap-1"
+                    disabled={processingInvId === inv.id}
+                    onClick={() => handleAcceptInvite(inv.id, inv.tripDetails?.destination)}
+                    className="px-4.5 py-2.5 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white text-xs font-black rounded-xl cursor-pointer transition-all shadow-sm shadow-teal-500/10 active:scale-95 flex items-center gap-1 disabled:opacity-50"
                   >
-                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    {processingInvId === inv.id ? (
+                      <span className="animate-spin text-xs">⌛</span>
+                    ) : (
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    )}
                     <span>Accept</span>
                   </button>
                 </div>

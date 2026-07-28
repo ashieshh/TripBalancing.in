@@ -252,6 +252,7 @@ export default function ItineraryView({
     );
   };
   const [packingChecks, setPackingChecks] = useState<Record<string, boolean>>(() => {
+    if (itinerary.packingChecks) return itinerary.packingChecks;
     const storageKey = `packing_checks_${tripId || itinerary.destination}`;
     const cached = localStorage.getItem(storageKey);
     if (cached) {
@@ -264,7 +265,7 @@ export default function ItineraryView({
     return {};
   });
 
-  // Sync state to localStorage on changes
+  // Sync state to localStorage on changes as backup cache
   useEffect(() => {
     const storageKey = `packing_checks_${tripId || itinerary.destination}`;
     localStorage.setItem(storageKey, JSON.stringify(packingChecks));
@@ -272,19 +273,23 @@ export default function ItineraryView({
 
   // Load correct state when active itinerary or trip changes
   useEffect(() => {
-    const storageKey = `packing_checks_${tripId || itinerary.destination}`;
-    const cached = localStorage.getItem(storageKey);
-    if (cached) {
-      try {
-        setPackingChecks(JSON.parse(cached));
-      } catch (e) {
-        console.warn("Failed to load packing checks:", e);
+    if (itinerary.packingChecks) {
+      setPackingChecks(itinerary.packingChecks);
+    } else {
+      const storageKey = `packing_checks_${tripId || itinerary.destination}`;
+      const cached = localStorage.getItem(storageKey);
+      if (cached) {
+        try {
+          setPackingChecks(JSON.parse(cached));
+        } catch (e) {
+          console.warn("Failed to load packing checks:", e);
+          setPackingChecks({});
+        }
+      } else {
         setPackingChecks({});
       }
-    } else {
-      setPackingChecks({});
     }
-  }, [tripId, itinerary.destination]);
+  }, [tripId, itinerary]);
   const [localNote, setLocalNote] = useState(itinerary.privateNote || "");
   const [localReview, setLocalReview] = useState(itinerary.reviewText || "");
   const [noteSavedFeedback, setNoteSavedFeedback] = useState(false);
@@ -522,10 +527,17 @@ export default function ItineraryView({
   };
 
   const togglePackingCheck = (item: string) => {
-    setPackingChecks(prev => ({
-      ...prev,
-      [item]: !prev[item]
-    }));
+    const updated = {
+      ...packingChecks,
+      [item]: !packingChecks[item]
+    };
+    setPackingChecks(updated);
+    if (onUpdateItinerary) {
+      onUpdateItinerary(tripId || "", {
+        ...itinerary,
+        packingChecks: updated
+      });
+    }
   };
 
   // Add daily expense item

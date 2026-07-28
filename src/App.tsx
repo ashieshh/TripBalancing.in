@@ -30,6 +30,7 @@ export default function App() {
   // Auth state
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [userDataLoading, setUserDataLoading] = useState(false);
 
   // Premium Subscription state
   const [plan, setPlan] = useState<"free" | "pay_per_trip" | "yearly" | "lifetime">("free");
@@ -39,45 +40,20 @@ export default function App() {
 
   const isPremium = plan === "yearly" || plan === "lifetime";
 
-  // Sync premium status and trip balances when user state changes
-  useEffect(() => {
+  const handleUpgradeSuccess = async (chosenPlan: "pay_per_trip" | "yearly" | "lifetime", tripsAddedCount = 1) => {
     if (user) {
-      const oldPremium = localStorage.getItem(`tripbalancing_premium_${user.id}`);
-      let savedPlan = localStorage.getItem(`tripbalancing_plan_${user.id}`) as "free" | "pay_per_trip" | "yearly" | "lifetime" | null;
-      if (!savedPlan) {
-        if (oldPremium === "true") {
-          savedPlan = "lifetime";
-          localStorage.setItem(`tripbalancing_plan_${user.id}`, "lifetime");
-        } else {
-          savedPlan = "free";
-          localStorage.setItem(`tripbalancing_plan_${user.id}`, "free");
-        }
-      }
-      setPlan(savedPlan);
-
-      const savedFreeUsed = localStorage.getItem(`tripbalancing_free_trips_used_${user.id}`);
-      setFreeTripsUsed(savedFreeUsed ? parseInt(savedFreeUsed, 10) : 0);
-
-      const savedPaidBalance = localStorage.getItem(`tripbalancing_paid_trips_balance_${user.id}`);
-      setPaidTripsBalance(savedPaidBalance ? parseInt(savedPaidBalance, 10) : 0);
-    } else {
-      setPlan("free");
-      setFreeTripsUsed(0);
-      setPaidTripsBalance(0);
-    }
-  }, [user]);
-
-  const handleUpgradeSuccess = (chosenPlan: "pay_per_trip" | "yearly" | "lifetime", tripsAddedCount = 1) => {
-    if (user) {
-      localStorage.setItem(`tripbalancing_plan_${user.id}`, chosenPlan);
       setPlan(chosenPlan);
+      let newBalance = paidTripsBalance;
       if (chosenPlan === "pay_per_trip") {
-        const newBalance = paidTripsBalance + (tripsAddedCount || 1);
-        localStorage.setItem(`tripbalancing_paid_trips_balance_${user.id}`, newBalance.toString());
+        newBalance = paidTripsBalance + (tripsAddedCount || 1);
         setPaidTripsBalance(newBalance);
-      } else {
-        localStorage.setItem(`tripbalancing_premium_${user.id}`, "true");
       }
+      await db.upsertUserProfile({
+        id: user.id,
+        plan: chosenPlan,
+        is_premium: chosenPlan === "yearly" || chosenPlan === "lifetime",
+        paid_trips_balance: newBalance
+      });
     }
   };
 
@@ -217,7 +193,11 @@ export default function App() {
                 destination: trip.destination,
                 startDate: trip.startDate,
                 endDate: trip.endDate
-              } : undefined
+              } : (inv.tripDetails || (inv.fullTrip ? {
+                destination: inv.fullTrip.destination,
+                startDate: inv.fullTrip.startDate,
+                endDate: inv.fullTrip.endDate
+              } : undefined))
             };
           } catch (e) {
             return inv;
@@ -263,11 +243,42 @@ export default function App() {
     ]);
   };
 
-  // Fetch trips and companion invites once user is logged in
+  const loadUserData = async (u: any) => {
+    if (!u) {
+      setPlan("free");
+      setFreeTripsUsed(0);
+      setPaidTripsBalance(0);
+      setTrips([]);
+      setSharedTrips([]);
+      setIncomingInvitations([]);
+      setAcceptedInvitations([]);
+      return;
+    }
+
+    setUserDataLoading(true);
+    try {
+      const profile = await db.syncLocalStorageToSupabase(u.id, u.email);
+      if (profile) {
+        setPlan(profile.plan || "free");
+        setFreeTripsUsed(profile.free_trips_used ?? 0);
+        setPaidTripsBalance(profile.paid_trips_balance ?? 0);
+      }
+      await syncUserDashboard();
+    } catch (err) {
+      console.error("Failed to load user data from Supabase:", err);
+    } finally {
+      setUserDataLoading(false);
+    }
+  };
+
+  // Fetch trips, profile, and companion invites once user is logged in
   useEffect(() => {
     if (user) {
-      syncUserDashboard();
+      loadUserData(user);
     } else {
+      setPlan("free");
+      setFreeTripsUsed(0);
+      setPaidTripsBalance(0);
       setTrips([]);
       setSharedTrips([]);
       setIncomingInvitations([]);
@@ -358,12 +369,18 @@ export default function App() {
         if (user && !isPremium) {
           if (plan === "free" && remainingFree > 0) {
             const nextFreeUsed = freeTripsUsed + 1;
-            localStorage.setItem(`tripbalancing_free_trips_used_${user.id}`, nextFreeUsed.toString());
             setFreeTripsUsed(nextFreeUsed);
+            db.upsertUserProfile({
+              id: user.id,
+              free_trips_used: nextFreeUsed
+            });
           } else if (paidTripsBalance > 0) {
             const nextPaidBalance = paidTripsBalance - 1;
-            localStorage.setItem(`tripbalancing_paid_trips_balance_${user.id}`, nextPaidBalance.toString());
             setPaidTripsBalance(nextPaidBalance);
+            db.upsertUserProfile({
+              id: user.id,
+              paid_trips_balance: nextPaidBalance
+            });
           }
         }
       } else {
@@ -569,11 +586,11 @@ export default function App() {
     );
   }
 
-  if (authLoading) {
+  if (authLoading || userDataLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200">
         <Compass className="w-12 h-12 text-teal-500 animate-spin" />
-        <p className="mt-4 text-sm font-bold tracking-wide uppercase">Initializing TripBalancing...</p>
+        <p className="mt-4 text-sm font-bold tracking-wide uppercase">Syncing your travel data with Supabase...</p>
       </div>
     );
   }

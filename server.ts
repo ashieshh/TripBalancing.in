@@ -11,7 +11,7 @@ import Razorpay from "razorpay";
 dotenv.config();
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 
 // Enable Gzip/Brotli response compression
 app.use(compression());
@@ -318,12 +318,6 @@ app.post("/api/razorpay/verify-payment", async (req, res) => {
       return res.json({ status: "success", verified: true });
     } else {
       console.warn(`[Razorpay API] Signature verification failed for order: ${razorpay_order_id}`);
-      console.log(`[Diagnostics] Razorpay key ID: ${keyId ? keyId.substring(0, 8) + '...' : 'none'}`);
-      console.log(`[Diagnostics] Key secret length: ${keySecret.length}, starts with: ${keySecret.substring(0, 4)}...`);
-      console.log(`[Diagnostics] Order ID: ${razorpay_order_id}`);
-      console.log(`[Diagnostics] Payment ID: ${razorpay_payment_id}`);
-      console.log(`[Diagnostics] Expected Signature (SHA256 HMAC of ${razorpay_order_id}|${razorpay_payment_id}): ${generated_signature}`);
-      console.log(`[Diagnostics] Received Signature: ${razorpay_signature}`);
       return res.status(400).json({ error: "Invalid payment signature." });
     }
   } catch (error: any) {

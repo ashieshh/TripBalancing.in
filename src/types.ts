@@ -102,6 +102,18 @@ export interface TransportSuggestion {
   estimatedCost: string;
 }
 
+export interface UserProfile {
+  id: string;
+  email?: string;
+  plan: 'free' | 'pay_per_trip' | 'yearly' | 'lifetime';
+  is_premium?: boolean;
+  free_trips_used: number;
+  paid_trips_balance: number;
+  global_packing_checked?: Record<string, boolean>;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface Itinerary {
   destination: string;
   origin?: string;
@@ -138,6 +150,8 @@ export interface Itinerary {
   aiBudgetSummary?: string;
   maxDaysComfortable?: number;
   remainingBudget?: string;
+  packingChecks?: Record<string, boolean>;
+  activityChecks?: Record<string, boolean>;
 }
 
 export interface LoggedExpense {
@@ -176,4 +190,5 @@ export interface BuddyInvitation {
     startDate: string;
     endDate: string;
   };
+  fullTrip?: TripRecord;
 }
