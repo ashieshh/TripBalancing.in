@@ -11,7 +11,7 @@ import Razorpay from "razorpay";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Enable Gzip/Brotli response compression
 app.use(compression());
