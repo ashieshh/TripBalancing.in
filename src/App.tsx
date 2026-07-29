@@ -13,6 +13,7 @@ import ThemeToggle from "./components/ThemeToggle";
 import PremiumUpgradeModal from "./components/PremiumUpgradeModal";
 import BuddyInviteModal from "./components/BuddyInviteModal";
 import GoogleContactsModal from "./components/GoogleContactsModal";
+import LegalAndSupportModal, { LegalTab } from "./components/LegalAndSupportModal";
 import { BuddyInvitation } from "./types";
 
 export default function App() {
@@ -37,6 +38,15 @@ export default function App() {
   const [freeTripsUsed, setFreeTripsUsed] = useState<number>(0);
   const [paidTripsBalance, setPaidTripsBalance] = useState<number>(0);
   const [showPremiumModal, setShowPremiumModal] = useState<boolean>(false);
+
+  // Legal & Support Modal state
+  const [showLegalModal, setShowLegalModal] = useState<boolean>(false);
+  const [legalTab, setLegalTab] = useState<LegalTab>("privacy");
+
+  const handleOpenLegalModal = (tab: LegalTab) => {
+    setLegalTab(tab);
+    setShowLegalModal(true);
+  };
 
   const isPremium = plan === "yearly" || plan === "lifetime";
 
@@ -967,18 +977,49 @@ export default function App() {
 
       {/* Footer */}
       <footer className="print:hidden border-t border-slate-150 dark:border-slate-900 bg-white dark:bg-slate-950 py-10 transition-colors mt-12 text-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-slate-400 font-medium">
-          <div className="flex items-center gap-2">
-            <Compass className="w-5 h-5 text-teal-500 animate-spin-slow" />
-            <span className="font-bold text-slate-600 dark:text-slate-300 text-sm">TripBalancing</span>
-            <span>|</span>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col lg:flex-row items-center justify-between gap-6 text-slate-400 font-medium">
+          <div className="flex flex-col sm:flex-row items-center gap-2 text-center sm:text-left">
+            <div className="flex items-center gap-2">
+              <Compass className="w-5 h-5 text-teal-500 animate-spin-slow" />
+              <span className="font-bold text-slate-600 dark:text-slate-300 text-sm">TripBalancing</span>
+            </div>
+            <span className="hidden sm:inline">|</span>
             <span>© 2026 TripBalancing travel helper app. All rights reserved.</span>
           </div>
 
-          <div className="flex items-center gap-4">
-            <span className="hover:text-slate-600 dark:hover:text-slate-300">Indian & Global Travelers Edition</span>
+          {/* User Experience Policy & Support Links */}
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs font-semibold">
+            <button 
+              type="button"
+              onClick={() => handleOpenLegalModal("privacy")}
+              className="hover:text-teal-600 dark:hover:text-teal-400 transition-colors cursor-pointer"
+            >
+              Privacy Policy
+            </button>
             <span>•</span>
-            <span className="hover:text-slate-600 dark:hover:text-slate-300">Powered by Gemini 3.5 Flash & Supabase</span>
+            <button 
+              type="button"
+              onClick={() => handleOpenLegalModal("terms")}
+              className="hover:text-teal-600 dark:hover:text-teal-400 transition-colors cursor-pointer"
+            >
+              Terms & Conditions
+            </button>
+            <span>•</span>
+            <button 
+              type="button"
+              onClick={() => handleOpenLegalModal("refund")}
+              className="hover:text-teal-600 dark:hover:text-teal-400 transition-colors cursor-pointer"
+            >
+              Refund Policy
+            </button>
+            <span>•</span>
+            <button 
+              type="button"
+              onClick={() => handleOpenLegalModal("contact")}
+              className="hover:text-teal-600 dark:hover:text-teal-400 transition-colors cursor-pointer font-bold text-slate-600 dark:text-slate-300 hover:underline"
+            >
+              Contact Us
+            </button>
           </div>
         </div>
       </footer>
@@ -991,6 +1032,14 @@ export default function App() {
         currentPlan={plan}
         remainingFreeTrips={Math.max(0, 2 - freeTripsUsed)}
         paidTripsBalance={paidTripsBalance}
+        onOpenLegalPage={handleOpenLegalModal}
+      />
+
+      <LegalAndSupportModal
+        isOpen={showLegalModal}
+        onClose={() => setShowLegalModal(false)}
+        defaultTab={legalTab}
+        userEmail={user?.email || ""}
       />
 
       <BuddyInviteModal 

@@ -230,38 +230,41 @@ app.get("/api/razorpay/config", (req, res) => {
   });
 });
 
-// Create Razorpay Order
-app.post("/api/razorpay/create-order", async (req, res) => {
+// Create Razorpay Order Handler
+const handleCreateOrder = async (req: express.Request, res: express.Response) => {
   try {
-    const { planType, currency = "INR" } = req.body;
-    const isUsd = currency === "USD";
-    const targetCurrency = isUsd ? "USD" : "INR";
-
-    let amount = 9900; // default ₹99
-    if (isUsd) {
-      if (planType === "pay_per_trip") {
-        amount = 200; // $2 (2 trips fee)
-      } else if (planType === "yearly") {
-        amount = 700; // $7
-      } else if (planType === "lifetime") {
-        amount = 1900; // $19
-      }
-    } else {
-      if (planType === "pay_per_trip") {
-        amount = 9900; // ₹99
-      } else if (planType === "yearly") {
-        amount = 49900; // ₹499
-      } else if (planType === "lifetime") {
-        amount = 149900; // ₹1499
-      }
-    }
-
     const { keyId, keySecret } = getRazorpayKeys();
 
     if (!keyId || !keySecret) {
-      console.warn("[Razorpay API] Missing key_id or key_secret in environment variables.");
-      return res.status(400).json({ error: "Razorpay payment gateway is not configured." });
+      return res.status(401).json({ 
+        error: "Razorpay credentials are missing. Please configure RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env." 
+      });
     }
+
+    const { planType, currency = "INR", receipt } = req.body;
+    let amount = req.body.amount; // May be passed in paise directly or calculated from planType
+
+    if (amount === undefined || amount === null) {
+      const isUsd = currency === "USD";
+      if (isUsd) {
+        if (planType === "pay_per_trip") amount = 200; // $2 (200 cents)
+        else if (planType === "yearly") amount = 700; // $7
+        else if (planType === "lifetime") amount = 1900; // $19
+        else amount = 200;
+      } else {
+        if (planType === "pay_per_trip") amount = 9900; // ₹99 (9900 paise)
+        else if (planType === "yearly") amount = 49900; // ₹499
+        else if (planType === "lifetime") amount = 149900; // ₹1499
+        else amount = 9900;
+      }
+    }
+
+    // Minimum amount: 100 paise
+    if (typeof amount !== "number" || amount < 100) {
+      return res.status(400).json({ error: "Amount must be at least 100 paise." });
+    }
+
+    const targetCurrency = currency || "INR";
 
     const razorpay = new Razorpay({
       key_id: keyId,
@@ -269,32 +272,67 @@ app.post("/api/razorpay/create-order", async (req, res) => {
     });
 
     const options = {
-      amount,
+      amount: Math.round(amount),
       currency: targetCurrency,
-      receipt: `receipt_${planType}_${Date.now()}`
+      receipt: receipt || `receipt_${planType || "order"}_${Date.now()}`
     };
 
-    const order = await razorpay.orders.create(options);
-    return res.json({
-      id: order.id,
-      amount: order.amount,
-      currency: order.currency
-    });
+    try {
+      const order = await razorpay.orders.create(options);
+      console.log(`[Razorpay API] Created order ${order.id} for amount ${order.amount} ${order.currency}`);
+      return res.json({
+        order_id: order.id,
+        id: order.id,
+        amount: order.amount,
+        currency: order.currency
+      });
+    } catch (rzpErr: any) {
+      console.error("[Razorpay API] Order creation failed:", rzpErr?.error || rzpErr?.message || rzpErr);
+      
+      const isAuthFailure = 
+        rzpErr?.error?.code === "BAD_REQUEST_ERROR" && 
+        (rzpErr?.error?.description === "Authentication failed" || rzpErr?.statusCode === 401);
+
+      if (isAuthFailure) {
+        return res.status(401).json({
+          error: "Razorpay API Key Authentication Failed. The RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET in .env is invalid or expired. Please update .env with active credentials from your Razorpay Dashboard (Settings -> API Keys)."
+        });
+      }
+
+      const statusCode = rzpErr?.statusCode || 500;
+      const description = rzpErr?.error?.description || rzpErr?.message || "Failed to create Razorpay order.";
+      return res.status(statusCode).json({ error: description });
+    }
   } catch (error: any) {
     console.error("Razorpay Order Creation Failed:", error);
     res.status(500).json({ error: error?.message || "Failed to create Razorpay order." });
   }
-});
+};
 
-// Verify Razorpay Payment Signature
-app.post("/api/razorpay/verify-payment", async (req, res) => {
+app.post("/api/create-order", handleCreateOrder);
+app.post("/api/razorpay/create-order", handleCreateOrder);
+
+// Verify Razorpay Payment Signature Handler
+const handleVerifyPayment = async (req: express.Request, res: express.Response) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ 
+        status: "failure", 
+        verified: false, 
+        error: "Missing required payment verification fields (razorpay_order_id, razorpay_payment_id, razorpay_signature)." 
+      });
+    }
 
     const { keySecret } = getRazorpayKeys();
 
     if (!keySecret) {
-      return res.status(400).json({ error: "Razorpay keys are not configured on the server." });
+      return res.status(400).json({ 
+        status: "failure", 
+        verified: false, 
+        error: "Razorpay secret key is not configured on the server." 
+      });
     }
 
     const hmac = crypto.createHmac("sha256", keySecret);
@@ -302,17 +340,20 @@ app.post("/api/razorpay/verify-payment", async (req, res) => {
     const generated_signature = hmac.digest("hex");
 
     if (generated_signature === razorpay_signature) {
-      console.log(`[Razorpay API] Successful verification for order: ${razorpay_order_id}`);
-      return res.json({ status: "success", verified: true });
+      console.log(`[Razorpay API] Signature verified successfully for order: ${razorpay_order_id}`);
+      return res.json({ status: "success", verified: true, message: "Payment verified successfully" });
     } else {
-      console.warn(`[Razorpay API] Signature verification failed for order: ${razorpay_order_id}`);
-      return res.status(400).json({ error: "Invalid payment signature." });
+      console.warn(`[Razorpay API] Signature mismatch for order: ${razorpay_order_id}`);
+      return res.status(400).json({ status: "failure", verified: false, error: "Invalid payment signature." });
     }
   } catch (error: any) {
     console.error("Razorpay Payment Verification Failed:", error);
-    res.status(500).json({ error: error?.message || "Failed to verify Razorpay payment." });
+    res.status(500).json({ status: "failure", verified: false, error: error?.message || "Failed to verify Razorpay payment." });
   }
-});
+};
+
+app.post("/api/verify-payment", handleVerifyPayment);
+app.post("/api/razorpay/verify-payment", handleVerifyPayment);
 
 // AI Itinerary Generator Endpoint
 app.post("/api/generate-itinerary", async (req, res) => {

@@ -13,6 +13,7 @@ interface PremiumUpgradeModalProps {
   currentPlan?: "free" | "pay_per_trip" | "yearly" | "lifetime";
   remainingFreeTrips?: number;
   paidTripsBalance?: number;
+  onOpenLegalPage?: (tab: "privacy" | "terms" | "refund" | "contact") => void;
 }
 
 export default function PremiumUpgradeModal({ 
@@ -22,6 +23,7 @@ export default function PremiumUpgradeModal({
   userEmail,
   currentPlan = "free",
   remainingFreeTrips = 2,
+  onOpenLegalPage
 }: PremiumUpgradeModalProps) {
   const [step, setStep] = useState<"pricing" | "success">("pricing");
   const [selectedPlan, setSelectedPlan] = useState<"pay_per_trip" | "yearly" | "lifetime">("yearly");
@@ -102,33 +104,36 @@ export default function PremiumUpgradeModal({
         });
       }
 
-      // 1. First call /api/razorpay/create-order
-      const res = await fetch("/api/razorpay/create-order", {
+      // 1. First call /api/create-order (or /api/razorpay/create-order)
+      const res = await fetch("/api/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ planType: selectedPlan, currency })
       });
 
       if (!res.ok) {
-        throw new Error("Unable to start payment. Please try again.");
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || "Unable to start payment order. Please try again.");
       }
 
       const orderData = await res.json();
+      const orderId = orderData.order_id || orderData.id;
 
-      if (!orderData || !orderData.id) {
-        throw new Error("Unable to start payment. Please try again.");
+      if (!orderData || !orderId) {
+        throw new Error("Unable to create payment order. Please try again.");
       }
 
       const planInfo = getPlanDetails(selectedPlan, currency);
+      const keyId = razorpayConfig?.keyId || ((import.meta as any).env?.VITE_RAZORPAY_KEY_ID as string) || "rzp_test_TJGWI6QqKRLd1i";
 
       // 2. Configure official Razorpay Checkout popup
       const options = {
-        key: razorpayConfig?.keyId || "",
+        key: keyId,
         amount: orderData.amount,
         currency: orderData.currency,
         name: "TripBalancing",
         description: `${planInfo.name} - ${planInfo.description}`,
-        order_id: orderData.id,
+        order_id: orderId,
         image: "https://cdn-icons-png.flaticon.com/512/3125/3125848.png",
         prefill: {
           email: userEmail,
@@ -139,8 +144,8 @@ export default function PremiumUpgradeModal({
         },
         handler: async (response: any) => {
           try {
-            // 3. Call /api/razorpay/verify-payment after payment
-            const verifyRes = await fetch("/api/razorpay/verify-payment", {
+            // 3. Call /api/verify-payment after payment
+            const verifyRes = await fetch("/api/verify-payment", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -151,29 +156,26 @@ export default function PremiumUpgradeModal({
               })
             });
 
-            if (!verifyRes.ok) {
-              throw new Error("Signature verification failed.");
+            const verifyData = await verifyRes.json().catch(() => ({}));
+
+            if (!verifyRes.ok || !verifyData.verified) {
+              throw new Error(verifyData.error || "Payment signature verification failed.");
             }
 
-            const verifyData = await verifyRes.json();
             // 4. Activate plan ONLY after successful server-side signature verification
-            if (verifyData.verified) {
-              setIsSubmitting(false);
-              setStep("success");
-              const tripsToAdd = (selectedPlan === "pay_per_trip" && currency === "USD") ? 2 : 1;
-              onUpgradeSuccess(selectedPlan, tripsToAdd);
-            } else {
-              throw new Error("Payment signature verification failed.");
-            }
+            setIsSubmitting(false);
+            setStep("success");
+            const tripsToAdd = (selectedPlan === "pay_per_trip" && currency === "USD") ? 2 : 1;
+            onUpgradeSuccess(selectedPlan, tripsToAdd);
           } catch (err: any) {
             console.error("Verification error:", err);
-            setPaymentError("Unable to start payment. Please try again.");
+            setPaymentError(err.message || "Payment verification failed. Please contact support.");
             setIsSubmitting(false);
           }
         },
         modal: {
           ondismiss: () => {
-            // If user closes Razorpay Checkout, keep them on plan selection page and do not activate plan
+            // User closed payment window without paying - remain on plan selection
             setIsSubmitting(false);
           }
         }
@@ -182,7 +184,7 @@ export default function PremiumUpgradeModal({
       const rzp = new (window as any).Razorpay(options);
       rzp.on("payment.failed", (response: any) => {
         console.error("Razorpay Payment failed:", response.error);
-        setPaymentError("Unable to start payment. Please try again.");
+        setPaymentError(response.error?.description || "Payment failed or was cancelled.");
         setIsSubmitting(false);
       });
 
@@ -190,7 +192,7 @@ export default function PremiumUpgradeModal({
       rzp.open();
     } catch (err: any) {
       console.error("Razorpay Order Creation Error:", err);
-      setPaymentError("Unable to start payment. Please try again.");
+      setPaymentError(err.message || "Unable to start payment. Please try again.");
       setIsSubmitting(false);
     }
   };
@@ -517,9 +519,14 @@ export default function PremiumUpgradeModal({
 
               {/* Error banner */}
               {paymentError && (
-                <div className="flex items-center gap-2.5 p-3.5 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 rounded-2xl border border-rose-200 dark:border-rose-900 text-xs font-bold animate-in fade-in">
-                  <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
-                  <span>{paymentError}</span>
+                <div className="flex flex-col gap-1.5 p-4 bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 rounded-2xl border border-rose-200 dark:border-rose-900 text-xs font-semibold animate-in fade-in">
+                  <div className="flex items-center gap-2 font-bold text-rose-700 dark:text-rose-300">
+                    <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+                    <span>Payment Configuration Notice</span>
+                  </div>
+                  <p className="leading-relaxed pl-6 text-[11px] text-rose-600 dark:text-rose-300">
+                    {paymentError}
+                  </p>
                 </div>
               )}
 
@@ -549,10 +556,37 @@ export default function PremiumUpgradeModal({
                 )}
               </button>
 
-              <div className="text-center">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                  🔒 Secure checkout • International USD & INR supported
+              <div className="text-center space-y-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                  🔒 Secure Razorpay checkout • International USD & INR supported
                 </span>
+                {onOpenLegalPage && (
+                  <div className="flex items-center justify-center gap-3 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                    <button
+                      type="button"
+                      onClick={() => onOpenLegalPage("terms")}
+                      className="hover:text-teal-600 dark:hover:text-teal-400 underline cursor-pointer"
+                    >
+                      Terms
+                    </button>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => onOpenLegalPage("privacy")}
+                      className="hover:text-teal-600 dark:hover:text-teal-400 underline cursor-pointer"
+                    >
+                      Privacy Policy
+                    </button>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => onOpenLegalPage("refund")}
+                      className="hover:text-teal-600 dark:hover:text-teal-400 underline cursor-pointer"
+                    >
+                      Refund Policy
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
