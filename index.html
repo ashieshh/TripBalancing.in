@@ -12,9 +12,18 @@
     <meta name="author" content="TripBalancing" />
     <meta name="robots" content="index, follow" />
 
-    <!-- Favicon & Icons -->
+    <!-- Favicon & PWA Icons -->
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-    <link rel="apple-touch-icon" href="/logo.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    
+    <!-- PWA Manifest & Mobile Theme -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TripBalancing" />
 
     <!-- Canonical URL -->
     <link rel="canonical" href="https://tripbalancing.app/" />
@@ -76,7 +85,20 @@
     <link rel="preload" href="/logo.svg" as="image" type="image/svg+xml" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- PWA Instant App Shell Splash Screen -->
+      <div style="position: fixed; inset: 0; background-color: #0f172a; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 99999; font-family: system-ui, -apple-system, sans-serif;">
+        <div style="width: 88px; height: 88px; background: rgba(13, 148, 136, 0.15); border: 1.5px solid rgba(20, 184, 166, 0.3); border-radius: 24px; display: flex; align-items: center; justify-content: center; margin-bottom: 20px; box-shadow: 0 12px 30px -5px rgba(0,0,0,0.5);">
+          <img src="/logo.svg" alt="TripBalancing Logo" style="width: 56px; height: 56px;" />
+        </div>
+        <div style="font-size: 22px; font-weight: 900; color: #ffffff; letter-spacing: -0.02em; margin-bottom: 6px;">TripBalancing</div>
+        <div style="font-size: 12px; font-weight: 700; color: #14b8a6; text-transform: uppercase; letter-spacing: 0.12em;">AI Travel & Budget Optimizer</div>
+        <div style="margin-top: 32px; width: 32px; height: 32px; border: 3px solid rgba(20,184,166,0.2); border-top-color: #14b8a6; border-radius: 50%; animation: pwa-splash-spin 0.8s linear infinite;"></div>
+        <style>
+          @keyframes pwa-splash-spin { to { transform: rotate(360deg); } }
+        </style>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

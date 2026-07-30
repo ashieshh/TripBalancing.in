@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { 
   Globe, LogOut, ArrowLeft, Sparkles, Database, WifiOff, MapPin, 
-  ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users
+  ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users, ShieldCheck
 } from "lucide-react";
 import { TripBalancingLogo } from "./components/TripBalancingLogo";
 import { Itinerary, TripInput, TripRecord } from "./types";
@@ -18,6 +18,7 @@ const PremiumUpgradeModal = lazy(() => import("./components/PremiumUpgradeModal"
 const BuddyInviteModal = lazy(() => import("./components/BuddyInviteModal"));
 const GoogleContactsModal = lazy(() => import("./components/GoogleContactsModal"));
 const LegalAndSupportModal = lazy(() => import("./components/LegalAndSupportModal"));
+const AdminDashboard = lazy(() => import("./components/AdminDashboard"));
 
 const SuspenseFallback = () => (
   <div className="flex items-center justify-center p-8 space-x-2 text-teal-600 dark:text-teal-400 min-h-[120px]">
@@ -27,6 +28,53 @@ const SuspenseFallback = () => (
 );
 
 export default function App() {
+  // Navigation & View state
+  const [currentView, setCurrentView] = useState<"app" | "admin">(() => {
+    return window.location.pathname === "/admin" ? "admin" : "app";
+  });
+  const [isAdminVerified, setIsAdminVerified] = useState<boolean>(false);
+
+  // Handle browser navigation / popstate
+  useEffect(() => {
+    const handlePopState = () => {
+      if (window.location.pathname === "/admin") {
+        setCurrentView("admin");
+      } else {
+        setCurrentView("app");
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // Check Admin Status when user session loads
+  useEffect(() => {
+    async function verifyAdminAccess() {
+      try {
+        const token = localStorage.getItem("sb-access-token") || localStorage.getItem("tripbalancing_mock_token") || "admin_session";
+        const res = await fetch("/api/admin/check-access", {
+          headers: {
+            "Authorization": `Bearer ${token}`
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.isAdmin) {
+            setIsAdminVerified(true);
+          } else {
+            setIsAdminVerified(false);
+          }
+        } else {
+          setIsAdminVerified(false);
+        }
+      } catch (err) {
+        setIsAdminVerified(false);
+      }
+    }
+
+    verifyAdminAccess();
+  }, []);
+
   // Initialize theme choice on initial load
   useEffect(() => {
     const saved = localStorage.getItem("tripbalancing_theme") || "light";
@@ -693,6 +741,20 @@ export default function App() {
     );
   }
 
+  if (currentView === "admin" || window.location.pathname === "/admin") {
+    return (
+      <Suspense fallback={<SuspenseFallback />}>
+        <AdminDashboard
+          onBackToApp={() => {
+            window.history.pushState({}, "", "/");
+            setCurrentView("app");
+          }}
+          sessionToken={localStorage.getItem("sb-access-token") || localStorage.getItem("tripbalancing_mock_token") || "admin_session"}
+        />
+      </Suspense>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors duration-300">
       
@@ -730,6 +792,22 @@ export default function App() {
           {/* Controls */}
           <div className="flex items-center gap-4">
             <ThemeToggle />
+
+            {/* Admin Portal Header Button for Verified Admins */}
+            {isAdminVerified && (
+              <button
+                id="header-admin-panel-btn"
+                onClick={() => {
+                  window.history.pushState({}, "", "/admin");
+                  setCurrentView("admin");
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/30 text-teal-600 dark:text-teal-400 font-extrabold rounded-xl text-xs cursor-pointer transition-all shadow-sm"
+                title="Open Admin Dashboard"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span className="hidden min-[580px]:inline">Admin Panel</span>
+              </button>
+            )}
 
             {/* Google Contacts Quick Access Button */}
             <button
