@@ -432,55 +432,60 @@ const drawUserIcon = (doc: any, x: number, y: number, color: number[] = [13, 148
 const drawTripBalancingLogo = (doc: any, cx: number, cy: number, darkTheme = false, sizeMultiplier = 1) => {
   const prevLineWidth = doc.getLineWidth();
 
-  // Determine colors based on theme
-  // Bright Teal: [20, 184, 166] (Hex #14b8a6)
-  // Dark Teal: [13, 148, 136] (Hex #0d9488)
-  const tealBright = [20, 184, 166];
-  const tealDark = [13, 148, 136];
-  const white = [255, 255, 255];
-  const slateDark = [15, 23, 42];
+  // Cyan brand colors matching official logo:
+  // Bright Cyan: [0, 229, 255] (Hex #00e5ff)
+  // Deep Cyan: [0, 184, 212] (Hex #00b8d4)
+  const cyanBright = [0, 229, 255];
+  const cyanDeep = [0, 184, 212];
+  const hubDark = [8, 12, 20];
 
-  const primaryColor = darkTheme ? white : tealBright;
-  const secondaryColor = darkTheme ? tealBright : tealDark;
+  const primaryColor = cyanBright;
+  const secondaryColor = cyanDeep;
 
-  const r = 4.2 * sizeMultiplier; // base radius 4.2mm (so at size 1 is 8.4mm diameter)
+  const r = 4.2 * sizeMultiplier; // base radius 4.2mm
 
-  // 1. Concentric circles
+  // 1. Concentric Sonar Rings
   doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-  doc.setLineWidth(0.15 * sizeMultiplier);
-  doc.circle(cx, cy, r, "D"); // Outer circle
-  doc.circle(cx, cy, r * 0.75, "D"); // Mid circle
-  doc.circle(cx, cy, r * 0.5, "D"); // Inner circle
+  doc.setLineWidth(0.18 * sizeMultiplier);
+  doc.circle(cx, cy, r, "D"); // Outer ring
+  doc.setLineWidth(0.14 * sizeMultiplier);
+  doc.circle(cx, cy, r * 0.78, "D"); // Mid ring
+  doc.setLineWidth(0.10 * sizeMultiplier);
+  doc.circle(cx, cy, r * 0.56, "D"); // Inner ring
 
-  // 2. Crosshairs (horizontal line passing through center, strictly inside the circle)
-  doc.line(cx - r, cy, cx + r, cy);
+  // 2. Faceted 4-Pointed Compass Star
+  const needleW = r * 0.22;
 
-  // 3. Stylized vertical needle pointing UP
-  const needleW = r * 0.18;
+  // NORTH POINT
   doc.setFillColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-  doc.setDrawColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-  
-  // Left half of top needle
-  doc.triangle(cx, cy - r, cx - needleW, cy - r * 0.35, cx, cy - r * 0.08, "F");
-  // Right half of top needle (slightly different/bright color)
+  doc.triangle(cx, cy - r * 0.95, cx - needleW, cy - r * 0.28, cx, cy, "F");
   doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-  doc.triangle(cx, cy - r, cx + needleW, cy - r * 0.35, cx, cy - r * 0.08, "F");
+  doc.triangle(cx, cy - r * 0.95, cx + needleW, cy - r * 0.28, cx, cy, "F");
 
-  // 4. Stylized vertical needle pointing DOWN
-  // Left half of bottom needle
+  // SOUTH POINT
+  doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+  doc.triangle(cx, cy + r * 0.95, cx - needleW, cy + r * 0.28, cx, cy, "F");
   doc.setFillColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-  doc.triangle(cx, cy + r, cx - needleW, cy + r * 0.35, cx, cy + r * 0.08, "F");
-  // Right half of bottom needle
-  doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-  doc.triangle(cx, cy + r, cx + needleW, cy + r * 0.35, cx, cy + r * 0.08, "F");
+  doc.triangle(cx, cy + r * 0.95, cx + needleW, cy + r * 0.28, cx, cy, "F");
 
-  // 5. Central Hub: circles at cx, cy
-  doc.setFillColor(darkTheme ? slateDark[0] : 255, darkTheme ? slateDark[1] : 255, darkTheme ? slateDark[2] : 255);
+  // EAST POINT
+  doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+  doc.triangle(cx + r * 0.95, cy, cx + r * 0.28, cy - needleW, cx, cy, "F");
+  doc.setFillColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+  doc.triangle(cx + r * 0.95, cy, cx + r * 0.28, cy + needleW, cx, cy, "F");
+
+  // WEST POINT
+  doc.setFillColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+  doc.triangle(cx - r * 0.95, cy, cx - r * 0.28, cy - needleW, cx, cy, "F");
+  doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+  doc.triangle(cx - r * 0.95, cy, cx - r * 0.28, cy + needleW, cx, cy, "F");
+
+  // 3. Central Hub Ring & Inner Dot
+  doc.setFillColor(hubDark[0], hubDark[1], hubDark[2]);
   doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-  doc.setLineWidth(0.2 * sizeMultiplier);
+  doc.setLineWidth(0.22 * sizeMultiplier);
   doc.circle(cx, cy, r * 0.22, "FD");
-  
-  // Inner dot of hub
+
   doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
   doc.circle(cx, cy, r * 0.08, "F");
 

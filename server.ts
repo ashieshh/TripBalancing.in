@@ -287,8 +287,35 @@ const handleCreateOrder = async (req: express.Request, res: express.Response) =>
         currency: order.currency
       });
     } catch (rzpErr: any) {
-      console.error("[Razorpay API] Order creation failed:", rzpErr?.error || rzpErr?.message || rzpErr);
+      console.error("[Razorpay API] Order creation failed:", rzpErr?.error?.description || rzpErr?.message || "Order creation failed.");
       
+      // If USD order creation failed due to merchant currency restrictions, retry with INR equivalent
+      if (targetCurrency === "USD") {
+        console.warn("[Razorpay API] USD order creation failed, falling back to INR...");
+        let fallbackInrAmount = 9900;
+        if (planType === "pay_per_trip") fallbackInrAmount = 9900; // ₹99
+        else if (planType === "yearly") fallbackInrAmount = 49900; // ₹499
+        else if (planType === "lifetime") fallbackInrAmount = 149900; // ₹1,499
+
+        try {
+          const fallbackOrder = await razorpay.orders.create({
+            amount: fallbackInrAmount,
+            currency: "INR",
+            receipt: receipt || `receipt_${planType || "order"}_inr_${Date.now()}`
+          });
+          console.log(`[Razorpay API] Created fallback INR order ${fallbackOrder.id}`);
+          return res.json({
+            order_id: fallbackOrder.id,
+            id: fallbackOrder.id,
+            amount: fallbackOrder.amount,
+            currency: fallbackOrder.currency,
+            convertedFromUsd: true
+          });
+        } catch (fallbackErr: any) {
+          console.error("[Razorpay API] INR fallback order creation also failed:", fallbackErr?.message || fallbackErr);
+        }
+      }
+
       const isAuthFailure = 
         rzpErr?.error?.code === "BAD_REQUEST_ERROR" && 
         (rzpErr?.error?.description === "Authentication failed" || rzpErr?.statusCode === 401);
@@ -1365,7 +1392,7 @@ Return the output in strict JSON format.`;
     try {
       data = JSON.parse(response.text || "{}");
     } catch (parseErr) {
-      console.error("Failed to parse Gemini Weather JSON:", response.text, parseErr);
+      console.error("Failed to parse Gemini Weather JSON:", parseErr?.message || parseErr);
       throw new Error("Invalid model JSON response");
     }
 

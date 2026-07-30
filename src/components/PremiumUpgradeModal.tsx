@@ -168,7 +168,7 @@ export default function PremiumUpgradeModal({
             const tripsToAdd = (selectedPlan === "pay_per_trip" && currency === "USD") ? 2 : 1;
             onUpgradeSuccess(selectedPlan, tripsToAdd);
           } catch (err: any) {
-            console.error("Verification error:", err);
+            console.error("Verification error:", err?.message || "Payment verification error");
             setPaymentError(err.message || "Payment verification failed. Please contact support.");
             setIsSubmitting(false);
           }
@@ -183,15 +183,20 @@ export default function PremiumUpgradeModal({
 
       const rzp = new (window as any).Razorpay(options);
       rzp.on("payment.failed", (response: any) => {
-        console.error("Razorpay Payment failed:", response.error);
-        setPaymentError(response.error?.description || "Payment failed or was cancelled.");
+        console.error("Razorpay Payment failed:", response.error?.description || "Payment failed");
+        const errMsg = response.error?.description || "Payment failed or was cancelled.";
+        if (errMsg.toLowerCase().includes("merchant") || currency === "USD") {
+          setPaymentError("Razorpay Merchant Notice: USD ($) payments require enabling 'International Payments' in your Razorpay Dashboard (Settings -> Payment Methods). Switch to INR (₹) below for instant payment via UPI, Credit/Debit Cards, or Netbanking.");
+        } else {
+          setPaymentError(errMsg);
+        }
         setIsSubmitting(false);
       });
 
       // 5. Immediately launch Razorpay Checkout popup
       rzp.open();
     } catch (err: any) {
-      console.error("Razorpay Order Creation Error:", err);
+      console.error("Razorpay Order Creation Error:", err?.message || "Order creation error");
       setPaymentError(err.message || "Unable to start payment. Please try again.");
       setIsSubmitting(false);
     }
@@ -519,14 +524,28 @@ export default function PremiumUpgradeModal({
 
               {/* Error banner */}
               {paymentError && (
-                <div className="flex flex-col gap-1.5 p-4 bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 rounded-2xl border border-rose-200 dark:border-rose-900 text-xs font-semibold animate-in fade-in">
+                <div className="flex flex-col gap-2 p-4 bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 rounded-2xl border border-rose-200 dark:border-rose-900 text-xs font-semibold animate-in fade-in">
                   <div className="flex items-center gap-2 font-bold text-rose-700 dark:text-rose-300">
                     <AlertCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
-                    <span>Payment Configuration Notice</span>
+                    <span>Razorpay Merchant Notice</span>
                   </div>
                   <p className="leading-relaxed pl-6 text-[11px] text-rose-600 dark:text-rose-300">
                     {paymentError}
                   </p>
+                  {currency === "USD" && (
+                    <div className="pl-6 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCurrency("INR");
+                          setPaymentError("");
+                        }}
+                        className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-all shadow-sm cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span>🇮🇳 Switch to INR (₹) & Retry Payment</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, FormEvent } from "react";
-import { Mail, Lock, User, Compass, AlertCircle, ArrowRight, ArrowLeft, Check, KeyRound } from "lucide-react";
+import { Mail, Lock, User, AlertCircle, ArrowRight, ArrowLeft, Check, KeyRound } from "lucide-react";
+import { TripBalancingLogo } from "./TripBalancingLogo";
 import { db } from "../lib/supabase";
 
 interface AuthModalProps {
@@ -150,8 +151,8 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
       {/* Visual Header */}
       <div className="relative p-8 text-center text-white bg-gradient-to-r from-teal-500 via-emerald-500 to-cyan-500">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-white/20 via-transparent to-transparent pointer-events-none" />
-        <div className="inline-flex items-center justify-center p-3 mb-3 bg-white/20 backdrop-blur-md rounded-2xl">
-          <Compass className="w-8 h-8 text-white animate-spin-slow" />
+        <div className="inline-flex items-center justify-center p-2 mb-3 bg-slate-950/40 backdrop-blur-md rounded-2xl border border-white/20 shadow-md">
+          <TripBalancingLogo className="w-10 h-10" spin />
         </div>
         <h2 className="text-2xl font-bold tracking-tight">Welcome to TripBalancing</h2>
         <p className="mt-1.5 text-[11px] text-teal-50/90 font-medium italic max-w-[280px] mx-auto leading-tight">

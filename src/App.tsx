@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { 
-  Compass, Globe, LogOut, ArrowLeft, Sparkles, Database, WifiOff, MapPin, 
+  Globe, LogOut, ArrowLeft, Sparkles, Database, WifiOff, MapPin, 
   ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users
 } from "lucide-react";
+import { TripBalancingLogo } from "./components/TripBalancingLogo";
 import { Itinerary, TripInput, TripRecord } from "./types";
 import { db, isRealSupabaseConfigured } from "./lib/supabase";
 import TripForm from "./components/TripForm";
@@ -71,6 +72,40 @@ export default function App() {
   const [trips, setTrips] = useState<TripRecord[]>([]);
 
   // Calculate travel metrics helper
+  const getUserDisplayName = (u: any) => {
+    if (!u) return "";
+    
+    // Check if user object has explicit name or displayName fields
+    const rawName = 
+      u.displayName || 
+      u.fullName || 
+      u.user_metadata?.full_name || 
+      u.user_metadata?.name || 
+      u.user_metadata?.displayName;
+
+    if (rawName && typeof rawName === "string" && !rawName.includes("@")) {
+      const formatted = rawName
+        .split(/[\s._-]+/)
+        .filter(Boolean)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(" ");
+      if (formatted.trim()) return formatted;
+    }
+
+    // Fallback to email: format into a clean display name (e.g., "yadavvashish" -> "Yadavvashish" or "john.doe" -> "John Doe")
+    if (u.email && typeof u.email === "string") {
+      const emailNamePart = u.email.split("@")[0];
+      const formattedEmailName = emailNamePart
+        .split(/[\s._-]+/)
+        .filter(Boolean)
+        .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(" ");
+      if (formattedEmailName.trim()) return formattedEmailName;
+    }
+
+    return "Guest User";
+  };
+
   const getCountryFromDestination = (dest: string): string => {
     if (!dest) return "";
     const parts = dest.split(",");
@@ -368,7 +403,7 @@ export default function App() {
 
       if (!response.ok) {
         const errData = await response.json();
-        throw new Error(errData.error || "Failed to generate your itinerary. Please verify your GEMINI_API_KEY.");
+        throw new Error(errData.error || "Failed to generate your itinerary. Please try again.");
       }
 
       const data = await response.json();
@@ -515,7 +550,7 @@ export default function App() {
     if (shareLoading) {
       return (
         <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200">
-          <Compass className="w-12 h-12 text-teal-500 animate-spin" />
+          <TripBalancingLogo className="w-16 h-16" spin />
           <p className="mt-4 text-sm font-bold tracking-wide uppercase">Loading Shared Itinerary...</p>
         </div>
       );
@@ -553,8 +588,8 @@ export default function App() {
               onClick={() => { window.location.href = window.location.origin; }}
               className="flex items-center gap-2.5 text-xl font-extrabold text-slate-800 dark:text-slate-100 cursor-pointer"
             >
-              <div className="p-2 bg-gradient-to-tr from-teal-500 to-emerald-500 rounded-xl text-white shadow-md shadow-teal-500/10">
-                <Compass className="w-5 h-5 animate-spin-slow" />
+              <div className="p-1.5 bg-slate-900 rounded-xl shadow-md border border-slate-800">
+                <TripBalancingLogo className="w-6 h-6" spin />
               </div>
               <span>TripBalancing</span>
             </button>
@@ -585,7 +620,7 @@ export default function App() {
         <footer className="print:hidden border-t border-slate-150 dark:border-slate-900 bg-white dark:bg-slate-950 py-10 transition-colors mt-12 text-xs">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-slate-400 font-medium">
             <div className="flex items-center gap-2">
-              <Compass className="w-5 h-5 text-teal-500 animate-spin-slow" />
+              <TripBalancingLogo className="w-5 h-5" spin />
               <span className="font-bold text-slate-600 dark:text-slate-300 text-sm">TripBalancing</span>
               <span>|</span>
               <span>© 2026 TripBalancing travel helper app. Shared read-only mode.</span>
@@ -599,7 +634,7 @@ export default function App() {
   if (authLoading || userDataLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200">
-        <Compass className="w-12 h-12 text-teal-500 animate-spin" />
+        <TripBalancingLogo className="w-16 h-16" spin />
         <p className="mt-4 text-sm font-bold tracking-wide uppercase">Syncing your travel data with Supabase...</p>
       </div>
     );
@@ -661,8 +696,8 @@ export default function App() {
               onClick={() => { setActiveItinerary(null); setActiveTripId(null); }}
               className="flex items-center gap-2.5 text-xl font-extrabold text-slate-800 dark:text-slate-100 cursor-pointer"
             >
-              <div className="p-2 bg-gradient-to-tr from-teal-500 to-emerald-500 rounded-xl text-white shadow-md shadow-teal-500/10">
-                <Compass className="w-5 h-5 animate-spin-slow" />
+              <div className="p-1.5 bg-slate-900 rounded-xl shadow-md border border-slate-800">
+                <TripBalancingLogo className="w-6 h-6" spin />
               </div>
               <span className="hidden min-[440px]:inline">TripBalancing</span>
             </button>
@@ -714,11 +749,10 @@ export default function App() {
               </button>
             )}
 
-            {/* Profile Dropdown or Simple Details */}
+            {/* Profile Details */}
             <div className="flex items-center gap-3 pl-3 border-l border-slate-200 dark:border-slate-800">
               <div className="hidden sm:block text-right">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Logged in as</span>
-                <span className="text-sm font-bold text-slate-700 dark:text-slate-300">{user.fullName || user.email}</span>
+                <span className="text-sm font-bold text-slate-700 dark:text-slate-300">{getUserDisplayName(user)}</span>
               </div>
               
               <button
@@ -752,8 +786,8 @@ export default function App() {
         {/* LOADING STATE FOR GENERATION */}
         {generating && (
           <div className="max-w-2xl mx-auto py-16 text-center space-y-6">
-            <div className="relative inline-flex items-center justify-center p-6 bg-gradient-to-tr from-teal-500 to-emerald-500 text-white rounded-3xl shadow-xl animate-bounce">
-              <Compass className="w-10 h-10 animate-spin-slow" />
+            <div className="relative inline-flex items-center justify-center p-5 bg-slate-950 rounded-3xl shadow-xl border border-slate-800 animate-bounce">
+              <TripBalancingLogo className="w-12 h-12" spin />
             </div>
             <div className="space-y-2">
               <h3 className="text-2xl font-extrabold text-slate-800 dark:text-slate-100">Consulting AI Travel Guides...</h3>
@@ -920,7 +954,7 @@ export default function App() {
                 <div className="space-y-6">
                   {/* Pulsing interactive map skeleton shape */}
                   <div className="h-[220px] w-full bg-slate-100/70 dark:bg-slate-900/40 rounded-3xl border border-slate-200/20 dark:border-slate-800/20 animate-pulse flex flex-col items-center justify-center space-y-2">
-                    <Compass className="w-7 h-7 text-teal-550/40 animate-spin-slow" />
+                    <TripBalancingLogo className="w-8 h-8 opacity-60" spin />
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Loading Travel Hub Visualization...</span>
                   </div>
                   {/* Grid layout of trips cards skeletons */}
@@ -980,7 +1014,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col lg:flex-row items-center justify-between gap-6 text-slate-400 font-medium">
           <div className="flex flex-col sm:flex-row items-center gap-2 text-center sm:text-left">
             <div className="flex items-center gap-2">
-              <Compass className="w-5 h-5 text-teal-500 animate-spin-slow" />
+              <TripBalancingLogo className="w-5 h-5" spin />
               <span className="font-bold text-slate-600 dark:text-slate-300 text-sm">TripBalancing</span>
             </div>
             <span className="hidden sm:inline">|</span>

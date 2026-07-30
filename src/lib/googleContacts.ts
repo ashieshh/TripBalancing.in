@@ -64,7 +64,7 @@ export const signInWithGoogleContacts = async (): Promise<{ user: User; accessTo
       contacts
     };
   } catch (error: any) {
-    console.error("Error signing in with Google Contacts:", error);
+    console.error("Error signing in with Google Contacts:", error?.message || "Authentication failed");
     throw error;
   } finally {
     isSigningIn = false;
@@ -157,7 +157,7 @@ export const fetchGoogleContacts = async (token?: string): Promise<GoogleContact
       }
     }
   } catch (err: any) {
-    console.error("Failed to fetch contacts from Google People API:", err);
+    console.error("Failed to fetch contacts from Google People API:", err?.message || "Failed to fetch contacts");
     throw new Error("Failed to load Google Contacts. Please ensure permissions are granted.");
   }
 

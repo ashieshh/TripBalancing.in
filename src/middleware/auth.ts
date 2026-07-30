@@ -22,7 +22,7 @@ export const requireAuth = async (
     req.user = decodedToken;
     next();
   } catch (error) {
-    console.error('Error verifying Firebase ID token:', error);
+    console.error('Error verifying Firebase ID token:', (error as any)?.message || 'Token verification failed');
     return res.status(401).json({ error: 'Unauthorized: Invalid token' });
   }
 };
