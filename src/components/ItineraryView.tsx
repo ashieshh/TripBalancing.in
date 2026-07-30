@@ -6,10 +6,9 @@ import {
   Search, Sun, CloudSun, Cloud, CloudRain, Snowflake, CloudLightning, PlaneTakeoff, Clock
 } from "lucide-react";
 import { Itinerary, TripRecord, LoggedExpense } from "../types";
-import DestinationWeather from "./DestinationWeather";
-import CameraCapture from "./CameraCapture";
-
 // Lazy-load heavier visual sub-components to optimize chunk size and page speed
+const DestinationWeather = lazy(() => import("./DestinationWeather"));
+const CameraCapture = lazy(() => import("./CameraCapture"));
 const BudgetBreakdownChart = lazy(() => import("./BudgetBreakdownChart"));
 const ItineraryMap = lazy(() => import("./ItineraryMap"));
 
@@ -1699,10 +1698,12 @@ export default function ItineraryView({
                           {/* Inline CameraCapture Interface */}
                           {activeCameraDay === day.dayNumber && (
                             <div className="bg-slate-50/50 dark:bg-slate-900/20 p-4 rounded-2xl border border-slate-150 dark:border-slate-850/60">
-                              <CameraCapture
-                                onPhotoAdded={(photoUrl) => handleAddPhotoToDay(day.dayNumber, photoUrl)}
-                                onClose={() => setActiveCameraDay(null)}
-                              />
+                              <Suspense fallback={<div className="p-4 text-center text-xs text-slate-400">Loading camera...</div>}>
+                                <CameraCapture
+                                  onPhotoAdded={(photoUrl) => handleAddPhotoToDay(day.dayNumber, photoUrl)}
+                                  onClose={() => setActiveCameraDay(null)}
+                                />
+                              </Suspense>
                             </div>
                           )}
 
@@ -1991,13 +1992,15 @@ export default function ItineraryView({
 
         {/* TAB 5: WEATHER */}
         {activeTab === "weather" && (
-          <DestinationWeather 
-            destination={itinerary.destination} 
-            latitude={itinerary.latitude} 
-            longitude={itinerary.longitude} 
-            startDate={itinerary.startDate}
-            endDate={itinerary.endDate}
-          />
+          <Suspense fallback={<div className="p-8 text-center text-xs font-semibold text-slate-400">Loading Weather Insights...</div>}>
+            <DestinationWeather 
+              destination={itinerary.destination} 
+              latitude={itinerary.latitude} 
+              longitude={itinerary.longitude} 
+              startDate={itinerary.startDate}
+              endDate={itinerary.endDate}
+            />
+          </Suspense>
         )}
 
         {/* TAB 6: BUDGET BREAKDOWN */}
@@ -2370,6 +2373,8 @@ export default function ItineraryView({
                 alt={itinerary.destination}
                 className="w-full h-full object-cover filter brightness-95"
                 referrerPolicy="no-referrer"
+                loading="lazy"
+                decoding="async"
               />
             </div>
           </div>
@@ -2422,6 +2427,8 @@ export default function ItineraryView({
                 alt="Destination Map" 
                 className="w-full h-[85mm] object-cover"
                 referrerPolicy="no-referrer"
+                loading="lazy"
+                decoding="async"
               />
               <div className="bg-slate-50 px-4 py-2 border-t border-slate-200 flex justify-between items-center text-[10px] text-slate-500 font-bold">
                 <span>📍 Location Focus: {itinerary.destination} (Coordinates: {itinerary.latitude?.toFixed(4) ?? "28.6139"}°N, {itinerary.longitude?.toFixed(4) ?? "77.2090"}°E)</span>
@@ -2436,6 +2443,8 @@ export default function ItineraryView({
                 alt="QR Code" 
                 className="w-24 h-24 border border-slate-200 rounded-xl bg-white p-1 flex-shrink-0"
                 referrerPolicy="no-referrer"
+                loading="lazy"
+                decoding="async"
               />
               <div className="space-y-2">
                 <h4 className="text-xs font-black uppercase tracking-wider text-teal-900">

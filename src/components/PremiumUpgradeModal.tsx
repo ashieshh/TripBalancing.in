@@ -50,14 +50,6 @@ export default function PremiumUpgradeModal({
         console.error("Failed to fetch Razorpay config:", err);
         setRazorpayConfig({ keyId: "", isConfigured: false });
       });
-
-    // Inject Razorpay standard checkout script dynamically if not present
-    if (!(window as any).Razorpay) {
-      const script = document.createElement("script");
-      script.src = "https://checkout.razorpay.com/v1/checkout.js";
-      script.async = true;
-      document.body.appendChild(script);
-    }
   }, [isOpen]);
 
   if (!isOpen) return null;

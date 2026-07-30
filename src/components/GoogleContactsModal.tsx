@@ -277,6 +277,8 @@ export default function GoogleContactsModal({
                             alt={contact.name}
                             className="w-9 h-9 rounded-full object-cover border border-slate-200 dark:border-slate-700 flex-shrink-0"
                             referrerPolicy="no-referrer"
+                            loading="lazy"
+                            decoding="async"
                           />
                         ) : (
                           <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-teal-500 to-emerald-500 text-white font-extrabold text-xs flex items-center justify-center flex-shrink-0">

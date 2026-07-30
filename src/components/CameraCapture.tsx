@@ -203,6 +203,8 @@ export default function CameraCapture({ onPhotoAdded, onClose }: CameraCapturePr
             alt="Captured log"
             className="w-full h-full object-cover"
             referrerPolicy="no-referrer"
+            loading="lazy"
+            decoding="async"
           />
         )}
 

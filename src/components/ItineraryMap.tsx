@@ -43,19 +43,54 @@ export default function ItineraryMap({
   };
 
   useEffect(() => {
-    // Check if Leaflet L is loaded from unpkg
-    const L = (window as any).L;
-    if (!L) {
-      const checkInterval = setInterval(() => {
-        if ((window as any).L) {
-          clearInterval(checkInterval);
-          setMapLoaded(true);
-        }
-      }, 100);
-      return () => clearInterval(checkInterval);
-    } else {
-      setMapLoaded(true);
-    }
+    // Dynamically load Leaflet JS and CSS if not present
+    let isMounted = true;
+    const loadLeafletAssets = async () => {
+      if ((window as any).L) {
+        if (isMounted) setMapLoaded(true);
+        return;
+      }
+
+      // Inject Leaflet CSS
+      if (!document.querySelector('link[href*="leaflet.css"]')) {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+        link.integrity = "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=";
+        link.crossOrigin = "";
+        document.head.appendChild(link);
+      }
+
+      // Inject Leaflet JS
+      try {
+        await new Promise<void>((resolve, reject) => {
+          if ((window as any).L) return resolve();
+          const existingScript = document.querySelector('script[src*="leaflet.js"]');
+          if (existingScript) {
+            existingScript.addEventListener("load", () => resolve());
+            existingScript.addEventListener("error", (e) => reject(e));
+            return;
+          }
+          const script = document.createElement("script");
+          script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+          script.integrity = "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=";
+          script.crossOrigin = "";
+          script.onload = () => resolve();
+          script.onerror = (e) => reject(e);
+          document.body.appendChild(script);
+        });
+
+        if (isMounted) setMapLoaded(true);
+      } catch (err) {
+        if (isMounted) setError("Failed to load map library. Please try again.");
+      }
+    };
+
+    loadLeafletAssets();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
