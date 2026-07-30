@@ -11,7 +11,7 @@ interface AdminDashboardProps {
   sessionToken?: string | null;
 }
 
-type AdminTab = "overview" | "users" | "payments" | "subscriptions" | "tickets" | "refunds" | "security";
+type AdminTab = "overview" | "users" | "payments" | "subscriptions" | "tickets" | "refunds" | "security" | "emails";
 
 export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
@@ -38,6 +38,94 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
   // Loading & error per tab
   const [tabLoading, setTabLoading] = useState(false);
   const [tabError, setTabError] = useState<string | null>(null);
+
+  // Email Tester & Action States
+  const [testEmailRecipient, setTestEmailRecipient] = useState("support@tripbalancing.in");
+  const [testTemplateType, setTestTemplateType] = useState("welcome");
+  const [testEmailSending, setTestEmailSending] = useState(false);
+  const [testEmailStatus, setTestEmailStatus] = useState<string | null>(null);
+  const [refActionLoading, setRefActionLoading] = useState<string | null>(null);
+
+  const handleRefundDecision = async (r: any, action: "approve" | "reject") => {
+    setRefActionLoading(r.id);
+    try {
+      const token = sessionToken || localStorage.getItem("sb-access-token") || localStorage.getItem("tripbalancing_mock_token") || "admin_session";
+      const res = await fetch("/api/admin/refunds/action", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          requestId: r.id,
+          action,
+          userEmail: r.user_email,
+          razorpayPaymentId: r.razorpay_payment_id,
+          amount: 499,
+          reason: action === "reject" ? "Request outside 7-day money-back window or credits utilized." : undefined
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`Refund request ${action === "approve" ? "APPROVED" : "REJECTED"}. Transactional email dispatched to ${r.user_email} via Brevo SMTP.`);
+        const refRes = await fetch("/api/admin/refund-requests", {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (refRes.ok) setRefundsData(await refRes.json());
+      } else {
+        alert(`Action failed: ${data.error || "Unknown error"}`);
+      }
+    } catch (err: any) {
+      alert(`Error processing refund action: ${err.message}`);
+    } finally {
+      setRefActionLoading(null);
+    }
+  };
+
+  const handleSendTestEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTestEmailSending(true);
+    setTestEmailStatus(null);
+    try {
+      const res = await fetch("/api/email/send-transactional", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateType: testTemplateType,
+          recipientEmail: testEmailRecipient,
+          payload: {
+            userName: testEmailRecipient.split("@")[0],
+            name: testEmailRecipient.split("@")[0],
+            planPurchased: "yearly",
+            amountPaid: 499,
+            razorpayPaymentId: "pay_test_" + Math.floor(100000 + Math.random() * 900000),
+            purchaseDate: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+            attemptedPlan: "Pro Annual Plan",
+            orderId: "order_test_999",
+            plan: "Pro Plan",
+            requestDate: new Date().toLocaleDateString("en-US"),
+            amountRefunded: 499,
+            approvedDate: new Date().toLocaleDateString("en-US"),
+            reason: "Request submitted outside 7-day policy.",
+            userEmail: testEmailRecipient,
+            ticketRef: "#TB-" + Math.floor(100000 + Math.random() * 900000),
+            subjectText: "Test Support Inquiry",
+            messageText: "Testing Brevo SMTP email template delivery from TripBalancing Admin Portal."
+          }
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTestEmailStatus(`✅ Email Dispatch Success! (Simulated Mode: ${data.result?.simulated ? "Yes" : "No"}, MessageID: ${data.result?.messageId || "N/A"})`);
+      } else {
+        setTestEmailStatus(`❌ Email Dispatch Error: ${data.error || "Unknown error"}`);
+      }
+    } catch (err: any) {
+      setTestEmailStatus(`❌ Error: ${err.message}`);
+    } finally {
+      setTestEmailSending(false);
+    }
+  };
 
   // Get Auth Header
   const getAuthHeaders = () => {
@@ -265,6 +353,7 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
             { id: "subscriptions", label: "Subscriptions", icon: Crown },
             { id: "tickets", label: "Support Tickets", icon: HelpCircle },
             { id: "refunds", label: "Refund Requests", icon: RefreshCw },
+            { id: "emails", label: "Brevo Email Operations", icon: Mail },
             { id: "security", label: "Security Audit", icon: Server }
           ].map((tab) => {
             const Icon = tab.icon;
@@ -643,6 +732,7 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
                       <th className="p-3.5">Usage Status</th>
                       <th className="p-3.5">7-Day Refund Eligibility</th>
                       <th className="p-3.5">Status</th>
+                      <th className="p-3.5 text-right">Admin Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-850 font-medium text-slate-300">
@@ -667,9 +757,35 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
                           )}
                         </td>
                         <td className="p-3.5">
-                          <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold uppercase">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            r.status === "approved" ? "bg-emerald-500/20 text-emerald-300" :
+                            r.status === "rejected" ? "bg-rose-500/20 text-rose-300" :
+                            "bg-amber-500/20 text-amber-300"
+                          }`}>
                             {r.status || "pending"}
                           </span>
+                        </td>
+                        <td className="p-3.5 text-right">
+                          {r.status === "pending" || !r.status ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                disabled={refActionLoading === r.id}
+                                onClick={() => handleRefundDecision(r, "approve")}
+                                className="px-2.5 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 font-bold text-[10px] rounded-lg cursor-pointer transition-all disabled:opacity-50"
+                              >
+                                Approve & Email
+                              </button>
+                              <button
+                                disabled={refActionLoading === r.id}
+                                onClick={() => handleRefundDecision(r, "reject")}
+                                className="px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 font-bold text-[10px] rounded-lg cursor-pointer transition-all disabled:opacity-50"
+                              >
+                                Reject & Email
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 font-bold uppercase">Decision Recorded</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -677,6 +793,127 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
                 </table>
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB 8: BREVO EMAIL OPERATIONS */}
+        {activeTab === "emails" && (
+          <div className="space-y-6 animate-in fade-in duration-200">
+            {/* Header / Info card */}
+            <div className="p-6 bg-slate-900 border border-slate-800 rounded-3xl space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    <Mail className="w-5 h-5 text-teal-400" />
+                    <span>Brevo SMTP Transactional Email Manager</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Send, test, and audit responsive HTML transactional emails. Configured with From: <strong className="text-teal-300">noreply@tripbalancing.in</strong> & Reply-To: <strong className="text-teal-300">support@tripbalancing.in</strong>.
+                  </p>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 font-extrabold text-[10px] uppercase">
+                  Express Backend Active
+                </span>
+              </div>
+
+              {/* Grid of 7 Templates Status */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {[
+                  { name: "1. Welcome Email", desc: "Triggered after email verification", badge: "Active" },
+                  { name: "2. Payment Success", desc: "Receipt with Razorpay Payment ID", badge: "Active" },
+                  { name: "3. Payment Failed", desc: "Failure details & retry button", badge: "Active" },
+                  { name: "4. Refund Received", desc: "Confirms 7-day review logging", badge: "Active" },
+                  { name: "5. Refund Approved", desc: "Refund ID & 5-7 day timeline", badge: "Active" },
+                  { name: "6. Refund Rejected", desc: "Policy explanation & support link", badge: "Active" },
+                  { name: "7. Support Ticket", desc: "Ref #TB-XXXXXX & confirmation", badge: "Active" }
+                ].map((t, idx) => (
+                  <div key={idx} className="p-3.5 bg-slate-950 border border-slate-850 rounded-2xl space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-slate-200">{t.name}</span>
+                      <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 text-[9px] font-extrabold uppercase rounded">
+                        {t.badge}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-tight">{t.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Live Interactive Email Dispatcher */}
+            <div className="p-6 bg-slate-900 border border-slate-800 rounded-3xl space-y-4">
+              <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-teal-400" />
+                <span>Test Transactional Email Dispatcher</span>
+              </h3>
+
+              <form onSubmit={handleSendTestEmail} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Select Email Template</label>
+                    <select
+                      value={testTemplateType}
+                      onChange={(e) => setTestTemplateType(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-teal-500"
+                    >
+                      <option value="welcome">1. Welcome Email (Email Verified)</option>
+                      <option value="payment_success">2. Payment Success (Razorpay Receipt)</option>
+                      <option value="payment_failed">3. Payment Failed (Retry Guidance)</option>
+                      <option value="refund_received">4. Refund Request Received</option>
+                      <option value="refund_approved">5. Refund Approved (Credit Timeline)</option>
+                      <option value="refund_rejected">6. Refund Rejected (Explanation)</option>
+                      <option value="support_ticket">7. Support Ticket Created (#TB-Ref)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">Recipient Email Address</label>
+                    <input
+                      type="email"
+                      required
+                      value={testEmailRecipient}
+                      onChange={(e) => setTestEmailRecipient(e.target.value)}
+                      placeholder="e.g. user@domain.com"
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-medium text-white placeholder-slate-500 focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  <div className="text-[11px] text-slate-400">
+                    Uses Brevo SMTP relay <code className="text-teal-400">smtp-relay.brevo.com:587</code> via Express backend.
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={testEmailSending}
+                    className="px-5 py-2.5 bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-xs rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {testEmailSending ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                        <span>Dispatching...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Mail className="w-4 h-4" />
+                        <span>Send Test Email Now</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {testEmailStatus && (
+                  <div className={`p-4 rounded-xl border text-xs font-mono ${
+                    testEmailStatus.includes("SUCCESS")
+                      ? "bg-teal-950/60 border-teal-800 text-teal-300"
+                      : "bg-rose-950/60 border-rose-800 text-rose-300"
+                  }`}>
+                    {testEmailStatus}
+                  </div>
+                )}
+              </form>
+            </div>
           </div>
         )}
 

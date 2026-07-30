@@ -7,6 +7,16 @@ import compression from "compression";
 import crypto from "crypto";
 import Razorpay from "razorpay";
 import { createClient } from "@supabase/supabase-js";
+import {
+  sendBrevoEmail,
+  generateWelcomeEmail,
+  generatePaymentSuccessEmail,
+  generatePaymentFailedEmail,
+  generateRefundRequestReceivedEmail,
+  generateRefundApprovedEmail,
+  generateRefundRejectedEmail,
+  generateSupportTicketEmail
+} from "./src/services/emailService";
 
 dotenv.config();
 
@@ -642,11 +652,49 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
             console.warn("[Razorpay Verification] Supabase sync warning:", e);
           }
         }
+
+        // Trigger Transactional Payment Success Email via Brevo SMTP
+        try {
+          const emailData = generatePaymentSuccessEmail({
+            userName: user_email.split("@")[0],
+            planPurchased: planType || "pay_per_trip",
+            amountPaid: paymentRec.amount,
+            razorpayPaymentId: razorpay_payment_id,
+            purchaseDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+          });
+          sendBrevoEmail({
+            to: user_email,
+            subject: emailData.subject,
+            html: emailData.html
+          }).catch(err => console.warn("[Email Service] Payment success email dispatch error:", err));
+        } catch (mailErr) {
+          console.warn("[Email Service] Failed building payment success email:", mailErr);
+        }
       }
 
       return res.json({ status: "success", verified: true, message: "Payment verified successfully" });
     } else {
       console.warn(`[Razorpay API] Signature mismatch for order: ${razorpay_order_id}`);
+      
+      // Trigger Transactional Payment Failed Email if email is present
+      const failedEmail = req.body?.user_email;
+      if (failedEmail) {
+        try {
+          const emailData = generatePaymentFailedEmail({
+            userName: failedEmail.split("@")[0],
+            attemptedPlan: req.body?.planType || "TripBalancing Upgrade",
+            orderId: razorpay_order_id
+          });
+          sendBrevoEmail({
+            to: failedEmail,
+            subject: emailData.subject,
+            html: emailData.html
+          }).catch(err => console.warn("[Email Service] Payment failed email dispatch error:", err));
+        } catch (mailErr) {
+          console.warn("[Email Service] Failed building payment failed email:", mailErr);
+        }
+      }
+
       return res.status(400).json({ status: "failure", verified: false, error: "Invalid payment signature." });
     }
   } catch (error: any) {
@@ -919,6 +967,24 @@ app.post("/api/support-tickets", async (req, res) => {
       }
     }
 
+    // Trigger Transactional Support Ticket Email via Brevo SMTP
+    try {
+      const emailData = generateSupportTicketEmail({
+        userName: contactEmail.split("@")[0],
+        userEmail: contactEmail,
+        ticketRef: ticketRef,
+        subjectText: subject || "Customer Inquiry",
+        messageText: message
+      });
+      sendBrevoEmail({
+        to: contactEmail,
+        subject: emailData.subject,
+        html: emailData.html
+      }).catch(err => console.warn("[Email Service] Support ticket email error:", err));
+    } catch (mailErr) {
+      console.warn("[Email Service] Failed building support ticket email:", mailErr);
+    }
+
     res.json({ success: true, ticketRef });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Failed to log support ticket" });
@@ -969,9 +1035,181 @@ app.post("/api/refund-requests", async (req, res) => {
       }
     }
 
+    // Trigger Transactional Refund Request Received Email via Brevo SMTP
+    try {
+      const emailData = generateRefundRequestReceivedEmail({
+        userName: userEmail.split("@")[0],
+        razorpayPaymentId: paymentId,
+        plan: plan || "Pro Plan",
+        requestDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+      });
+      sendBrevoEmail({
+        to: userEmail,
+        subject: emailData.subject,
+        html: emailData.html
+      }).catch(err => console.warn("[Email Service] Refund request email error:", err));
+    } catch (mailErr) {
+      console.warn("[Email Service] Failed building refund request email:", mailErr);
+    }
+
     res.json({ success: true, refundEligible: isEligible, status: "pending" });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Failed to process refund request" });
+  }
+});
+
+// Dedicated Email API Endpoints
+
+// 1. Welcome Email Endpoint (Sent after email verification)
+app.post("/api/email/welcome", async (req, res) => {
+  try {
+    const { email, name, appUrl } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: "User email is required." });
+    }
+
+    const emailData = generateWelcomeEmail(name || email.split("@")[0], appUrl || "https://tripbalancing.in");
+    const result = await sendBrevoEmail({
+      to: email,
+      subject: emailData.subject,
+      html: emailData.html
+    });
+
+    res.json({ success: true, message: "Welcome email sent successfully", result });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to send welcome email" });
+  }
+});
+
+// Admin Refund Decision Endpoint (Approves or rejects refund and dispatches email)
+app.post("/api/admin/refunds/action", verifyAdminAuth, async (req, res) => {
+  try {
+    const { requestId, action, userEmail, razorpayPaymentId, amount, reason } = req.body;
+    if (!userEmail || !razorpayPaymentId || !action) {
+      return res.status(400).json({ error: "Missing required parameters: userEmail, razorpayPaymentId, and action." });
+    }
+
+    // Update in-memory record
+    const refIdx = IN_MEMORY_REFUND_REQUESTS.findIndex(r => r.id === requestId || r.razorpay_payment_id === razorpayPaymentId);
+    if (refIdx !== -1) {
+      IN_MEMORY_REFUND_REQUESTS[refIdx].status = action === "approve" ? "approved" : "rejected";
+    }
+
+    if (supabaseAdmin) {
+      try {
+        await supabaseAdmin.from("refund_requests").update({ status: action === "approve" ? "approved" : "rejected" }).eq("razorpay_payment_id", razorpayPaymentId);
+      } catch (e) {
+        console.warn("[Admin Refund Action] Supabase update warning:", e);
+      }
+    }
+
+    let emailResult;
+    if (action === "approve") {
+      const emailData = generateRefundApprovedEmail({
+        userName: userEmail.split("@")[0],
+        razorpayPaymentId,
+        amountRefunded: Number(amount) || 499,
+        approvedDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+      });
+      emailResult = await sendBrevoEmail({
+        to: userEmail,
+        subject: emailData.subject,
+        html: emailData.html
+      });
+    } else {
+      const emailData = generateRefundRejectedEmail({
+        userName: userEmail.split("@")[0],
+        razorpayPaymentId,
+        reason: reason || "Request submitted outside our 7-day money-back policy or service already consumed."
+      });
+      emailResult = await sendBrevoEmail({
+        to: userEmail,
+        subject: emailData.subject,
+        html: emailData.html
+      });
+    }
+
+    res.json({ success: true, action, status: action === "approve" ? "approved" : "rejected", emailResult });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to process refund decision action" });
+  }
+});
+
+// Unified Transactional Email Dispatch Endpoint (Backend API)
+app.post("/api/email/send-transactional", async (req, res) => {
+  try {
+    const { templateType, recipientEmail, payload } = req.body;
+    if (!templateType || !recipientEmail) {
+      return res.status(400).json({ error: "templateType and recipientEmail are required." });
+    }
+
+    let emailData: { subject: string; html: string };
+
+    switch (templateType) {
+      case "welcome":
+        emailData = generateWelcomeEmail(payload?.name || recipientEmail.split("@")[0], payload?.appUrl);
+        break;
+      case "payment_success":
+        emailData = generatePaymentSuccessEmail({
+          userName: payload?.userName || recipientEmail.split("@")[0],
+          planPurchased: payload?.planPurchased || "pay_per_trip",
+          amountPaid: Number(payload?.amountPaid) || 499,
+          razorpayPaymentId: payload?.razorpayPaymentId || "pay_mock_12345",
+          purchaseDate: payload?.purchaseDate || new Date().toLocaleDateString("en-US")
+        });
+        break;
+      case "payment_failed":
+        emailData = generatePaymentFailedEmail({
+          userName: payload?.userName || recipientEmail.split("@")[0],
+          attemptedPlan: payload?.attemptedPlan || "Pro Explorer",
+          orderId: payload?.orderId || "order_mock_12345"
+        });
+        break;
+      case "refund_received":
+        emailData = generateRefundRequestReceivedEmail({
+          userName: payload?.userName || recipientEmail.split("@")[0],
+          razorpayPaymentId: payload?.razorpayPaymentId || "pay_mock_12345",
+          plan: payload?.plan || "Pro Plan",
+          requestDate: payload?.requestDate || new Date().toLocaleDateString("en-US")
+        });
+        break;
+      case "refund_approved":
+        emailData = generateRefundApprovedEmail({
+          userName: payload?.userName || recipientEmail.split("@")[0],
+          razorpayPaymentId: payload?.razorpayPaymentId || "pay_mock_12345",
+          amountRefunded: Number(payload?.amountRefunded) || 499,
+          approvedDate: payload?.approvedDate || new Date().toLocaleDateString("en-US")
+        });
+        break;
+      case "refund_rejected":
+        emailData = generateRefundRejectedEmail({
+          userName: payload?.userName || recipientEmail.split("@")[0],
+          razorpayPaymentId: payload?.razorpayPaymentId || "pay_mock_12345",
+          reason: payload?.reason
+        });
+        break;
+      case "support_ticket":
+        emailData = generateSupportTicketEmail({
+          userName: payload?.userName || recipientEmail.split("@")[0],
+          userEmail: recipientEmail,
+          ticketRef: payload?.ticketRef || "#TB-999999",
+          subjectText: payload?.subjectText || "General Inquiry",
+          messageText: payload?.messageText || "Need help with itinerary balancing."
+        });
+        break;
+      default:
+        return res.status(400).json({ error: `Unknown templateType: ${templateType}` });
+    }
+
+    const result = await sendBrevoEmail({
+      to: recipientEmail,
+      subject: emailData.subject,
+      html: emailData.html
+    });
+
+    res.json({ success: true, templateType, recipientEmail, result });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to dispatch transactional email" });
   }
 });
 
