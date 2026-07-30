@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { 
   Compass, Calendar, Users, Briefcase, MapPin, Trash, Eye, Globe2, Search, X, Star, Lock, 
   Pencil, ShieldCheck, Shield, Mail, Check, AlertCircle, LogOut, Luggage, Cloud, ExternalLink, Coins,
-  Tag, MessageSquare, TrendingUp, ArrowUpDown, ChevronDown
+  Tag, MessageSquare, TrendingUp, ArrowUpDown, ChevronDown, Clock
 } from "lucide-react";
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend 
@@ -54,6 +54,34 @@ const CHART_COLORS = [
   "#8b5cf6", // Purple
   "#f43f5e", // Rose
 ];
+
+function getInviterDisplayName(email: string): string {
+  if (!email) return "Travel Companion";
+  const namePart = email.split("@")[0];
+  const formatted = namePart
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+  return formatted.trim() || "Travel Companion";
+}
+
+function formatTimeSent(dateStr?: string): string {
+  if (!dateStr) return "Recently";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "Recently";
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 export default function Dashboard({ 
   trips, 
@@ -459,51 +487,76 @@ export default function Dashboard({
       {incomingInvitations.length > 0 && (
         <div className="space-y-3 animate-in fade-in slide-in-from-top-4 duration-300">
           <div className="flex items-center gap-2">
-            <Mail className="w-5 h-5 text-teal-600 dark:text-teal-400 animate-pulse" />
-            <h3 className="text-sm font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Travel Buddy Invitations ({incomingInvitations.length})</h3>
+            <Mail className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+            <h3 className="text-xs font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              Travel Buddy Invitations ({incomingInvitations.length})
+            </h3>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {incomingInvitations.map((inv) => (
               <div 
                 key={inv.id} 
-                className="p-5 bg-gradient-to-r from-amber-500/5 via-amber-400/5 to-yellow-500/5 dark:from-amber-950/20 dark:via-amber-900/10 dark:to-yellow-950/20 border border-amber-200/40 dark:border-amber-900/30 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm"
+                className="p-3.5 sm:p-4 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-sm hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 transition-all duration-200 hover:-translate-y-0.5 flex flex-col justify-between gap-3 group"
               >
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-black text-amber-650 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/20 px-2 py-0.5 rounded-lg flex items-center gap-1">
-                      {inv.accessType === "write" ? (
-                        <>
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          <span>Collaborator (Read-Write)</span>
-                        </>
-                      ) : (
-                        <>
-                          <Shield className="w-3.5 h-3.5" />
-                          <span>Viewer (Read-Only)</span>
-                        </>
-                      )}
-                    </span>
+                <div className="flex items-start gap-3">
+                  {/* Small Travel Icon */}
+                  <div className="w-9 h-9 rounded-xl bg-teal-500/10 dark:bg-teal-500/20 text-teal-600 dark:text-teal-400 flex items-center justify-center flex-shrink-0 border border-teal-500/20 mt-0.5">
+                    <Compass className="w-4 h-4 animate-spin-slow" />
                   </div>
-                  
-                  <h4 className="text-sm font-extrabold text-slate-800 dark:text-slate-200">
-                    Invitation to explore <span className="text-teal-600 dark:text-teal-400 font-black">{inv.tripDetails?.destination || "a trip"}</span>
-                  </h4>
-                  
-                  <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
-                    Sent by <span className="font-bold text-slate-650 dark:text-slate-350">{inv.senderEmail}</span> 
-                    {inv.tripDetails?.startDate && (
-                      <span> for dates: {inv.tripDetails.startDate} to {inv.tripDetails.endDate}</span>
-                    )}
-                  </p>
+
+                  {/* Main Details */}
+                  <div className="flex-1 min-w-0 space-y-1">
+                    {/* Header Row: Inviter Display Name + Badge */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 min-w-0 truncate">
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
+                          {getInviterDisplayName(inv.senderEmail)}
+                        </span>
+                        <span className="text-[11px] text-slate-400 dark:text-slate-500 font-normal truncate">
+                          ({inv.senderEmail})
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {inv.accessType === "write" ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-500/20">
+                            <ShieldCheck className="w-3 h-3" />
+                            Editor
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                            <Shield className="w-3 h-3" />
+                            Viewer
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Trip Name and Time Sent */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                      <h4 className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1 min-w-0 truncate">
+                        <MapPin className="w-3.5 h-3.5 text-teal-500 flex-shrink-0" />
+                        <span className="truncate">
+                          Trip: <span className="text-teal-600 dark:text-teal-400 font-extrabold">{inv.tripDetails?.destination || "Shared Travel Plan"}</span>
+                        </span>
+                      </h4>
+
+                      <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 flex items-center gap-1 flex-shrink-0">
+                        <Clock className="w-3 h-3" />
+                        {formatTimeSent(inv.createdAt)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                
-                <div className="flex items-center gap-2.5 self-end md:self-center">
+
+                {/* Bottom-right Action Buttons */}
+                <div className="flex items-center gap-2 justify-end pt-2 border-t border-slate-100 dark:border-slate-800/60">
                   <button
                     id={`decline-invite-btn-${inv.id}`}
                     disabled={processingInvId === inv.id}
                     onClick={() => handleDeclineInvite(inv.id)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-rose-50 dark:bg-slate-850 dark:hover:bg-rose-950/20 text-slate-600 hover:text-rose-650 dark:text-slate-300 dark:hover:text-rose-400 text-xs font-extrabold rounded-xl cursor-pointer transition-colors disabled:opacity-50"
+                    className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 bg-transparent hover:bg-rose-50 dark:hover:bg-rose-950/20 text-slate-600 hover:text-rose-600 dark:text-slate-300 dark:hover:text-rose-400 text-xs font-bold rounded-xl cursor-pointer transition-all active:scale-95 disabled:opacity-50"
                   >
                     Decline
                   </button>
@@ -511,7 +564,7 @@ export default function Dashboard({
                     id={`accept-invite-btn-${inv.id}`}
                     disabled={processingInvId === inv.id}
                     onClick={() => handleAcceptInvite(inv.id, inv.tripDetails?.destination)}
-                    className="px-4.5 py-2.5 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 text-white text-xs font-black rounded-xl cursor-pointer transition-all shadow-sm shadow-teal-500/10 active:scale-95 flex items-center gap-1 disabled:opacity-50"
+                    className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-extrabold rounded-xl cursor-pointer transition-all shadow-sm shadow-teal-500/10 active:scale-95 flex items-center gap-1.5 disabled:opacity-50"
                   >
                     {processingInvId === inv.id ? (
                       <span className="animate-spin text-xs">⌛</span>
