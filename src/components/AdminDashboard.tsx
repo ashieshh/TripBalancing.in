@@ -347,7 +347,7 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
         {/* Navigation Tabs */}
         <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-850 scrollbar-none">
           {[
-            { id: "overview", label: "Overview", icon: Activity },
+            { id: "overview", label: "Overview", icon: Activity || Server },
             { id: "users", label: "Users", icon: Users },
             { id: "payments", label: "Payments", icon: CreditCard },
             { id: "subscriptions", label: "Subscriptions", icon: Crown },
@@ -356,7 +356,7 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
             { id: "emails", label: "Brevo Email Operations", icon: Mail },
             { id: "security", label: "Security Audit", icon: Server }
           ].map((tab) => {
-            const Icon = tab.icon;
+            const Icon = tab.icon || Server;
             const isActive = activeTab === tab.id;
             return (
               <button
@@ -448,7 +448,7 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
             {/* Quick Status Bar */}
             <div className="p-6 bg-slate-900 border border-slate-800 rounded-3xl space-y-4">
               <h3 className="text-sm font-extrabold text-white flex items-center gap-2">
-                <Activity className="w-4 h-4 text-teal-400" />
+                {React.createElement(Activity || Server, { className: "w-4 h-4 text-teal-400" })}
                 <span>System Operational Status</span>
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">

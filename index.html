@@ -83,17 +83,29 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="preload" href="/logo.svg" as="image" type="image/svg+xml" />
+    <script>
+      window.addEventListener('error', function(e) {
+        var spinner = document.getElementById('pwa-splash-spinner');
+        var errBox = document.getElementById('pwa-splash-error');
+        if (spinner) spinner.style.display = 'none';
+        if (errBox) {
+          errBox.style.display = 'block';
+          errBox.innerHTML = '<strong>App Launch Error:</strong> ' + (e.message || 'An unexpected error occurred during startup.') + '<br/><button onclick="window.location.reload()" style="margin-top: 12px; padding: 8px 18px; background-color: #14b8a6; color: #0f172a; border: none; border-radius: 8px; font-weight: 800; cursor: pointer;">Reload Application</button>';
+        }
+      });
+    </script>
   </head>
   <body>
     <div id="root">
       <!-- PWA Instant App Shell Splash Screen -->
-      <div style="position: fixed; inset: 0; background-color: #0f172a; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 99999; font-family: system-ui, -apple-system, sans-serif;">
+      <div id="pwa-splash" style="position: fixed; inset: 0; background-color: #0f172a; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 99999; font-family: system-ui, -apple-system, sans-serif;">
         <div style="width: 88px; height: 88px; background: rgba(13, 148, 136, 0.15); border: 1.5px solid rgba(20, 184, 166, 0.3); border-radius: 24px; display: flex; align-items: center; justify-content: center; margin-bottom: 20px; box-shadow: 0 12px 30px -5px rgba(0,0,0,0.5);">
           <img src="/logo.svg" alt="TripBalancing Logo" style="width: 56px; height: 56px;" />
         </div>
         <div style="font-size: 22px; font-weight: 900; color: #ffffff; letter-spacing: -0.02em; margin-bottom: 6px;">TripBalancing</div>
         <div style="font-size: 12px; font-weight: 700; color: #14b8a6; text-transform: uppercase; letter-spacing: 0.12em;">AI Travel & Budget Optimizer</div>
-        <div style="margin-top: 32px; width: 32px; height: 32px; border: 3px solid rgba(20,184,166,0.2); border-top-color: #14b8a6; border-radius: 50%; animation: pwa-splash-spin 0.8s linear infinite;"></div>
+        <div id="pwa-splash-spinner" style="margin-top: 32px; width: 32px; height: 32px; border: 3px solid rgba(20,184,166,0.2); border-top-color: #14b8a6; border-radius: 50%; animation: pwa-splash-spin 0.8s linear infinite;"></div>
+        <div id="pwa-splash-error" style="display: none; margin-top: 24px; padding: 14px 20px; background-color: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 12px; color: #f87171; font-size: 13px; font-weight: 600; text-align: center; max-width: 90%;"></div>
         <style>
           @keyframes pwa-splash-spin { to { transform: rotate(360deg); } }
         </style>
