@@ -1,0 +1,6 @@
+# TripBalancing Robots.txt
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://tripbalancing.app/sitemap.xml
