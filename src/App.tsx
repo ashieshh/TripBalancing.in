@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { 
   Globe, LogOut, ArrowLeft, Sparkles, Database, WifiOff, MapPin, 
   ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users
@@ -7,15 +7,24 @@ import { TripBalancingLogo } from "./components/TripBalancingLogo";
 import { Itinerary, TripInput, TripRecord } from "./types";
 import { db, isRealSupabaseConfigured } from "./lib/supabase";
 import TripForm from "./components/TripForm";
-import ItineraryView from "./components/ItineraryView";
-import Dashboard from "./components/Dashboard";
-import AuthModal from "./components/AuthModal";
 import ThemeToggle from "./components/ThemeToggle";
-import PremiumUpgradeModal from "./components/PremiumUpgradeModal";
-import BuddyInviteModal from "./components/BuddyInviteModal";
-import GoogleContactsModal from "./components/GoogleContactsModal";
-import LegalAndSupportModal, { LegalTab } from "./components/LegalAndSupportModal";
+import type { LegalTab } from "./components/LegalAndSupportModal";
 import { BuddyInvitation } from "./types";
+
+const ItineraryView = lazy(() => import("./components/ItineraryView"));
+const Dashboard = lazy(() => import("./components/Dashboard"));
+const AuthModal = lazy(() => import("./components/AuthModal"));
+const PremiumUpgradeModal = lazy(() => import("./components/PremiumUpgradeModal"));
+const BuddyInviteModal = lazy(() => import("./components/BuddyInviteModal"));
+const GoogleContactsModal = lazy(() => import("./components/GoogleContactsModal"));
+const LegalAndSupportModal = lazy(() => import("./components/LegalAndSupportModal"));
+
+const SuspenseFallback = () => (
+  <div className="flex items-center justify-center p-8 space-x-2 text-teal-600 dark:text-teal-400 min-h-[120px]">
+    <TripBalancingLogo className="w-6 h-6" spin />
+    <span className="text-xs font-bold text-slate-400">Loading...</span>
+  </div>
+);
 
 export default function App() {
   // Initialize theme choice on initial load
@@ -675,7 +684,9 @@ export default function App() {
 
           {/* Login Form */}
           <div className="md:col-span-5">
-            <AuthModal onSuccess={handleAuthSuccess} />
+            <Suspense fallback={<SuspenseFallback />}>
+              <AuthModal onSuccess={handleAuthSuccess} />
+            </Suspense>
           </div>
         </div>
       </div>
@@ -818,19 +829,21 @@ export default function App() {
               Back to Travel Hub
             </button>
 
-            <ItineraryView 
-              itinerary={activeItinerary} 
-              onSave={handleSaveTrip}
-              isSaving={saving}
-              isSaved={isCurrentlySaved}
-              onDelete={activeTripId ? () => handleDeleteTrip(activeTripId) : undefined}
-              isDeleting={deletingId === activeTripId}
-              tripId={activeTripId}
-              onUpdateNotesAndRating={handleUpdateTripNotesAndRating}
-              onUpdateItinerary={handleUpdateItinerary}
-              isReadOnly={activeTripIsReadOnly}
-              onInviteBuddy={() => setShowBuddyInviteModal(true)}
-            />
+            <Suspense fallback={<SuspenseFallback />}>
+              <ItineraryView 
+                itinerary={activeItinerary} 
+                onSave={handleSaveTrip}
+                isSaving={saving}
+                isSaved={isCurrentlySaved}
+                onDelete={activeTripId ? () => handleDeleteTrip(activeTripId) : undefined}
+                isDeleting={deletingId === activeTripId}
+                tripId={activeTripId}
+                onUpdateNotesAndRating={handleUpdateTripNotesAndRating}
+                onUpdateItinerary={handleUpdateItinerary}
+                isReadOnly={activeTripIsReadOnly}
+                onInviteBuddy={() => setShowBuddyInviteModal(true)}
+              />
+            </Suspense>
           </div>
         )}
 
@@ -981,26 +994,28 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                <Dashboard 
-                  trips={trips} 
-                  sharedTrips={sharedTrips}
-                  acceptedInvitations={acceptedInvitations}
-                  incomingInvitations={incomingInvitations}
-                  onAcceptInvitation={handleAcceptInvitation}
-                  onDeclineInvitation={handleDeclineInvitation}
-                  onSelectTrip={(trip, isReadOnly = false) => {
-                    setActiveItinerary(trip.itinerary);
-                    setActiveTripId(trip.id);
-                    setActiveTripIsReadOnly(isReadOnly);
-                  }} 
-                  onDeleteTrip={handleDeleteTrip}
-                  isDeleting={deletingId}
-                  onUpdateNotesAndRating={handleUpdateTripNotesAndRating}
-                  plan={plan}
-                  freeTripsUsed={freeTripsUsed}
-                  paidTripsBalance={paidTripsBalance}
-                  onUpgradeClick={() => setShowPremiumModal(true)}
-                />
+                <Suspense fallback={<SuspenseFallback />}>
+                  <Dashboard 
+                    trips={trips} 
+                    sharedTrips={sharedTrips}
+                    acceptedInvitations={acceptedInvitations}
+                    incomingInvitations={incomingInvitations}
+                    onAcceptInvitation={handleAcceptInvitation}
+                    onDeclineInvitation={handleDeclineInvitation}
+                    onSelectTrip={(trip, isReadOnly = false) => {
+                      setActiveItinerary(trip.itinerary);
+                      setActiveTripId(trip.id);
+                      setActiveTripIsReadOnly(isReadOnly);
+                    }} 
+                    onDeleteTrip={handleDeleteTrip}
+                    isDeleting={deletingId}
+                    onUpdateNotesAndRating={handleUpdateTripNotesAndRating}
+                    plan={plan}
+                    freeTripsUsed={freeTripsUsed}
+                    paidTripsBalance={paidTripsBalance}
+                    onUpgradeClick={() => setShowPremiumModal(true)}
+                  />
+                </Suspense>
               )}
             </div>
 
@@ -1058,37 +1073,39 @@ export default function App() {
         </div>
       </footer>
 
-      <PremiumUpgradeModal 
-        isOpen={showPremiumModal}
-        onClose={() => setShowPremiumModal(false)}
-        onUpgradeSuccess={handleUpgradeSuccess}
-        userEmail={user?.email || "guest@tripbalancing.com"}
-        currentPlan={plan}
-        remainingFreeTrips={Math.max(0, 2 - freeTripsUsed)}
-        paidTripsBalance={paidTripsBalance}
-        onOpenLegalPage={handleOpenLegalModal}
-      />
+      <Suspense fallback={null}>
+        <PremiumUpgradeModal 
+          isOpen={showPremiumModal}
+          onClose={() => setShowPremiumModal(false)}
+          onUpgradeSuccess={handleUpgradeSuccess}
+          userEmail={user?.email || "guest@tripbalancing.com"}
+          currentPlan={plan}
+          remainingFreeTrips={Math.max(0, 2 - freeTripsUsed)}
+          paidTripsBalance={paidTripsBalance}
+          onOpenLegalPage={handleOpenLegalModal}
+        />
 
-      <LegalAndSupportModal
-        isOpen={showLegalModal}
-        onClose={() => setShowLegalModal(false)}
-        defaultTab={legalTab}
-        userEmail={user?.email || ""}
-      />
+        <LegalAndSupportModal
+          isOpen={showLegalModal}
+          onClose={() => setShowLegalModal(false)}
+          defaultTab={legalTab}
+          userEmail={user?.email || ""}
+        />
 
-      <BuddyInviteModal 
-        isOpen={showBuddyInviteModal}
-        onClose={() => setShowBuddyInviteModal(false)}
-        tripId={activeTripId}
-        tripDestination={activeItinerary?.destination || ""}
-        userEmail={user?.email || ""}
-      />
+        <BuddyInviteModal 
+          isOpen={showBuddyInviteModal}
+          onClose={() => setShowBuddyInviteModal(false)}
+          tripId={activeTripId}
+          tripDestination={activeItinerary?.destination || ""}
+          userEmail={user?.email || ""}
+        />
 
-      <GoogleContactsModal
-        isOpen={showGoogleContactsModal}
-        onClose={() => setShowGoogleContactsModal(false)}
-        tripDestination={activeItinerary?.destination || ""}
-      />
+        <GoogleContactsModal
+          isOpen={showGoogleContactsModal}
+          onClose={() => setShowGoogleContactsModal(false)}
+          tripDestination={activeItinerary?.destination || ""}
+        />
+      </Suspense>
 
     </div>
   );
