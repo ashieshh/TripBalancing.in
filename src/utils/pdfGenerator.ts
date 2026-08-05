@@ -946,11 +946,20 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
   // planned budget.
   const daysData = itinerary.days || [];
   const totalDays = daysData.length || 1;
-  const targetDailyRequirement = calculatedTotal > 0
-    ? Math.round(calculatedTotal / totalDays)
-    : 0;
 
-  daysData.forEach((day: any) => {
+  // Reconcile daily totals to the same realistic estimate used by the financial
+  // planner. Existing AI daily budgets are used only as relative weights; they
+  // are normalized so the sum of every day equals the grand total exactly.
+  const dailyWeights = daysData.map((day: any) => {
+    const activities = Array.isArray(day.activities) ? day.activities : [];
+    const activitySubtotal = activities.reduce((sum: number, act: any) => sum + parseVal(act.cost), 0);
+    const aiRequirement = parseVal(day.dailyBudget);
+    return Math.max(aiRequirement, activitySubtotal, 1);
+  });
+  const totalWeight = dailyWeights.reduce((sum: number, value: number) => sum + value, 0) || totalDays;
+  let allocatedSoFar = 0;
+
+  daysData.forEach((day: any, dayIndex: number) => {
     const activities = Array.isArray(day.activities) ? day.activities : [];
     activities.forEach((act: any) => {
       if (act.location) act.location = sanitizeLocation(act.location);
@@ -963,11 +972,23 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
       }
     });
 
-    const daySpend = activities.reduce((sum: number, act: any) => sum + parseVal(act.cost), 0);
-    const existingRequirement = parseVal(day.dailyBudget);
-    const dayRequirement = Math.max(existingRequirement, daySpend, targetDailyRequirement);
-    day.dailyBudget = currencySym + Math.round(dayRequirement).toLocaleString();
+    const activitySubtotal = activities.reduce((sum: number, act: any) => sum + parseVal(act.cost), 0);
+    const isLastDay = dayIndex === daysData.length - 1;
+    const allocatedDayTotal = calculatedTotal > 0
+      ? (isLastDay
+          ? Math.max(0, calculatedTotal - allocatedSoFar)
+          : Math.round((calculatedTotal * dailyWeights[dayIndex]) / totalWeight))
+      : activitySubtotal;
+
+    allocatedSoFar += allocatedDayTotal;
+    day.dailyBudget = currencySym + allocatedDayTotal.toLocaleString();
+    day.estimatedTotalSpend = currencySym + allocatedDayTotal.toLocaleString();
+    day.activitySubtotal = currencySym + activitySubtotal.toLocaleString();
   });
+
+  const plannedBudgetValue = parseVal((itinerary as any).plannedBudget || itinerary.budgetAmount);
+  const shortfall = Math.max(0, calculatedTotal - plannedBudgetValue);
+  (itinerary as any).budgetShortfall = fmt(shortfall);
 
   return itinerary;
 };
@@ -1853,19 +1874,16 @@ export const exportPremiumTravelPDF = async (
       }
 
       // Pre-calculate daily financial calculations to ensure complete consistency!
-      const spendNum = day.activities.reduce((sum, act) => sum + parseVal(act.cost), 0);
+      const activitySubtotalNum = day.activities.reduce((sum, act) => sum + parseVal(act.cost), 0);
       let budgetNum = parseVal(day.dailyBudget);
-      if (budgetNum > 0 && budgetNum < spendNum) {
-        // Dynamically adjust daily budget to comfortably cover estimated spending, rounding up to nearest 500
-        budgetNum = Math.ceil((spendNum * 1.20) / 500) * 500;
-      } else if (budgetNum === 0) {
-        budgetNum = Math.ceil(((spendNum || 1500) * 1.20) / 500) * 500;
-      }
+      const estimatedTotalSpendNum = parseVal((day as any).estimatedTotalSpend) || budgetNum || activitySubtotalNum;
+      if (budgetNum === 0) budgetNum = estimatedTotalSpendNum;
 
       const displayBudget = currencySym + budgetNum.toLocaleString();
-      const displaySpend = currencySym + spendNum.toLocaleString();
-      const remainingNum = Math.max(0, budgetNum - spendNum);
+      const displaySpend = currencySym + estimatedTotalSpendNum.toLocaleString();
+      const remainingNum = Math.max(0, budgetNum - estimatedTotalSpendNum);
       const displayRemaining = currencySym + remainingNum.toLocaleString();
+      const spendNum = estimatedTotalSpendNum;
 
       // Day Header Banner
       drawPremiumCard(doc, marginX, y, 180, 10, 1.5, 1.5, [13, 148, 136], [240, 253, 250]);
@@ -2144,7 +2162,7 @@ export const exportPremiumTravelPDF = async (
       doc.setFont("helvetica", "bold");
       doc.setFontSize(6.5);
       doc.setTextColor(100, 116, 139);
-      doc.text("ESTIMATED SPEND", marginX + 72, y + 5.2);
+      doc.text("EST. TOTAL DAY COST", marginX + 72, y + 5.2);
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
@@ -2162,7 +2180,7 @@ export const exportPremiumTravelPDF = async (
       doc.setFont("helvetica", "bold");
       doc.setFontSize(6.5);
       doc.setTextColor(100, 116, 139);
-      doc.text("REMAINING", marginX + 131, y + 5.2);
+      doc.text("VARIANCE RESERVE", marginX + 131, y + 5.2);
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
@@ -2190,7 +2208,7 @@ export const exportPremiumTravelPDF = async (
       doc.setFont("helvetica", "bold");
       doc.setFontSize(6);
       doc.setTextColor(100, 116, 139);
-      doc.text(`Budget Utilization: ${Math.round(spendPercent)}% of allocation used`, marginX + 8, y + 21);
+      doc.text(`Daily total includes accommodation, meals, transport, activities and allocated trip overhead.`, marginX + 8, y + 21);
 
       y += 28;
     });

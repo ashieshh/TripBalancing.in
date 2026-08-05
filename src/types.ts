@@ -35,6 +35,8 @@ export interface DayItinerary {
   foodRecommendations?: string[];
   transportationSuggestions?: string[];
   dailyBudget?: string;
+  estimatedTotalSpend?: string;
+  activitySubtotal?: string;
 }
 
 export interface BudgetBreakdown {
