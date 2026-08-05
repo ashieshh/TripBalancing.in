@@ -10,10 +10,10 @@ import {
 import { TripRecord, BuddyInvitation } from "../types";
 
 // Lazy load heavy components to reduce initial bundle size and speed up page load
-const WorldMap = lazy(() => import("./WorldMap"));
-const GlobalPackingChecklist = lazy(() => import("./GlobalPackingChecklist"));
-const CurrencyConverter = lazy(() => import("./CurrencyConverter"));
-const TravelBuddyInvitationsSection = lazy(() => import("./TravelBuddyInvitationsSection"));
+import WorldMap from "./WorldMap";
+import GlobalPackingChecklist from "./GlobalPackingChecklist";
+import CurrencyConverter from "./CurrencyConverter";
+import TravelBuddyInvitationsSection from "./TravelBuddyInvitationsSection";
 
 interface DashboardProps {
   trips: TripRecord[];

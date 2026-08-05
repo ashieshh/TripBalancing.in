@@ -878,50 +878,83 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
   const itinerary = sanitizeItineraryText(rawItinerary);
   const totalBudgetNum = parseVal(itinerary.budgetAmount);
 
-  // 1. Strict mathematical validation on Category Breakdown
-  if (itinerary.estimatedBudgetBreakdown && totalBudgetNum > 0) {
-    const b = itinerary.estimatedBudgetBreakdown;
-    const accVal = parseVal(b.accommodation);
-    const fdVal = parseVal(b.food);
-    const actVal = parseVal(b.activities);
-    const trVal = parseVal(b.transport);
-    const miscVal = parseVal(b.miscellaneous || "0");
-    const sumCategories = accVal + fdVal + actVal + trVal + miscVal;
-    
-    if (sumCategories > 0 && Math.abs(sumCategories - totalBudgetNum) > 10) {
-      const ratio = totalBudgetNum / sumCategories;
-      b.accommodation = currencySym + Math.round(accVal * ratio).toLocaleString();
-      b.food = currencySym + Math.round(fdVal * ratio).toLocaleString();
-      b.activities = currencySym + Math.round(actVal * ratio).toLocaleString();
-      b.transport = currencySym + Math.round(trVal * ratio).toLocaleString();
-      if (b.miscellaneous) {
-        b.miscellaneous = currencySym + Math.round(miscVal * ratio).toLocaleString();
-      }
-      b.total = currencySym + totalBudgetNum.toLocaleString();
-    }
-  }
+  // Synchronize and scale both estimatedBudgetBreakdown and detailedBudgetSummary
+  if (totalBudgetNum > 0) {
+    const b = itinerary.estimatedBudgetBreakdown || ({} as any);
+    const d = itinerary.detailedBudgetSummary || ({} as any);
+    const hasOrigin = Boolean(itinerary.origin && itinerary.origin.trim() !== "");
 
-  // 2. Strict mathematical validation on Detailed Budget Summary
-  if (itinerary.detailedBudgetSummary && totalBudgetNum > 0) {
-    const d = itinerary.detailedBudgetSummary;
-    const accVal = parseVal(d.accommodationTotal);
-    const fdVal = parseVal(d.foodTotal);
-    const trVal = parseVal(d.localTransportTotal);
-    const actVal = parseVal(d.attractionTotal);
-    const miscVal = parseVal(d.miscellaneousExpenses || "0");
-    const sumCategories = accVal + fdVal + trVal + actVal + miscVal;
+    // Extract raw category values from either breakdown or detailed summary
+    let rawAcc = parseVal(b.accommodation) || parseVal(d.accommodationTotal) || 0;
+    let rawFood = parseVal(b.food) || parseVal(d.foodTotal) || 0;
+    let rawAct = parseVal(b.activities) || parseVal(d.attractionTotal) || 0;
+    let rawTrans = parseVal(b.transport) || parseVal(d.localTransportTotal) || 0;
+    let rawMisc = parseVal(b.miscellaneous) || parseVal(d.miscellaneousExpenses) || 0;
+    let rawTransit = hasOrigin ? (parseVal(b.originToDestinationTravel) || parseVal(d.originToDestinationCost) || 0) : 0;
 
-    if (sumCategories > 0 && Math.abs(sumCategories - totalBudgetNum) > 10) {
-      const ratio = totalBudgetNum / sumCategories;
-      d.accommodationTotal = currencySym + Math.round(accVal * ratio).toLocaleString();
-      d.foodTotal = currencySym + Math.round(fdVal * ratio).toLocaleString();
-      d.localTransportTotal = currencySym + Math.round(trVal * ratio).toLocaleString();
-      d.attractionTotal = currencySym + Math.round(actVal * ratio).toLocaleString();
-      if (d.miscellaneousExpenses) {
-        d.miscellaneousExpenses = currencySym + Math.round(miscVal * ratio).toLocaleString();
+    let sumRaw = rawAcc + rawFood + rawAct + rawTrans + rawMisc + rawTransit;
+
+    if (sumRaw <= 0) {
+      if (hasOrigin) {
+        rawAcc = totalBudgetNum * 0.35;
+        rawFood = totalBudgetNum * 0.20;
+        rawAct = totalBudgetNum * 0.15;
+        rawTrans = totalBudgetNum * 0.12;
+        rawTransit = totalBudgetNum * 0.13;
+        rawMisc = totalBudgetNum * 0.05;
+      } else {
+        rawAcc = totalBudgetNum * 0.40;
+        rawFood = totalBudgetNum * 0.25;
+        rawAct = totalBudgetNum * 0.15;
+        rawTrans = totalBudgetNum * 0.15;
+        rawMisc = totalBudgetNum * 0.05;
       }
-      d.grandTotal = currencySym + totalBudgetNum.toLocaleString();
+      sumRaw = totalBudgetNum;
     }
+
+    // Proportional scaling factor
+    const ratio = totalBudgetNum / sumRaw;
+
+    let scaledAcc = Math.round(rawAcc * ratio);
+    let scaledFood = Math.round(rawFood * ratio);
+    let scaledAct = Math.round(rawAct * ratio);
+    let scaledTrans = Math.round(rawTrans * ratio);
+    let scaledMisc = rawMisc > 0 ? Math.round(rawMisc * ratio) : 0;
+    let scaledTransit = (hasOrigin && rawTransit > 0) ? Math.round(rawTransit * ratio) : 0;
+
+    // Adjust integer rounding delta so category sum equals totalBudgetNum EXACTLY
+    const scaledSum = scaledAcc + scaledFood + scaledAct + scaledTrans + scaledMisc + scaledTransit;
+    const diff = totalBudgetNum - scaledSum;
+
+    if (diff !== 0) {
+      const maxVal = Math.max(scaledAcc, scaledFood, scaledAct, scaledTrans);
+      if (maxVal === scaledAcc) scaledAcc += diff;
+      else if (maxVal === scaledFood) scaledFood += diff;
+      else if (maxVal === scaledAct) scaledAct += diff;
+      else scaledTrans += diff;
+    }
+
+    const formattedTotal = currencySym + totalBudgetNum.toLocaleString();
+
+    itinerary.estimatedBudgetBreakdown = {
+      accommodation: currencySym + scaledAcc.toLocaleString(),
+      food: currencySym + scaledFood.toLocaleString(),
+      activities: currencySym + scaledAct.toLocaleString(),
+      transport: currencySym + scaledTrans.toLocaleString(),
+      total: formattedTotal,
+      ...(scaledMisc > 0 ? { miscellaneous: currencySym + scaledMisc.toLocaleString() } : {}),
+      ...(scaledTransit > 0 ? { originToDestinationTravel: currencySym + scaledTransit.toLocaleString() } : { originToDestinationTravel: "N/A" })
+    };
+
+    itinerary.detailedBudgetSummary = {
+      accommodationTotal: currencySym + scaledAcc.toLocaleString(),
+      foodTotal: currencySym + scaledFood.toLocaleString(),
+      attractionTotal: currencySym + scaledAct.toLocaleString(),
+      localTransportTotal: currencySym + scaledTrans.toLocaleString(),
+      grandTotal: formattedTotal,
+      miscellaneousExpenses: scaledMisc > 0 ? (currencySym + scaledMisc.toLocaleString()) : "N/A",
+      originToDestinationCost: scaledTransit > 0 ? (currencySym + scaledTransit.toLocaleString()) : "N/A"
+    };
   }
 
   // 3. Constrain location and hotel names to max 40 chars
@@ -2373,19 +2406,39 @@ export const exportPremiumTravelPDF = async (
     doc.text("Bespoke Cost Allocation Dashboard", marginX, y);
     y += 8;
 
-    // Numerical breakdowns for Donut Chart
+    // Numerical breakdowns for Donut Chart & Stat Cards
     const accommVal = parseVal(b.accommodation);
     const foodVal = parseVal(b.food);
     const actVal = parseVal(b.activities);
-    const transVal = parseVal(b.transport);
+    const localTransVal = parseVal(b.transport);
+    const miscVal = parseVal(b.miscellaneous || "0");
+    const transitVal = parseVal(b.originToDestinationTravel || "0");
+
+    // For the 4 main dashboard stat cards, group local transport, origin transit, and misc under TRANSIT & TOURS so 4 cards represent 100% of budget
+    const transVal = localTransVal + transitVal + miscVal;
     const totalVal = accommVal + foodVal + actVal + transVal || 1;
 
-    const percentages = [
+    // Calculate percentage allocations for the 4 stat cards
+    const rawPcts = [
       (accommVal / totalVal) * 100,
       (foodVal / totalVal) * 100,
       (actVal / totalVal) * 100,
       (transVal / totalVal) * 100
     ];
+
+    let r1 = Math.round(rawPcts[0]);
+    let r2 = Math.round(rawPcts[1]);
+    let r3 = Math.round(rawPcts[2]);
+    let r4 = Math.round(rawPcts[3]);
+    const pctSum = r1 + r2 + r3 + r4;
+    if (pctSum !== 100 && pctSum > 0) {
+      const maxPct = Math.max(r1, r2, r3, r4);
+      if (maxPct === r1) r1 += (100 - pctSum);
+      else if (maxPct === r2) r2 += (100 - pctSum);
+      else if (maxPct === r3) r3 += (100 - pctSum);
+      else r4 += (100 - pctSum);
+    }
+    const percentages = [r1, r2, r3, r4];
 
     // Left Column: Donut Chart (Enlarged)
     const cx = 52;
@@ -2446,7 +2499,7 @@ export const exportPremiumTravelPDF = async (
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7.5);
       doc.setTextColor(71, 85, 105);
-      doc.text(`${item.name}: ${Math.round(item.pct)}%`, lx + 6, lY);
+      doc.text(`${item.name}: ${item.pct}%`, lx + 6, lY);
     });
 
     // Right Column: Progress Bars & Stats Card with Icons
@@ -2456,7 +2509,7 @@ export const exportPremiumTravelPDF = async (
       { name: "ACCOMMODATION", val: b.accommodation, pct: percentages[0], color: [13, 148, 136], icon: "hotel" },
       { name: "MEALS & FOOD", val: b.food, pct: percentages[1], color: [217, 119, 6], icon: "clock" },
       { name: "ACTIVITIES", val: b.activities, pct: percentages[2], color: [79, 70, 229], icon: "calendar" },
-      { name: "TRANSIT & TOURS", val: b.transport, pct: percentages[3], color: [2, 132, 199], icon: "mapPin" }
+      { name: "TRANSIT & TOURS", val: currencySym + transVal.toLocaleString(), pct: percentages[3], color: [2, 132, 199], icon: "mapPin" }
     ];
 
     statCards.forEach((sc) => {
@@ -2481,7 +2534,7 @@ export const exportPremiumTravelPDF = async (
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7.5);
       doc.setTextColor(sc.color[0], sc.color[1], sc.color[2]);
-      doc.text(`${Math.round(sc.pct)}%`, rx + 91, cardY + 4.5, { align: "right" });
+      doc.text(`${sc.pct}%`, rx + 91, cardY + 4.5, { align: "right" });
 
       // Progress bar track (indented for icon)
       const barX = rx + 48;
@@ -2506,15 +2559,27 @@ export const exportPremiumTravelPDF = async (
       foodTotal: b.food || (currencySym + "8,000"),
       localTransportTotal: b.transport || (currencySym + "3,500"),
       attractionTotal: b.activities || (currencySym + "2,000"),
+      miscellaneousExpenses: b.miscellaneous || "N/A",
       originToDestinationCost: b.originToDestinationTravel || (itinerary.origin ? (currencySym + "6,000 - " + currencySym + "12,000") : "N/A"),
       grandTotal: b.total || (currencySym + "30,000")
     };
 
-    const hasTransitCost = itinerary.origin && invoiceData.originToDestinationCost && invoiceData.originToDestinationCost !== "N/A";
-    const tableHeight = hasTransitCost ? 37 : 32;
+    const hasTransitCost = itinerary.origin && invoiceData.originToDestinationCost && invoiceData.originToDestinationCost !== "N/A" && parseVal(invoiceData.originToDestinationCost) > 0;
+    const hasMiscCost = invoiceData.miscellaneousExpenses && invoiceData.miscellaneousExpenses !== "N/A" && parseVal(invoiceData.miscellaneousExpenses) > 0;
+
+    const categories = [
+      { label: "Accommodations Cumulative Ratios", val: invoiceData.accommodationTotal },
+      { label: "Food & Dining Allowances", val: invoiceData.foodTotal },
+      { label: "Transit & Vehicle Rentals", val: invoiceData.localTransportTotal },
+      { label: "Attraction Entry Portals", val: invoiceData.attractionTotal },
+      ...(hasTransitCost ? [{ label: `Travel Transit from ${itinerary.origin}`, val: invoiceData.originToDestinationCost }] : []),
+      ...(hasMiscCost ? [{ label: "Miscellaneous & Contingency", val: invoiceData.miscellaneousExpenses }] : [])
+    ];
+
+    const tableHeight = 12 + (categories.length * 4.8);
 
     // Consolidated Invoicing details table
-    checkPageEnd(42);
+    checkPageEnd(tableHeight + 10);
     // Draw table background - dynamically adjusted height
     drawPremiumCard(doc, marginX, y, 180, tableHeight, 2, 2, [148, 163, 184], [248, 250, 252]);
 
@@ -2529,14 +2594,6 @@ export const exportPremiumTravelPDF = async (
     doc.setLineWidth(0.3);
     doc.line(marginX + 4, y + 8, marginX + 176, y + 8);
 
-    const categories = [
-      { label: "Accommodations Cumulative Ratios", val: invoiceData.accommodationTotal },
-      { label: "Food & Dining Allowances", val: invoiceData.foodTotal },
-      { label: "Transit & Vehicle Rentals", val: invoiceData.localTransportTotal },
-      { label: "Attraction Entry Portals", val: invoiceData.attractionTotal },
-      ...(hasTransitCost ? [{ label: `Travel Transit from ${itinerary.origin}`, val: invoiceData.originToDestinationCost }] : [])
-    ];
-
     categories.forEach((cat, idx) => {
       const cy = y + 13 + (idx * 4.5);
       doc.setFont("helvetica", "normal");
@@ -2546,7 +2603,7 @@ export const exportPremiumTravelPDF = async (
       doc.text(String(cat.val), 190, cy, { align: "right" });
     });
 
-    y += (hasTransitCost ? 41 : 36);
+    y += tableHeight + 5;
 
     // Highlighted Grand Total Card (Enlarged and Luxury Styled)
     drawPremiumCard(doc, marginX, y, 180, 15, 1.5, 1.5, [13, 148, 136], [240, 253, 250]);

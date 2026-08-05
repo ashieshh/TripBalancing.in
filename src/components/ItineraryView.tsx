@@ -7,10 +7,10 @@ import {
 } from "lucide-react";
 import { Itinerary, TripRecord, LoggedExpense } from "../types";
 // Lazy-load heavier visual sub-components to optimize chunk size and page speed
-const DestinationWeather = lazy(() => import("./DestinationWeather"));
-const CameraCapture = lazy(() => import("./CameraCapture"));
-const BudgetBreakdownChart = lazy(() => import("./BudgetBreakdownChart"));
-const ItineraryMap = lazy(() => import("./ItineraryMap"));
+import DestinationWeather from "./DestinationWeather";
+import CameraCapture from "./CameraCapture";
+import BudgetBreakdownChart from "./BudgetBreakdownChart";
+import ItineraryMap from "./ItineraryMap";
 
 interface ItineraryViewProps {
   itinerary: Itinerary;

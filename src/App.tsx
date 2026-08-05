@@ -11,14 +11,14 @@ import ThemeToggle from "./components/ThemeToggle";
 import type { LegalTab } from "./components/LegalAndSupportModal";
 import { BuddyInvitation } from "./types";
 
-const ItineraryView = lazy(() => import("./components/ItineraryView"));
-const Dashboard = lazy(() => import("./components/Dashboard"));
-const AuthModal = lazy(() => import("./components/AuthModal"));
-const PremiumUpgradeModal = lazy(() => import("./components/PremiumUpgradeModal"));
-const BuddyInviteModal = lazy(() => import("./components/BuddyInviteModal"));
-const GoogleContactsModal = lazy(() => import("./components/GoogleContactsModal"));
-const LegalAndSupportModal = lazy(() => import("./components/LegalAndSupportModal"));
-const AdminDashboard = lazy(() => import("./components/AdminDashboard"));
+import ItineraryView from "./components/ItineraryView";
+import Dashboard from "./components/Dashboard";
+import AuthModal from "./components/AuthModal";
+import PremiumUpgradeModal from "./components/PremiumUpgradeModal";
+import BuddyInviteModal from "./components/BuddyInviteModal";
+import GoogleContactsModal from "./components/GoogleContactsModal";
+import LegalAndSupportModal from "./components/LegalAndSupportModal";
+import AdminDashboard from "./components/AdminDashboard";
 
 const SuspenseFallback = () => (
   <div className="flex items-center justify-center p-8 space-x-2 text-teal-600 dark:text-teal-400 min-h-[120px]">

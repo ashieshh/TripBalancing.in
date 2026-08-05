@@ -1,10 +1,11 @@
-const CACHE_NAME = 'tripbalancing-v1';
+const CACHE_NAME = 'tripbalancing-v2';
 const OFFLINE_URL = '/offline.html';
 
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
+  '/manifest.webmanifest',
   '/offline.html',
   '/logo.svg',
   '/icon-192.png',
