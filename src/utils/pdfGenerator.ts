@@ -796,7 +796,7 @@ const drawComingSoonPlaceholder = (doc: any, x: number, y: number, w: number, h:
   doc.setFont("helvetica", "bold");
   doc.setFontSize(5);
   doc.setTextColor(textColor[0], textColor[1], textColor[2]);
-  drawSpacedText(doc, "COMING SOON", cx, y + h - 3.2, 0.35, "center");
+  drawSpacedText(doc, "CURATED PICK", cx, y + h - 3.2, 0.35, "center");
 };
 
 const drawAttractionThumbnail = (doc: any, x: number, y: number, w: number, h: number, name: string) => {
@@ -832,6 +832,59 @@ const parseVal = (str: any): number => {
   const num = parseFloat(match[0]);
   return isNaN(num) ? 0 : num;
 };
+
+const estimateFoodPriceRange = (
+  food: any,
+  itemIndex: number,
+  itinerary: Itinerary,
+  currencySym: string
+): string => {
+  const supplied = String(food?.estimatedPrice || "").trim();
+  if (supplied) return supplied.replace(/₹/g, "Rs. ");
+
+  const days = Math.max(1, itinerary.days?.length || 1);
+  const travelers = Math.max(1, itinerary.travelers || 1);
+  const foodTotal =
+    parseVal(itinerary.estimatedBudgetBreakdown?.food) ||
+    parseVal(itinerary.detailedBudgetSummary?.foodTotal) ||
+    0;
+
+  const style = String(itinerary.travelStyle || "mid-range").toLowerCase();
+  const perPersonDaily = foodTotal > 0
+    ? foodTotal / days / travelers
+    : style.includes("luxury") || style.includes("premium")
+      ? 12000
+      : style.includes("budget")
+        ? 1800
+        : 5000;
+  const baseMeal = Math.max(150, perPersonDaily / 3);
+
+  const text = `${food?.name || ""} ${food?.description || ""} ${food?.mustTryAt || ""}`.toLowerCase();
+  let lowFactor = 0.55;
+  let highFactor = 1.05;
+
+  if (/michelin|ritz|ducasse|fine dining|gastronomic|truffle|tasting menu|luxury|premium/.test(text)) {
+    lowFactor = 1.15;
+    highFactor = 2.25;
+  } else if (/street|croissant|pastry|bakery|boulangerie|crepe|sandwich|snack|macaron/.test(text)) {
+    lowFactor = 0.18;
+    highFactor = 0.48;
+  } else if (/dessert|coffee|tea|beverage|soup/.test(text)) {
+    lowFactor = 0.30;
+    highFactor = 0.70;
+  }
+
+  const variation = 1 + ((itemIndex % 3) - 1) * 0.08;
+  const roundNice = (value: number) => {
+    const step = value >= 5000 ? 500 : value >= 1000 ? 100 : 50;
+    return Math.max(step, Math.round(value / step) * step);
+  };
+
+  const low = roundNice(baseMeal * lowFactor * variation);
+  const high = Math.max(low, roundNice(baseMeal * highFactor * variation));
+  return `${currencySym}${low.toLocaleString()} - ${currencySym}${high.toLocaleString()}`;
+};
+
 
 // Prevent Truncation: Restrict location names and landmarks to a maximum of 40 characters
 const sanitizeLocation = (loc: string): string => {
@@ -1789,7 +1842,7 @@ export const exportPremiumTravelPDF = async (
 
         const detailY = Math.min(y + heightNeeded - 7.5, y + 12 + (descLines.length * 4.2) + 2);
         const simulatedRating = (4.4 + (idx % 6) * 0.1).toFixed(1);
-        const simulatedPrice = `${currencySym}${15 + idx * 5} - ${currencySym}${35 + idx * 8}`;
+        const estimatedPrice = estimateFoodPriceRange(food, idx, itinerary, currencySym);
 
         // Badge 1: Must Try (Amber, wider and perfectly centered)
         drawCenteredBadge(doc, contentX, detailY, 60, 4.5, `Must Try: ${food.mustTryAt}`, undefined, [254, 243, 199], [217, 119, 6]);
@@ -1798,7 +1851,7 @@ export const exportPremiumTravelPDF = async (
         drawCenteredBadge(doc, contentX + 64, detailY, 28, 4.5, `Rating: ${simulatedRating}`, undefined, [236, 253, 245], [13, 148, 136]);
 
         // Badge 3: Cost (using drawPriceBadge helper with auto-scaling font size)
-        drawPriceBadge(doc, contentX + 96, detailY, 34, 4.5, `Avg: ${simulatedPrice}`);
+        drawPriceBadge(doc, contentX + 96, detailY, 34, 4.5, `Avg: ${estimatedPrice}`);
 
         y += heightNeeded + 4;
       });

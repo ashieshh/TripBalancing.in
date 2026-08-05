@@ -1314,7 +1314,7 @@ Please tailor the recommendations explicitly:
    - Specific local transit/transportation suggestions for that day ('transportationSuggestions' field).
    - Estimated daily budget for that day ('dailyBudget' field).
 4. CRITICAL: For longer trips (up to 365 days), make sure to generate entries for every requested day without omitting or skipping any days. Keep daily descriptions concise but complete to stay within token limits.
-5. The "localFood" recommendations should describe must-try street foods and popular restaurants, explicitly labeling veg/non-veg.
+5. The "localFood" recommendations should describe must-try street foods and popular restaurants, explicitly labeling veg/non-veg. For every localFood item, include an "estimatedPrice" per-person range in the same reporting currency as the itinerary. Use realistic values for the specific venue and travel style; never use placeholder prices.
 6. Estimate highly realistic, accurate budgets based on the destination's current average living costs, the travel style (${travelStyle}), duration (${diffDays} days), and number of travelers (${travelers}).
    - You MUST estimate expected cost ranges (a minimum expected cost and a maximum expected cost, e.g., "₹10,000 - ₹15,000" or "$150 - $220") instead of a single fixed value for each.
    - Breakdown costs into 6 specific categories:
@@ -1435,7 +1435,8 @@ Return the response in strict JSON format.`;
                   name: { type: Type.STRING },
                   description: { type: Type.STRING },
                   type: { type: Type.STRING, description: "veg, non-veg, both, dessert, or beverage" },
-                  mustTryAt: { type: Type.STRING }
+                  mustTryAt: { type: Type.STRING },
+                  estimatedPrice: { type: Type.STRING, description: "Realistic per-person price range in the same reporting currency as the itinerary, e.g. Rs. 800 - Rs. 1,500" }
                 },
                 required: ["name", "description", "type", "mustTryAt"]
               }

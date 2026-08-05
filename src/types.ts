@@ -102,6 +102,7 @@ export interface FoodItem {
   description: string;
   type: 'veg' | 'non-veg' | 'both' | 'dessert' | 'beverage';
   mustTryAt: string;
+  estimatedPrice?: string;
 }
 
 export interface TransportSuggestion {
