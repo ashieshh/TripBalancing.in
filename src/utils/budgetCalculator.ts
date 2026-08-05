@@ -1,18 +1,15 @@
-// Central travel budget calculator.
-// All calculations use numeric values; formatting is applied only for display.
+// Real-World Mathematical Travel Budget Calculator and Reconciler
 
 export interface BudgetFactorsInput {
   destination: string;
   origin?: string;
   travelers: number;
   days: number;
-  travelStyle: string;
-  userBudgetInput?: string | number;
-  includeFlights?: boolean;
+  travelStyle: string; // Budget, Mid-range, Premium, Luxury, Family, Solo, Adventure
+  userBudgetInput?: string | number; // User entered budget string or number
 }
 
 export interface CalculatedCategoryBreakdown {
-  plannedBudget: number;
   flight: number;
   hotel: number;
   food: number;
@@ -21,14 +18,7 @@ export interface CalculatedCategoryBreakdown {
   visaAndInsurance: number;
   miscellaneous: number;
   grandTotal: number;
-  expectedMin: number;
-  expectedMax: number;
-  averageDailyBudgetNum: number;
-  currencySymbol: string;
-  isBudgetTooLow: boolean;
-  warningMessage?: string;
   formatted: {
-    plannedBudget: string;
     flight: string;
     hotel: string;
     food: string;
@@ -40,170 +30,228 @@ export interface CalculatedCategoryBreakdown {
     expectedRange: string;
     averageDailyBudget: string;
   };
+  expectedMin: number;
+  expectedMax: number;
+  averageDailyBudgetNum: number;
+  currencySymbol: string;
+  isBudgetTooLow: boolean;
+  warningMessage?: string;
 }
 
-export const parseNumericValue = (value?: string | number | null): number => {
-  if (value === null || value === undefined) return 0;
-  if (typeof value === "number") return Number.isFinite(value) ? Math.max(0, value) : 0;
-  const parsed = Number.parseFloat(String(value).replace(/,/g, "").replace(/[^0-9.]/g, ""));
-  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
-};
-
-export const detectCurrencySymbol = (value?: string | number): string => {
-  if (typeof value === "string") {
-    const normalized = value.toLowerCase();
-    if (value.includes("₹") || normalized.includes("inr") || normalized.includes("rs")) return "₹";
-    if (value.includes("€") || normalized.includes("eur")) return "€";
-    if (value.includes("£") || normalized.includes("gbp")) return "£";
-    if (normalized.includes("aed")) return "AED ";
-    if (value.includes("$") || normalized.includes("usd")) return "$";
+// Detect currency symbol from input string or default
+export const detectCurrencySymbol = (str?: string | number, destination?: string): string => {
+  if (typeof str === "string") {
+    if (str.includes("$")) return "$";
+    if (str.includes("€")) return "€";
+    if (str.includes("£")) return "£";
+    if (str.includes("¥")) return "¥";
+    if (str.includes("₹") || str.toLowerCase().includes("inr") || str.toLowerCase().includes("rs")) return "₹";
+    if (str.includes("AED") || str.includes("aed")) return "AED ";
   }
-  return "₹";
+  
+  // Infer based on destination if no symbol in budget
+  const dest = (destination || "").toLowerCase();
+  if (dest.includes("usa") || dest.includes("america") || dest.includes("york") || dest.includes("singapore") || dest.includes("bali")) {
+    return "$";
+  }
+  if (dest.includes("france") || dest.includes("paris") || dest.includes("italy") || dest.includes("rome") || dest.includes("spain") || dest.includes("germany")) {
+    return "€";
+  }
+  if (dest.includes("london") || dest.includes("uk") || dest.includes("england")) {
+    return "£";
+  }
+  if (dest.includes("dubai") || dest.includes("uae")) {
+    return "AED ";
+  }
+
+  return "₹"; // Default to INR
 };
 
-type CostTier = "low" | "medium" | "high";
-type NormalizedStyle = "budget" | "mid" | "premium" | "luxury";
-
-const normalizeStyle = (styleValue: string): NormalizedStyle => {
-  const style = (styleValue || "mid-range").toLowerCase();
-  if (style.includes("luxury") || style.includes("vip")) return "luxury";
-  if (style.includes("premium")) return "premium";
-  if (style.includes("budget") || style.includes("backpack") || style.includes("solo")) return "budget";
-  return "mid";
+// Clean numeric parser
+export const parseNumericValue = (val?: string | number | null): number => {
+  if (val === null || val === undefined) return 0;
+  if (typeof val === "number") return isNaN(val) ? 0 : Math.abs(val);
+  
+  // Extract digits and decimal point
+  const cleaned = String(val).replace(/,/g, "").replace(/[^0-9.]/g, "");
+  const parsed = parseFloat(cleaned);
+  return isNaN(parsed) ? 0 : parsed;
 };
 
-const getDestinationInfo = (destinationValue: string) => {
-  const destination = (destinationValue || "").toLowerCase();
-  const internationalKeywords = [
-    "france", "paris", "italy", "rome", "spain", "germany", "uk", "london", "england",
-    "usa", "america", "new york", "japan", "tokyo", "singapore", "dubai", "uae", "maldives",
-    "thailand", "bali", "indonesia", "turkey", "greece", "portugal", "vietnam", "korea",
-    "australia", "switzerland", "netherlands", "amsterdam", "austria", "vienna", "norway",
-    "iceland", "canada", "egypt"
+// Determine destination cost tier (Tier 1: High, Tier 2: Mid, Tier 3: Low)
+const getDestinationTier = (destination: string): { tier: 1 | 2 | 3; isInternational: boolean } => {
+  const d = destination.toLowerCase().trim();
+  
+  const tier1Keywords = [
+    "paris", "france", "london", "uk", "england", "tokyo", "japan", "new york", "usa", "switzerland",
+    "zurich", "geneva", "rome", "italy", "venice", "amsterdam", "oslo", "norway", "reykjavik", "iceland",
+    "sydney", "australia", "singapore", "dubai", "uae", "hawaii", "maldives", "los angeles", "san francisco",
+    "barcelona", "spain", "vienna", "austria"
   ];
-  const highCostKeywords = [
-    "paris", "france", "london", "uk", "new york", "usa", "switzerland", "tokyo", "japan",
-    "singapore", "dubai", "maldives", "sydney", "australia", "amsterdam", "vienna", "norway",
-    "iceland", "rome", "italy", "barcelona", "spain"
-  ];
-  const mediumCostKeywords = [
-    "bangkok", "thailand", "bali", "indonesia", "istanbul", "turkey", "prague", "budapest",
-    "athens", "greece", "lisbon", "portugal", "kuala lumpur", "malaysia", "vietnam", "seoul",
-    "goa", "kerala", "udaipur", "jaipur"
+
+  const tier2Keywords = [
+    "bangkok", "thailand", "phuket", "bali", "indonesia", "istanbul", "turkey", "prague", "czech",
+    "budapest", "hungary", "athens", "greece", "lisbon", "portugal", "kuala lumpur", "malaysia",
+    "vietnam", "hanoi", "ho chi minh", "seoul", "korea", "goa", "kerala", "udaipur", "jaipur"
   ];
 
-  const isInternational = internationalKeywords.some((keyword) => destination.includes(keyword));
-  const tier: CostTier = highCostKeywords.some((keyword) => destination.includes(keyword))
-    ? "high"
-    : mediumCostKeywords.some((keyword) => destination.includes(keyword))
-      ? "medium"
-      : "low";
+  const isInternationalKeywords = [
+    "paris", "france", "london", "uk", "tokyo", "japan", "new york", "usa", "switzerland", "rome",
+    "italy", "singapore", "dubai", "uae", "maldives", "thailand", "bali", "indonesia", "turkey",
+    "prague", "greece", "portugal", "vietnam", "korea", "australia", "spain", "germany", "egypt"
+  ];
 
-  return { isInternational, tier };
+  const isInternational = isInternationalKeywords.some(k => d.includes(k));
+
+  if (tier1Keywords.some(k => d.includes(k))) {
+    return { tier: 1, isInternational };
+  }
+  if (tier2Keywords.some(k => d.includes(k))) {
+    return { tier: 2, isInternational };
+  }
+
+  return { tier: 3, isInternational };
 };
 
-const convertFromInr = (amount: number, symbol: string): number => {
-  const rates: Record<string, number> = {
-    "₹": 1,
-    "$": 85,
-    "€": 92,
-    "£": 108,
-    "AED ": 23
-  };
-  return amount / (rates[symbol] || 1);
-};
-
-const formatAmount = (amount: number, symbol: string): string => {
-  const rounded = Math.round(amount);
-  return `${symbol}${rounded.toLocaleString("en-IN")}`;
-};
-
+// Calculate realistic, mathematically consistent travel budget
 export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedCategoryBreakdown => {
-  const travelers = Math.max(1, Math.floor(Number(input.travelers) || 1));
-  const days = Math.max(1, Math.floor(Number(input.days) || 1));
+  const travelers = Math.max(1, input.travelers || 1);
+  const days = Math.max(1, input.days || 1);
   const nights = Math.max(1, days - 1);
-  const rooms = Math.max(1, Math.ceil(travelers / 2));
-  const style = normalizeStyle(input.travelStyle);
-  const { tier, isInternational } = getDestinationInfo(input.destination);
-  const currencySymbol = detectCurrencySymbol(input.userBudgetInput);
-  const plannedBudget = parseNumericValue(input.userBudgetInput);
-  const includeFlights = input.includeFlights !== false;
+  const rooms = Math.ceil(travelers / 2);
+  const styleRaw = (input.travelStyle || "Mid-range").toLowerCase();
 
-  const rateTable = {
-    budget: {
-      flightDomestic: 7000, flightInternationalMedium: 28000, flightInternationalHigh: 60000,
-      hotelLow: 2200, hotelMedium: 4500, hotelHigh: 8000,
-      foodLow: 800, foodMedium: 1400, foodHigh: 2600,
-      transportLow: 450, transportMedium: 800, transportHigh: 1400,
-      activitiesLow: 600, activitiesMedium: 1000, activitiesHigh: 1800,
-      contingency: 0.05
-    },
-    mid: {
-      flightDomestic: 12000, flightInternationalMedium: 45000, flightInternationalHigh: 90000,
-      hotelLow: 5000, hotelMedium: 10000, hotelHigh: 22000,
-      foodLow: 1800, foodMedium: 3500, foodHigh: 7000,
-      transportLow: 900, transportMedium: 1800, transportHigh: 3500,
-      activitiesLow: 1400, activitiesMedium: 2800, activitiesHigh: 5500,
-      contingency: 0.07
-    },
-    premium: {
-      flightDomestic: 22000, flightInternationalMedium: 80000, flightInternationalHigh: 150000,
-      hotelLow: 12000, hotelMedium: 25000, hotelHigh: 50000,
-      foodLow: 4200, foodMedium: 8000, foodHigh: 14000,
-      transportLow: 2500, transportMedium: 5000, transportHigh: 9000,
-      activitiesLow: 3500, activitiesMedium: 7000, activitiesHigh: 12000,
-      contingency: 0.10
-    },
-    luxury: {
-      flightDomestic: 40000, flightInternationalMedium: 130000, flightInternationalHigh: 250000,
-      hotelLow: 25000, hotelMedium: 50000, hotelHigh: 110000,
-      foodLow: 8000, foodMedium: 15000, foodHigh: 25000,
-      transportLow: 6000, transportMedium: 12000, transportHigh: 22000,
-      activitiesLow: 8000, activitiesMedium: 15000, activitiesHigh: 28000,
-      contingency: 0.12
+  let style: "budget" | "mid" | "luxury" = "mid";
+  if (styleRaw.includes("budget") || styleRaw.includes("solo") || styleRaw.includes("backpacker")) {
+    style = "budget";
+  } else if (styleRaw.includes("luxury") || styleRaw.includes("premium") || styleRaw.includes("vip")) {
+    style = "luxury";
+  }
+
+  const { tier, isInternational } = getDestinationTier(input.destination);
+  const hasOrigin = Boolean(input.origin && input.origin.trim() !== "");
+  const currencySymbol = detectCurrencySymbol(input.userBudgetInput, input.destination);
+  const isUSD = currencySymbol === "$";
+  const isEUR = currencySymbol === "€";
+  const isGBP = currencySymbol === "£";
+  
+  // Scale factor if currency is USD / EUR / GBP instead of INR
+  const FX = isUSD ? 1 : isEUR ? 0.92 : isGBP ? 0.80 : 85; // 1 USD = ~85 INR
+
+  // 1. Flight / Transit Cost per traveler (Roundtrip)
+  let flightCostPerPerson = 0;
+  if (hasOrigin || isInternational) {
+    if (isInternational) {
+      if (tier === 1) { // Long-haul luxury / West
+        flightCostPerPerson = style === "budget" ? 55000 : style === "mid" ? 85000 : 220000;
+      } else { // Short-haul international
+        flightCostPerPerson = style === "budget" ? 18000 : style === "mid" ? 28000 : 65000;
+      }
+    } else { // Domestic flight/train
+      flightCostPerPerson = style === "budget" ? 4000 : style === "mid" ? 7500 : 16000;
     }
-  } as const;
+  } else {
+    // Arrival local transfer baseline
+    flightCostPerPerson = style === "budget" ? 1500 : style === "mid" ? 3000 : 8000;
+  }
+  if (isUSD || isEUR || isGBP) flightCostPerPerson = flightCostPerPerson / FX;
 
-  const rates = rateTable[style];
-  const tierSuffix = tier === "high" ? "High" : tier === "medium" ? "Medium" : "Low";
+  // 2. Hotel / Accommodation Cost per night per room
+  let hotelNightRate = 0;
+  if (style === "budget") {
+    hotelNightRate = tier === 1 ? 7500 : tier === 2 ? 3500 : 1800;
+  } else if (style === "mid") {
+    hotelNightRate = tier === 1 ? 22000 : tier === 2 ? 9500 : 4800;
+  } else { // Luxury
+    hotelNightRate = tier === 1 ? 75000 : tier === 2 ? 38000 : 22000;
+  }
+  if (isUSD || isEUR || isGBP) hotelNightRate = hotelNightRate / FX;
 
-  const flightPerTravelerInr = isInternational
-    ? (tier === "high" ? rates.flightInternationalHigh : rates.flightInternationalMedium)
-    : rates.flightDomestic;
-  const hotelPerRoomNightInr = rates[`hotel${tierSuffix}` as keyof typeof rates] as number;
-  const foodPerTravelerDayInr = rates[`food${tierSuffix}` as keyof typeof rates] as number;
-  const transportPerTravelerDayInr = rates[`transport${tierSuffix}` as keyof typeof rates] as number;
-  const activityPerTravelerDayInr = rates[`activities${tierSuffix}` as keyof typeof rates] as number;
-  const visaInsurancePerTravelerInr = isInternational ? (tier === "high" ? 18000 : 9000) : 1000;
+  // 3. Daily Food Cost per traveler per day
+  let dailyFoodRate = 0;
+  if (style === "budget") {
+    dailyFoodRate = tier === 1 ? 2400 : tier === 2 ? 1200 : 650;
+  } else if (style === "mid") {
+    dailyFoodRate = tier === 1 ? 6500 : tier === 2 ? 3200 : 1600;
+  } else { // Luxury
+    dailyFoodRate = tier === 1 ? 20000 : tier === 2 ? 9500 : 4800;
+  }
+  if (isUSD || isEUR || isGBP) dailyFoodRate = dailyFoodRate / FX;
 
-  const flight = includeFlights ? Math.round(convertFromInr(flightPerTravelerInr * travelers, currencySymbol)) : 0;
-  const hotel = Math.round(convertFromInr(hotelPerRoomNightInr * nights * rooms, currencySymbol));
-  const food = Math.round(convertFromInr(foodPerTravelerDayInr * days * travelers, currencySymbol));
-  const localTransport = Math.round(convertFromInr(transportPerTravelerDayInr * days * travelers, currencySymbol));
-  const sightseeing = Math.round(convertFromInr(activityPerTravelerDayInr * days * travelers, currencySymbol));
-  const visaAndInsurance = Math.round(convertFromInr(visaInsurancePerTravelerInr * travelers, currencySymbol));
+  // 4. Daily Local Transport per traveler per day
+  let dailyTransportRate = 0;
+  if (style === "budget") {
+    dailyTransportRate = tier === 1 ? 1200 : tier === 2 ? 600 : 350;
+  } else if (style === "mid") {
+    dailyTransportRate = tier === 1 ? 3500 : tier === 2 ? 1600 : 850;
+  } else { // Luxury
+    dailyTransportRate = tier === 1 ? 14000 : tier === 2 ? 6500 : 3800;
+  }
+  if (isUSD || isEUR || isGBP) dailyTransportRate = dailyTransportRate / FX;
 
-  const subtotalBeforeContingency = flight + hotel + food + localTransport + sightseeing + visaAndInsurance;
-  const miscellaneous = Math.round(subtotalBeforeContingency * rates.contingency);
-  const grandTotal = subtotalBeforeContingency + miscellaneous;
-  const expectedMin = Math.round(grandTotal * 0.9);
-  const expectedMax = Math.round(grandTotal * 1.15);
-  const averageDailyBudgetNum = Math.round((food + localTransport + sightseeing + miscellaneous) / days);
-  const isBudgetTooLow = plannedBudget > 0 && plannedBudget < expectedMin;
+  // 5. Daily Sightseeing / Attractions per traveler per day
+  let dailySightseeingRate = 0;
+  if (style === "budget") {
+    dailySightseeingRate = tier === 1 ? 1500 : tier === 2 ? 800 : 450;
+  } else if (style === "mid") {
+    dailySightseeingRate = tier === 1 ? 4800 : tier === 2 ? 2400 : 1200;
+  } else { // Luxury
+    dailySightseeingRate = tier === 1 ? 15000 : tier === 2 ? 8000 : 4200;
+  }
+  if (isUSD || isEUR || isGBP) dailySightseeingRate = dailySightseeingRate / FX;
 
-  const warningMessage = isBudgetTooLow
-    ? `Your planned budget of ${formatAmount(plannedBudget, currencySymbol)} is below the estimated minimum of ${formatAmount(expectedMin, currencySymbol)} for a ${input.travelStyle || "Mid-range"} trip to ${input.destination}. Increase the budget, shorten the trip, or choose a more economical travel style.`
-    : undefined;
+  // 6. Visa & Travel Insurance per traveler (One-time)
+  let visaInsurancePerPerson = 0;
+  if (isInternational) {
+    visaInsurancePerPerson = tier === 1 ? 16500 : 6500;
+  } else {
+    visaInsurancePerPerson = 600; // Basic trip insurance/pass
+  }
+  if (isUSD || isEUR || isGBP) visaInsurancePerPerson = visaInsurancePerPerson / FX;
+
+  // Compute category totals
+  const flightTotal = Math.round(flightCostPerPerson * travelers);
+  const hotelTotal = Math.round(hotelNightRate * nights * rooms);
+  const foodTotal = Math.round(dailyFoodRate * days * travelers);
+  const localTransportTotal = Math.round(dailyTransportRate * days * travelers);
+  const sightseeingTotal = Math.round(dailySightseeingRate * days * travelers);
+  const visaAndInsuranceTotal = Math.round(visaInsurancePerPerson * travelers);
+  
+  // 7. Miscellaneous & Taxes (6% of subtotal)
+  const subtotal = hotelTotal + foodTotal + localTransportTotal + sightseeingTotal;
+  const miscellaneousTotal = Math.round(subtotal * 0.06);
+
+  // Exact Grand Total
+  const grandTotal = flightTotal + hotelTotal + foodTotal + localTransportTotal + sightseeingTotal + visaAndInsuranceTotal + miscellaneousTotal;
+
+  // Expected Range (+/- 8% to 10%)
+  const expectedMin = Math.round(grandTotal * 0.92);
+  const expectedMax = Math.round(grandTotal * 1.08);
+
+  // Average Daily Budget
+  const averageDailyBudgetNum = Math.round(grandTotal / days);
+
+  // Check if user budget input is too low
+  const userNum = parseNumericValue(input.userBudgetInput);
+  let isBudgetTooLow = false;
+  let warningMessage: string | undefined = undefined;
+
+  if (userNum > 0 && userNum < expectedMin * 0.75) {
+    isBudgetTooLow = true;
+    const travelStyleLabel = input.travelStyle || (style === "luxury" ? "Luxury" : style === "budget" ? "Budget" : "Mid-range");
+    warningMessage = `Your selected budget (${currencySymbol}${userNum.toLocaleString()}) is lower than the realistic estimated cost for a ${travelStyleLabel} trip to ${input.destination} (${currencySymbol}${grandTotal.toLocaleString()}). Consider increasing your budget or choosing a more economical travel style.`;
+  }
+
+  const fmt = (num: number) => `${currencySymbol}${num.toLocaleString()}`;
 
   return {
-    plannedBudget,
-    flight,
-    hotel,
-    food,
-    localTransport,
-    sightseeing,
-    visaAndInsurance,
-    miscellaneous,
+    flight: flightTotal,
+    hotel: hotelTotal,
+    food: foodTotal,
+    localTransport: localTransportTotal,
+    sightseeing: sightseeingTotal,
+    visaAndInsurance: visaAndInsuranceTotal,
+    miscellaneous: miscellaneousTotal,
     grandTotal,
     expectedMin,
     expectedMax,
@@ -212,46 +260,66 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
     isBudgetTooLow,
     warningMessage,
     formatted: {
-      plannedBudget: plannedBudget > 0 ? formatAmount(plannedBudget, currencySymbol) : "Not specified",
-      flight: includeFlights ? formatAmount(flight, currencySymbol) : "Excluded",
-      hotel: formatAmount(hotel, currencySymbol),
-      food: formatAmount(food, currencySymbol),
-      localTransport: formatAmount(localTransport, currencySymbol),
-      sightseeing: formatAmount(sightseeing, currencySymbol),
-      visaAndInsurance: formatAmount(visaAndInsurance, currencySymbol),
-      miscellaneous: formatAmount(miscellaneous, currencySymbol),
-      grandTotal: formatAmount(grandTotal, currencySymbol),
-      expectedRange: `${formatAmount(expectedMin, currencySymbol)} – ${formatAmount(expectedMax, currencySymbol)}`,
-      averageDailyBudget: formatAmount(averageDailyBudgetNum, currencySymbol)
+      flight: fmt(flightTotal),
+      hotel: fmt(hotelTotal),
+      food: fmt(foodTotal),
+      localTransport: fmt(localTransportTotal),
+      sightseeing: fmt(sightseeingTotal),
+      visaAndInsurance: fmt(visaAndInsuranceTotal),
+      miscellaneous: fmt(miscellaneousTotal),
+      grandTotal: fmt(grandTotal),
+      expectedRange: `${fmt(expectedMin)} – ${fmt(expectedMax)}`,
+      averageDailyBudget: fmt(averageDailyBudgetNum)
     }
   };
 };
 
-export const reconcileItineraryBudget = (source: any): any => {
-  if (!source || typeof source !== "object") return source;
+// Reconcile and synchronize any itinerary object so that all budget sections are 100% mathematically consistent
+export const reconcileItineraryBudget = (itinerary: any): any => {
+  if (!itinerary || typeof itinerary !== "object") return itinerary;
 
-  const itinerary = structuredClone(source);
-  const days = Math.max(1, Array.isArray(itinerary.days) ? itinerary.days.length : 1);
-  const originalPlannedBudget = itinerary.plannedBudget || itinerary.budgetAmount;
+  const destination = itinerary.destination || "Destination";
+  const origin = itinerary.origin || "";
+  const travelers = Math.max(1, parseInt(itinerary.travelers) || 1);
+  const days = Math.max(1, (itinerary.days && itinerary.days.length) || 1);
+  const travelStyle = itinerary.travelStyle || "Mid-range";
+  const userBudgetInput = itinerary.budgetAmount;
 
+  // Calculate strict baseline
   const calculated = calculateRealWorldBudget({
-    destination: itinerary.destination || "Destination",
-    origin: itinerary.origin || "",
-    travelers: Math.max(1, Number.parseInt(String(itinerary.travelers || 1), 10) || 1),
+    destination,
+    origin,
+    travelers,
     days,
-    travelStyle: itinerary.travelStyle || "Mid-range",
-    userBudgetInput: originalPlannedBudget,
-    includeFlights: itinerary.includeFlights !== false
+    travelStyle,
+    userBudgetInput
   });
 
-  // Preserve what the user entered and store the calculated estimate separately.
-  itinerary.plannedBudget = calculated.formatted.plannedBudget;
-  itinerary.budgetAmount = calculated.formatted.plannedBudget;
+  const currencySym = calculated.currencySymbol;
+  const grandTotalNum = calculated.grandTotal;
+  const plannedBudgetNum = parseNumericValue(userBudgetInput);
+  const plannedBudgetFormatted = plannedBudgetNum > 0
+    ? `${currencySym}${plannedBudgetNum.toLocaleString()}`
+    : calculated.formatted.grandTotal;
+
+  // Keep the user's entered amount separate from the realistic calculated cost.
+  // budgetAmount remains the planned budget for backward-compatible UI display.
+  itinerary.plannedBudget = plannedBudgetFormatted;
+  itinerary.budgetAmount = plannedBudgetFormatted;
   itinerary.realisticEstimatedCost = calculated.formatted.grandTotal;
   itinerary.expectedRange = calculated.formatted.expectedRange;
   itinerary.averageDailyBudget = calculated.formatted.averageDailyBudget;
-  itinerary.budgetWarning = calculated.warningMessage;
+  itinerary.budgetShortfall = plannedBudgetNum > 0 && grandTotalNum > plannedBudgetNum
+    ? `${currencySym}${Math.round(grandTotalNum - plannedBudgetNum).toLocaleString()}`
+    : `${currencySym}0`;
 
+  if (calculated.isBudgetTooLow) {
+    itinerary.budgetWarning = calculated.warningMessage;
+  } else {
+    delete itinerary.budgetWarning;
+  }
+
+  // Update estimatedBudgetBreakdown
   itinerary.estimatedBudgetBreakdown = {
     accommodation: calculated.formatted.hotel,
     food: calculated.formatted.food,
@@ -263,29 +331,53 @@ export const reconcileItineraryBudget = (source: any): any => {
     total: calculated.formatted.grandTotal
   };
 
+  // Update detailedBudgetSummary
   itinerary.detailedBudgetSummary = {
     accommodationTotal: calculated.formatted.hotel,
     foodTotal: calculated.formatted.food,
-    localTransportTotal: calculated.formatted.localTransport,
     attractionTotal: calculated.formatted.sightseeing,
+    localTransportTotal: calculated.formatted.localTransport,
     miscellaneousExpenses: calculated.formatted.miscellaneous,
     originToDestinationCost: calculated.formatted.flight,
     visaAndInsurance: calculated.formatted.visaAndInsurance,
     grandTotal: calculated.formatted.grandTotal
   };
 
-  const onGroundTotal = calculated.food + calculated.localTransport + calculated.sightseeing + calculated.miscellaneous;
-  const dailyBase = Math.floor(onGroundTotal / days);
-  let remainder = onGroundTotal - dailyBase * days;
+  // Reconcile Day-by-Day budgets so sum equals grandTotal
+  if (Array.isArray(itinerary.days) && itinerary.days.length > 0) {
+    const dayCount = itinerary.days.length;
+    const dailyBase = Math.floor(grandTotalNum / dayCount);
+    let remainder = grandTotalNum - (dailyBase * dayCount);
 
-  if (Array.isArray(itinerary.days)) {
-    itinerary.days = itinerary.days.map((day: any, index: number) => {
-      const allocation = dailyBase + (index === 0 ? remainder : 0);
-      return {
-        ...day,
-        dailyBudget: formatAmount(allocation, calculated.currencySymbol)
-      };
+    itinerary.days.forEach((day: any, idx: number) => {
+      const dayAlloc = dailyBase + (idx === 0 ? remainder : 0);
+      day.dailyBudget = `${currencySym}${dayAlloc.toLocaleString()}`;
     });
+  }
+
+  // Filter hotel recommendations according to travel style
+  if (itinerary.hotelRecommendations) {
+    const hr = itinerary.hotelRecommendations;
+    const styleLower = travelStyle.toLowerCase();
+
+    // Ensure prices match style
+    if (styleLower.includes("budget") || styleLower.includes("backpacker")) {
+      if (hr.budget) {
+        hr.budget.forEach((h: any) => {
+          if (!h.pricePerNight || h.pricePerNight.includes("NaN")) {
+            h.pricePerNight = `${currencySym}${Math.round(calculated.hotel / (days * travelers * 2)).toLocaleString()}/night`;
+          }
+        });
+      }
+    } else if (styleLower.includes("luxury") || styleLower.includes("vip")) {
+      if (hr.luxury) {
+        hr.luxury.forEach((h: any) => {
+          if (!h.pricePerNight || h.pricePerNight.includes("NaN")) {
+            h.pricePerNight = `${currencySym}${Math.round(calculated.hotel / (days * travelers)).toLocaleString()}/night`;
+          }
+        });
+      }
+    }
   }
 
   return itinerary;

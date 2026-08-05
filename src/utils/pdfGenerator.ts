@@ -1,5 +1,4 @@
 import { Itinerary, HotelRecommend } from "../types";
-import { reconcileItineraryBudget } from "./budgetCalculator";
 
 // Helper to load QR code or fall back
 const loadImgUrlBase64 = (url: string): Promise<string | null> => {
@@ -876,10 +875,59 @@ const sanitizeItineraryText = (obj: any): any => {
 
 // Robust Mathematical Validation and Proportionate Scaling Engine
 const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): Itinerary => {
-  // Reconcile once using the central calculator. Never shrink real costs to fit
-  // the user's planned budget.
-  const itinerary = sanitizeItineraryText(reconcileItineraryBudget(rawItinerary)) as Itinerary;
+  const itinerary = sanitizeItineraryText(rawItinerary);
 
+  // Reconcile visible PDF categories without forcing realistic costs into the
+  // user's planned budget. The calculated breakdown is the source of truth.
+  const b = itinerary.estimatedBudgetBreakdown || ({} as any);
+  const d = itinerary.detailedBudgetSummary || ({} as any);
+  const hasOrigin = Boolean(itinerary.origin && itinerary.origin.trim() !== "");
+
+  const acc = parseVal(b.accommodation) || parseVal(d.accommodationTotal) || 0;
+  const food = parseVal(b.food) || parseVal(d.foodTotal) || 0;
+  const activities = parseVal(b.activities) || parseVal(d.attractionTotal) || 0;
+  const localTransport = parseVal(b.transport) || parseVal(d.localTransportTotal) || 0;
+  const flight = hasOrigin ? (parseVal(b.originToDestinationTravel) || parseVal(d.originToDestinationCost) || 0) : 0;
+  const visaInsurance = parseVal((b as any).visaAndInsurance) || parseVal((d as any).visaAndInsurance) || 0;
+  let miscellaneous = parseVal(b.miscellaneous) || parseVal(d.miscellaneousExpenses) || 0;
+
+  const explicitTotal = parseVal(b.total) || parseVal(d.grandTotal) || parseVal((itinerary as any).realisticEstimatedCost);
+  const visibleSubtotal = acc + food + activities + localTransport + flight + visaInsurance + miscellaneous;
+  const calculatedTotal = explicitTotal > 0 ? explicitTotal : visibleSubtotal;
+
+  // Put any rounding/reconciliation delta into miscellaneous so every visible
+  // row adds exactly to the displayed grand total.
+  if (calculatedTotal > 0 && visibleSubtotal !== calculatedTotal) {
+    miscellaneous = Math.max(0, miscellaneous + (calculatedTotal - visibleSubtotal));
+  }
+
+  const fmt = (value: number) => `${currencySym}${Math.round(value).toLocaleString()}`;
+  const formattedTotal = fmt(calculatedTotal);
+
+  itinerary.realisticEstimatedCost = formattedTotal;
+  itinerary.estimatedBudgetBreakdown = {
+    accommodation: fmt(acc),
+    food: fmt(food),
+    activities: fmt(activities),
+    transport: fmt(localTransport),
+    miscellaneous: fmt(miscellaneous),
+    originToDestinationTravel: flight > 0 ? fmt(flight) : "N/A",
+    visaAndInsurance: fmt(visaInsurance),
+    total: formattedTotal
+  } as any;
+
+  itinerary.detailedBudgetSummary = {
+    accommodationTotal: fmt(acc),
+    foodTotal: fmt(food),
+    attractionTotal: fmt(activities),
+    localTransportTotal: fmt(localTransport),
+    miscellaneousExpenses: fmt(miscellaneous),
+    originToDestinationCost: flight > 0 ? fmt(flight) : "N/A",
+    visaAndInsurance: fmt(visaInsurance),
+    grandTotal: formattedTotal
+  } as any;
+
+  // 3. Constrain location and hotel names to max 40 chars
   if (itinerary.placesToVisit) {
     itinerary.placesToVisit.forEach((place: any) => {
       place.name = sanitizeLocation(place.name);
@@ -887,19 +935,38 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
   }
 
   if (itinerary.hotelRecommendations) {
-    const recommendations = itinerary.hotelRecommendations;
-    if (recommendations.budget) recommendations.budget.forEach((hotel: any) => hotel.name = sanitizeLocation(hotel.name));
-    if (recommendations.midRange) recommendations.midRange.forEach((hotel: any) => hotel.name = sanitizeLocation(hotel.name));
-    if (recommendations.luxury) recommendations.luxury.forEach((hotel: any) => hotel.name = sanitizeLocation(hotel.name));
+    const r = itinerary.hotelRecommendations;
+    if (r.budget) r.budget.forEach((h: any) => h.name = sanitizeLocation(h.name));
+    if (r.midRange) r.midRange.forEach((h: any) => h.name = sanitizeLocation(h.name));
+    if (r.luxury) r.luxury.forEach((h: any) => h.name = sanitizeLocation(h.name));
   }
 
-  (itinerary.days || []).forEach((day: any) => {
-    (day.activities || []).forEach((activity: any) => {
-      if (activity.location) activity.location = sanitizeLocation(activity.location);
-      activity.title = sanitizeLocation(activity.title);
-      const cost = parseVal(activity.cost);
-      if (cost > 0) activity.cost = currencySym + cost.toLocaleString("en-IN");
+  // 4. Preserve itinerary activity estimates and label the daily figure as a
+  // realistic requirement. Never shrink real activity costs to fit the user's
+  // planned budget.
+  const daysData = itinerary.days || [];
+  const totalDays = daysData.length || 1;
+  const targetDailyRequirement = calculatedTotal > 0
+    ? Math.round(calculatedTotal / totalDays)
+    : 0;
+
+  daysData.forEach((day: any) => {
+    const activities = Array.isArray(day.activities) ? day.activities : [];
+    activities.forEach((act: any) => {
+      if (act.location) act.location = sanitizeLocation(act.location);
+      act.title = sanitizeLocation(act.title);
+      const costVal = parseVal(act.cost);
+      if (costVal > 0) {
+        act.cost = currencySym + costVal.toLocaleString();
+      } else if (!act.cost || String(act.cost).trim() === "") {
+        act.cost = "Free / Included";
+      }
     });
+
+    const daySpend = activities.reduce((sum: number, act: any) => sum + parseVal(act.cost), 0);
+    const existingRequirement = parseVal(day.dailyBudget);
+    const dayRequirement = Math.max(existingRequirement, daySpend, targetDailyRequirement);
+    day.dailyBudget = currencySym + Math.round(dayRequirement).toLocaleString();
   });
 
   return itinerary;
@@ -1327,7 +1394,8 @@ export const exportPremiumTravelPDF = async (
   // Grid / Badges for Cover
   const coverTodayStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
   const coverBadges = [
-    { label: "ESTIMATED BUDGET", val: String(itinerary.budgetAmount || "Bespoke"), color: [13, 148, 136] },
+    { label: "PLANNED BUDGET", val: String((itinerary as any).plannedBudget || itinerary.budgetAmount || "Bespoke"), color: [13, 148, 136] },
+    { label: "REALISTIC ESTIMATE", val: String((itinerary as any).realisticEstimatedCost || itinerary.estimatedBudgetBreakdown?.total || "Calculating"), color: [2, 132, 199] },
     { label: "TRIP DURATION", val: `${itinerary.days?.length || 0} Days`, color: [79, 70, 229] },
     { label: "TOTAL TRAVELERS", val: `${itinerary.travelers} Pax`, color: [217, 119, 6] },
     { label: "TRAVEL STYLE", val: String(itinerary.travelStyle || "Premium").toUpperCase(), color: [20, 184, 166] },
@@ -1392,7 +1460,8 @@ export const exportPremiumTravelPDF = async (
   startSectionPage("01", "TRIP SUMMARY & LOGISTICS ATLAS", "A comprehensive high-level dashboard and logistics atlas of your upcoming travel.");
 
   const glanceCards = [
-    { label: "BUDGET", value: itinerary.budgetAmount || "N/A", bg: [240, 253, 250], txt: [13, 148, 136] },
+    { label: "PLANNED", value: (itinerary as any).plannedBudget || itinerary.budgetAmount || "N/A", bg: [240, 253, 250], txt: [13, 148, 136] },
+    { label: "EST. COST", value: (itinerary as any).realisticEstimatedCost || itinerary.estimatedBudgetBreakdown?.total || "N/A", bg: [240, 249, 255], txt: [2, 132, 199] },
     { label: "DURATION", value: `${itinerary.days?.length || 0} Days`, bg: [240, 249, 255], txt: [2, 132, 199] },
     ...(itinerary.origin && itinerary.originToDestinationDuration && itinerary.originToDestinationDuration !== "N/A"
       ? [{ label: "TRANSIT TIME", value: itinerary.originToDestinationDuration, bg: [250, 245, 255], txt: [147, 51, 234] }]
@@ -1821,7 +1890,7 @@ export const exportPremiumTravelPDF = async (
       }
 
       const dStats = [
-        { label: "DAILY BUDGET", value: displayBudget, bg: [236, 253, 245], border: [13, 148, 136], txt: [13, 148, 136], icon: "budget" },
+        { label: "EST. DAILY REQUIREMENT", value: displayBudget, bg: [236, 253, 245], border: [13, 148, 136], txt: [13, 148, 136], icon: "budget" },
         { label: "WEATHER FORECAST", value: weatherLabel, bg: [240, 249, 255], border: [2, 132, 199], txt: [2, 132, 199], icon: "weather" },
         { label: "WALKING DISTANCE", value: `${dist} km`, bg: [255, 241, 242], border: [225, 29, 72], txt: [225, 29, 72], icon: "distance" },
         { label: "TRAVEL TIME", value: `${travTime} hrs`, bg: [238, 242, 255], border: [79, 70, 229], txt: [79, 70, 229], icon: "time" }
@@ -2063,7 +2132,7 @@ export const exportPremiumTravelPDF = async (
       doc.setFont("helvetica", "bold");
       doc.setFontSize(6.5);
       doc.setTextColor(100, 116, 139);
-      doc.text("DAILY BUDGET", marginX + 14, y + 5.2);
+      doc.text("EST. DAILY REQUIREMENT", marginX + 14, y + 5.2);
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
@@ -2260,7 +2329,10 @@ export const exportPremiumTravelPDF = async (
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9.5);
     doc.setTextColor(51, 65, 85);
-    const budgetIntro = `A luxury travel experience relies on a meticulously calibrated financial blueprint. This closing chapter presents your unified expense ledger, allocation matrices, and categorized asset breakdowns. All daily expenditures, accommodations, local meal allowances, and monument entry fees are audited to ensure mathematical accuracy and complete alignment with your estimated budget of ${itinerary.budgetAmount || "INR 1,50,000"}.`;
+    const plannedBudgetText = (itinerary as any).plannedBudget || itinerary.budgetAmount || "Not specified";
+    const estimatedCostText = (itinerary as any).realisticEstimatedCost || b.total || "Calculating";
+    const shortfallText = (itinerary as any).budgetShortfall || "0";
+    const budgetIntro = `This financial blueprint separates your planned budget (${plannedBudgetText}) from the realistic estimated trip cost (${estimatedCostText}). The category values below are reconciled to the calculated estimate, not forced into the planned amount. Estimated shortfall: ${shortfallText}. Prices remain estimates and may vary with dates, availability, exchange rates, and booking time.`;
     doc.text(doc.splitTextToSize(budgetIntro, 180), marginX, y);
     y += 24;
 
@@ -2303,9 +2375,11 @@ export const exportPremiumTravelPDF = async (
     const localTransVal = parseVal(b.transport);
     const miscVal = parseVal(b.miscellaneous || "0");
     const transitVal = parseVal(b.originToDestinationTravel || "0");
+    const visaInsuranceVal = parseVal((b as any).visaAndInsurance || "0");
 
-    // For the 4 main dashboard stat cards, group local transport, origin transit, and misc under TRANSIT & TOURS so 4 cards represent 100% of budget
-    const transVal = localTransVal + transitVal + miscVal;
+    // Group local transport, origin transit, visa/insurance and contingency under
+    // Transit & Tours so the four dashboard cards represent the full estimate.
+    const transVal = localTransVal + transitVal + visaInsuranceVal + miscVal;
     const totalVal = accommVal + foodVal + actVal + transVal || 1;
 
     // Calculate percentage allocations for the 4 stat cards
@@ -2451,11 +2525,13 @@ export const exportPremiumTravelPDF = async (
       attractionTotal: b.activities || (currencySym + "2,000"),
       miscellaneousExpenses: b.miscellaneous || "N/A",
       originToDestinationCost: b.originToDestinationTravel || (itinerary.origin ? (currencySym + "6,000 - " + currencySym + "12,000") : "N/A"),
+      visaAndInsurance: (b as any).visaAndInsurance || "N/A",
       grandTotal: b.total || (currencySym + "30,000")
     };
 
     const hasTransitCost = itinerary.origin && invoiceData.originToDestinationCost && invoiceData.originToDestinationCost !== "N/A" && parseVal(invoiceData.originToDestinationCost) > 0;
     const hasMiscCost = invoiceData.miscellaneousExpenses && invoiceData.miscellaneousExpenses !== "N/A" && parseVal(invoiceData.miscellaneousExpenses) > 0;
+    const hasVisaInsurance = (invoiceData as any).visaAndInsurance && (invoiceData as any).visaAndInsurance !== "N/A" && parseVal((invoiceData as any).visaAndInsurance) > 0;
 
     const categories = [
       { label: "Accommodations Cumulative Ratios", val: invoiceData.accommodationTotal },
@@ -2463,6 +2539,7 @@ export const exportPremiumTravelPDF = async (
       { label: "Transit & Vehicle Rentals", val: invoiceData.localTransportTotal },
       { label: "Attraction Entry Portals", val: invoiceData.attractionTotal },
       ...(hasTransitCost ? [{ label: `Travel Transit from ${itinerary.origin}`, val: invoiceData.originToDestinationCost }] : []),
+      ...(hasVisaInsurance ? [{ label: "Visa & Travel Insurance", val: (invoiceData as any).visaAndInsurance }] : []),
       ...(hasMiscCost ? [{ label: "Miscellaneous & Contingency", val: invoiceData.miscellaneousExpenses }] : [])
     ];
 
