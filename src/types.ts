@@ -6,6 +6,12 @@ export interface TripInput {
   startDate: string;
   endDate: string;
   budgetAmount: string;
+  plannedBudget?: string;
+  realisticEstimatedCost?: string;
+  expectedRange?: string;
+  averageDailyBudget?: string;
+  budgetWarning?: string;
+  includeFlights?: boolean;
   travelers: number;
   travelStyle: TravelStyle;
   isAiBudgetPlanner?: boolean;
@@ -38,6 +44,7 @@ export interface BudgetBreakdown {
   transport: string;
   miscellaneous: string;
   originToDestinationTravel?: string;
+  visaAndInsurance?: string;
   total: string;
 }
 
@@ -86,6 +93,7 @@ export interface DetailedBudgetSummary {
   attractionTotal: string;
   miscellaneousExpenses: string;
   originToDestinationCost?: string;
+  visaAndInsurance?: string;
   grandTotal: string;
 }
 
@@ -121,6 +129,12 @@ export interface Itinerary {
   startDate: string;
   endDate: string;
   budgetAmount: string;
+  plannedBudget?: string;
+  realisticEstimatedCost?: string;
+  expectedRange?: string;
+  averageDailyBudget?: string;
+  budgetWarning?: string;
+  includeFlights?: boolean;
   travelers: number;
   travelStyle: string;
   days: DayItinerary[];

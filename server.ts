@@ -17,6 +17,7 @@ import {
   generateRefundRejectedEmail,
   generateSupportTicketEmail
 } from "./src/services/emailService";
+import { reconcileItineraryBudget } from "./src/utils/budgetCalculator";
 
 dotenv.config();
 
@@ -1245,7 +1246,7 @@ app.post("/api/generate-itinerary", async (req, res) => {
     const cached = ITINERARY_CACHE.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < ITINERARY_TTL)) {
       console.log(`[Cache Hit] Returning cached itinerary for destination: ${destination} from origin: ${origin || "any"}`);
-      const cachedItinerary = { ...cached.data, latitude: geoCoords.latitude, longitude: geoCoords.longitude };
+      const cachedItinerary = reconcileItineraryBudget({ ...cached.data, latitude: geoCoords.latitude, longitude: geoCoords.longitude });
       return res.json({ itinerary: cachedItinerary });
     }
 
@@ -1597,12 +1598,14 @@ Return the response in strict JSON format.`;
     parsedItinerary.origin = origin || "";
     
     // Store in cache for future identical requests
+    const reconciledItinerary = reconcileItineraryBudget(parsedItinerary);
+
     ITINERARY_CACHE.set(cacheKey, {
-      data: parsedItinerary,
+      data: reconciledItinerary,
       timestamp: Date.now()
     });
 
-    return res.json({ itinerary: parsedItinerary });
+    return res.json({ itinerary: reconciledItinerary });
 
   } catch (error: any) {
     console.warn("AI Itinerary Generation Error, providing high-quality custom fallback:", error);
@@ -1898,12 +1901,14 @@ Return the response in strict JSON format.`;
 
     // Store in cache
     const fallbackCacheKey = `${(destination || "").toLowerCase().trim()}_${origin ? origin.toLowerCase().trim() : ""}_${startDate}_${endDate}_${budgetAmount}_${travelers}_${String(travelStyle || "").toLowerCase().trim()}_${isAiBudgetPlanner ? "ai" : "manual"}`;
+    const reconciledFallback = reconcileItineraryBudget(fallbackItinerary);
+
     ITINERARY_CACHE.set(fallbackCacheKey, {
-      data: fallbackItinerary,
+      data: reconciledFallback,
       timestamp: Date.now()
     });
 
-    return res.json({ itinerary: fallbackItinerary });
+    return res.json({ itinerary: reconciledFallback });
   }
 });
 

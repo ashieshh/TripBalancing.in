@@ -1,4 +1,5 @@
 import { Itinerary, HotelRecommend } from "../types";
+import { reconcileItineraryBudget } from "./budgetCalculator";
 
 // Helper to load QR code or fall back
 const loadImgUrlBase64 = (url: string): Promise<string | null> => {
@@ -875,89 +876,10 @@ const sanitizeItineraryText = (obj: any): any => {
 
 // Robust Mathematical Validation and Proportionate Scaling Engine
 const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): Itinerary => {
-  const itinerary = sanitizeItineraryText(rawItinerary);
-  const totalBudgetNum = parseVal(itinerary.budgetAmount);
+  // Reconcile once using the central calculator. Never shrink real costs to fit
+  // the user's planned budget.
+  const itinerary = sanitizeItineraryText(reconcileItineraryBudget(rawItinerary)) as Itinerary;
 
-  // Synchronize and scale both estimatedBudgetBreakdown and detailedBudgetSummary
-  if (totalBudgetNum > 0) {
-    const b = itinerary.estimatedBudgetBreakdown || ({} as any);
-    const d = itinerary.detailedBudgetSummary || ({} as any);
-    const hasOrigin = Boolean(itinerary.origin && itinerary.origin.trim() !== "");
-
-    // Extract raw category values from either breakdown or detailed summary
-    let rawAcc = parseVal(b.accommodation) || parseVal(d.accommodationTotal) || 0;
-    let rawFood = parseVal(b.food) || parseVal(d.foodTotal) || 0;
-    let rawAct = parseVal(b.activities) || parseVal(d.attractionTotal) || 0;
-    let rawTrans = parseVal(b.transport) || parseVal(d.localTransportTotal) || 0;
-    let rawMisc = parseVal(b.miscellaneous) || parseVal(d.miscellaneousExpenses) || 0;
-    let rawTransit = hasOrigin ? (parseVal(b.originToDestinationTravel) || parseVal(d.originToDestinationCost) || 0) : 0;
-
-    let sumRaw = rawAcc + rawFood + rawAct + rawTrans + rawMisc + rawTransit;
-
-    if (sumRaw <= 0) {
-      if (hasOrigin) {
-        rawAcc = totalBudgetNum * 0.35;
-        rawFood = totalBudgetNum * 0.20;
-        rawAct = totalBudgetNum * 0.15;
-        rawTrans = totalBudgetNum * 0.12;
-        rawTransit = totalBudgetNum * 0.13;
-        rawMisc = totalBudgetNum * 0.05;
-      } else {
-        rawAcc = totalBudgetNum * 0.40;
-        rawFood = totalBudgetNum * 0.25;
-        rawAct = totalBudgetNum * 0.15;
-        rawTrans = totalBudgetNum * 0.15;
-        rawMisc = totalBudgetNum * 0.05;
-      }
-      sumRaw = totalBudgetNum;
-    }
-
-    // Proportional scaling factor
-    const ratio = totalBudgetNum / sumRaw;
-
-    let scaledAcc = Math.round(rawAcc * ratio);
-    let scaledFood = Math.round(rawFood * ratio);
-    let scaledAct = Math.round(rawAct * ratio);
-    let scaledTrans = Math.round(rawTrans * ratio);
-    let scaledMisc = rawMisc > 0 ? Math.round(rawMisc * ratio) : 0;
-    let scaledTransit = (hasOrigin && rawTransit > 0) ? Math.round(rawTransit * ratio) : 0;
-
-    // Adjust integer rounding delta so category sum equals totalBudgetNum EXACTLY
-    const scaledSum = scaledAcc + scaledFood + scaledAct + scaledTrans + scaledMisc + scaledTransit;
-    const diff = totalBudgetNum - scaledSum;
-
-    if (diff !== 0) {
-      const maxVal = Math.max(scaledAcc, scaledFood, scaledAct, scaledTrans);
-      if (maxVal === scaledAcc) scaledAcc += diff;
-      else if (maxVal === scaledFood) scaledFood += diff;
-      else if (maxVal === scaledAct) scaledAct += diff;
-      else scaledTrans += diff;
-    }
-
-    const formattedTotal = currencySym + totalBudgetNum.toLocaleString();
-
-    itinerary.estimatedBudgetBreakdown = {
-      accommodation: currencySym + scaledAcc.toLocaleString(),
-      food: currencySym + scaledFood.toLocaleString(),
-      activities: currencySym + scaledAct.toLocaleString(),
-      transport: currencySym + scaledTrans.toLocaleString(),
-      total: formattedTotal,
-      ...(scaledMisc > 0 ? { miscellaneous: currencySym + scaledMisc.toLocaleString() } : {}),
-      ...(scaledTransit > 0 ? { originToDestinationTravel: currencySym + scaledTransit.toLocaleString() } : { originToDestinationTravel: "N/A" })
-    };
-
-    itinerary.detailedBudgetSummary = {
-      accommodationTotal: currencySym + scaledAcc.toLocaleString(),
-      foodTotal: currencySym + scaledFood.toLocaleString(),
-      attractionTotal: currencySym + scaledAct.toLocaleString(),
-      localTransportTotal: currencySym + scaledTrans.toLocaleString(),
-      grandTotal: formattedTotal,
-      miscellaneousExpenses: scaledMisc > 0 ? (currencySym + scaledMisc.toLocaleString()) : "N/A",
-      originToDestinationCost: scaledTransit > 0 ? (currencySym + scaledTransit.toLocaleString()) : "N/A"
-    };
-  }
-
-  // 3. Constrain location and hotel names to max 40 chars
   if (itinerary.placesToVisit) {
     itinerary.placesToVisit.forEach((place: any) => {
       place.name = sanitizeLocation(place.name);
@@ -965,51 +887,19 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
   }
 
   if (itinerary.hotelRecommendations) {
-    const r = itinerary.hotelRecommendations;
-    if (r.budget) r.budget.forEach((h: any) => h.name = sanitizeLocation(h.name));
-    if (r.midRange) r.midRange.forEach((h: any) => h.name = sanitizeLocation(h.name));
-    if (r.luxury) r.luxury.forEach((h: any) => h.name = sanitizeLocation(h.name));
+    const recommendations = itinerary.hotelRecommendations;
+    if (recommendations.budget) recommendations.budget.forEach((hotel: any) => hotel.name = sanitizeLocation(hotel.name));
+    if (recommendations.midRange) recommendations.midRange.forEach((hotel: any) => hotel.name = sanitizeLocation(hotel.name));
+    if (recommendations.luxury) recommendations.luxury.forEach((hotel: any) => hotel.name = sanitizeLocation(hotel.name));
   }
 
-  // 4. Day-by-Day budget scaling and activity constraints
-  const daysData = itinerary.days || [];
-  const totalDays = daysData.length || 1;
-  const accommodationCost = itinerary.estimatedBudgetBreakdown ? parseVal(itinerary.estimatedBudgetBreakdown.accommodation) : 0;
-  const localSpendingBudget = totalBudgetNum > accommodationCost ? (totalBudgetNum - accommodationCost) : (totalBudgetNum * 0.5);
-  const targetDailyBudget = Math.floor(localSpendingBudget / totalDays);
-
-  daysData.forEach((day: any) => {
-    let dayBudget = parseVal(day.dailyBudget);
-    if (dayBudget <= 0 || dayBudget > localSpendingBudget || dayBudget > totalBudgetNum) {
-      dayBudget = targetDailyBudget;
-    }
-
-    const daySpend = day.activities.reduce((sum: number, act: any) => sum + parseVal(act.cost), 0);
-    if (daySpend > dayBudget && daySpend > 0) {
-      const ratio = (dayBudget * 0.8) / daySpend;
-      day.activities.forEach((act: any) => {
-        if (act.location) act.location = sanitizeLocation(act.location);
-        act.title = sanitizeLocation(act.title);
-        const costVal = parseVal(act.cost);
-        if (costVal > 0) {
-          act.cost = currencySym + Math.round(costVal * ratio).toLocaleString();
-        }
-      });
-    } else {
-      day.activities.forEach((act: any) => {
-        if (act.location) act.location = sanitizeLocation(act.location);
-        act.title = sanitizeLocation(act.title);
-        const costVal = parseVal(act.cost);
-        if (costVal > 0) {
-          act.cost = currencySym + costVal.toLocaleString();
-        } else if (day.activities.length > 0) {
-          const allocatedPerAct = Math.floor((dayBudget * 0.4) / day.activities.length);
-          act.cost = currencySym + allocatedPerAct.toLocaleString();
-        }
-      });
-    }
-
-    day.dailyBudget = currencySym + dayBudget.toLocaleString();
+  (itinerary.days || []).forEach((day: any) => {
+    (day.activities || []).forEach((activity: any) => {
+      if (activity.location) activity.location = sanitizeLocation(activity.location);
+      activity.title = sanitizeLocation(activity.title);
+      const cost = parseVal(activity.cost);
+      if (cost > 0) activity.cost = currencySym + cost.toLocaleString("en-IN");
+    });
   });
 
   return itinerary;
