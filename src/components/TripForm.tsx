@@ -209,7 +209,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-8 rounded-3xl border border-slate-100 bg-white p-6 shadow-xl shadow-slate-100/10 dark:border-slate-900 dark:bg-slate-950 md:p-8">
+    <form onSubmit={handleSubmit} className="trip-planner-shell space-y-7 rounded-[30px] border border-slate-100 bg-white p-5 shadow-2xl shadow-slate-950/10 dark:border-slate-800 dark:bg-slate-950 md:p-7">
       {error && (
         <div className="flex items-start gap-2.5 rounded-2xl border border-rose-100 bg-rose-50/50 p-4 text-sm text-rose-800 dark:border-rose-900/30 dark:bg-rose-950/10 dark:text-rose-400">
           <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
@@ -217,17 +217,21 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
         </div>
       )}
 
-      <section className="space-y-3">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">How can we help?</p>
-          <h2 className="mt-1 text-2xl font-black text-slate-900 dark:text-white">Choose how you want to plan</h2>
+      <section className="planner-mode-section space-y-4">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-teal-500">Start your journey</p>
+            <h2 className="mt-1 text-2xl font-black text-slate-900 dark:text-white">How would you like to plan?</h2>
+            <p className="mt-1 text-sm text-slate-500">Choose the fastest path for your trip.</p>
+          </div>
+          <span className="hidden rounded-full border border-teal-500/20 bg-teal-500/10 px-3 py-1 text-[11px] font-bold text-teal-400 md:inline">STEP 1</span>
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          <button type="button" onClick={() => { setPlanningMode("known_destination"); setRecommendations([]); }} className={`rounded-2xl border-2 p-5 text-left transition ${planningMode === "known_destination" ? "border-teal-500 bg-teal-50 dark:bg-teal-950/20" : "border-slate-200 dark:border-slate-800"}`}>
-            <div className="text-2xl">📍</div><div className="mt-2 font-black">I Know My Destination</div><p className="mt-1 text-xs text-slate-500">Tell us where you are going and we will plan the complete trip.</p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <button type="button" onClick={() => { setPlanningMode("known_destination"); setRecommendations([]); }} className={`planning-mode-card ${planningMode === "known_destination" ? "is-selected" : ""}`}>
+            <div className="planning-mode-icon">📍</div><div className="mt-3 text-lg font-black">I Know My Destination</div><p className="mt-1 text-sm leading-relaxed text-slate-500">Tell us where you are going and we will build the complete trip.</p>
           </button>
-          <button type="button" onClick={() => { setPlanningMode("help_choose"); setDestination(""); }} className={`rounded-2xl border-2 p-5 text-left transition ${planningMode === "help_choose" ? "border-fuchsia-500 bg-fuchsia-50 dark:bg-fuchsia-950/20" : "border-slate-200 dark:border-slate-800"}`}>
-            <div className="text-2xl">✨</div><div className="mt-2 font-black">Help Me Choose</div><p className="mt-1 text-xs text-slate-500">Share your time, budget and preferences to receive destination matches.</p>
+          <button type="button" onClick={() => { setPlanningMode("help_choose"); setDestination(""); }} className={`planning-mode-card planning-mode-card-alt ${planningMode === "help_choose" ? "is-selected" : ""}`}>
+            <div className="planning-mode-icon">✨</div><div className="mt-3 text-lg font-black">Help Me Choose</div><p className="mt-1 text-sm leading-relaxed text-slate-500">Share your time, budget and preferences to discover your best matches.</p>
           </button>
         </div>
       </section>
@@ -253,12 +257,12 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
 
       <section className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Who is travelling?</p>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{TRAVELER_TYPES.map((item) => <ChoiceButton key={item.name} selected={travelerType === item.name} onClick={() => setTravelerType(item.name)}><span className="mr-1">{item.icon}</span>{item.name}</ChoiceButton>)}</div>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">{TRAVELER_TYPES.map((item) => <ChoiceButton key={item.name} selected={travelerType === item.name} onClick={() => setTravelerType(item.name)}><span className="mr-1">{item.icon}</span>{item.name}</ChoiceButton>)}</div>
       </section>
 
       <section className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Select your travel style</p>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(125px,1fr))] gap-3">{TRAVEL_STYLES.map((item) => <button key={item.name} type="button" onClick={() => setTravelStyle(item.name)} title={item.description} className={`min-h-[112px] rounded-2xl border-2 p-3 text-center transition ${travelStyle === item.name ? "border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-950/20 dark:text-teal-300" : "border-slate-100 bg-slate-50/50 text-slate-600 dark:border-slate-900 dark:bg-slate-900/30 dark:text-slate-400"}`}><div className="text-xl">{item.icon}</div><div className="mt-1 text-sm font-bold">{item.name}{item.name === "Smart Luxury" && <span className="ml-1 text-[9px] text-fuchsia-500">NEW</span>}</div><p className="mt-1 text-[10px] leading-tight opacity-75">{item.description}</p></button>)}</div>
+        <div className="travel-style-grid grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-3">{TRAVEL_STYLES.map((item) => <button key={item.name} type="button" onClick={() => setTravelStyle(item.name)} title={item.description} className={`travel-style-card ${item.name === "Smart Luxury" ? "featured" : ""} ${travelStyle === item.name ? "is-selected" : ""}`}><div className="text-2xl">{item.icon}</div><div className="mt-2 text-sm font-black">{item.name}{item.name === "Smart Luxury" && <span className="ml-1 rounded-full bg-fuchsia-500/15 px-1.5 py-0.5 text-[8px] font-black text-fuchsia-400">NEW</span>}</div><p className="mt-1 text-[10px] leading-snug opacity-70">{item.description}</p></button>)}</div>
       </section>
 
       <section className="space-y-3">
