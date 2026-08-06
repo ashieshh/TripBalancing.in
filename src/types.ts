@@ -1,6 +1,21 @@
+export type PlanningMode = 'known_destination' | 'help_choose';
+export type BudgetMode = 'fixed' | 'recommended';
+export type RevisitPreference = 'new_only' | 'allow_revisit' | 'favorites_only';
+export type TravelerType = 'Couple' | 'Honeymoon' | 'Family' | 'Friends' | 'Solo' | 'Business' | 'Senior Citizens' | 'Students' | 'Women-only Trip' | 'Group Trip' | 'Parents with Children';
+
+export interface DestinationRecommendation {
+  destination: string;
+  matchScore: number;
+  whyItFits: string;
+  estimatedCostRange: string;
+  bestFor: string[];
+  bestMonths?: string;
+}
+
 export type TravelStyle = 'Budget' | 'Smart Luxury' | 'Luxury' | 'Family' | 'Solo' | 'Adventure' | 'Business' | 'Honeymoon' | 'Backpacker' | 'Food Explorer' | 'Wellness & Spa' | 'Culture & History' | 'Beach Escape';
 
 export interface TripInput {
+  planningMode?: PlanningMode;
   destination: string;
   origin?: string;
   startDate: string;
@@ -13,7 +28,14 @@ export interface TripInput {
   averageDailyBudget?: string;
   budgetWarning?: string;
   travelers: number;
+  travelerType?: TravelerType;
   travelStyle: TravelStyle;
+  budgetMode?: BudgetMode;
+  tripPurpose?: string;
+  preferredWeather?: string;
+  interests?: string[];
+  visitedDestinations?: string[];
+  revisitPreference?: RevisitPreference;
   isAiBudgetPlanner?: boolean;
 }
 

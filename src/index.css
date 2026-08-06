@@ -209,3 +209,12 @@
 }
 
 
+
+@layer components {
+  .input-field {
+    @apply w-full min-w-0 rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3.5 text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-1 focus:ring-teal-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200;
+  }
+  .counter-btn {
+    @apply h-12 w-12 flex-shrink-0 rounded-2xl bg-slate-100 text-xl font-bold text-slate-800 transition hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200;
+  }
+}

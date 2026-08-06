@@ -1214,12 +1214,130 @@ app.post("/api/email/send-transactional", async (req, res) => {
   }
 });
 
+// Destination Recommendation Endpoint
+app.post("/api/recommend-destinations", async (req, res) => {
+  try {
+    const {
+      origin,
+      days,
+      travelers,
+      travelerType,
+      travelStyle,
+      budgetMode,
+      budgetAmount,
+      tripScope,
+      tripPurpose,
+      preferredWeather,
+      interests = [],
+      visitedDestinations = [],
+      revisitPreference = "new_only",
+      startDate,
+    } = req.body || {};
+
+    if (!origin || !days || !travelers || !travelerType || !travelStyle) {
+      return res.status(400).json({ error: "Missing destination recommendation details." });
+    }
+
+    const ai = getGeminiClient();
+    const visitedRule = revisitPreference === "new_only"
+      ? `Do not recommend any of these previously visited destinations: ${visitedDestinations.join(", ") || "none"}.`
+      : revisitPreference === "favorites_only"
+        ? `Prefer these previously visited favourites when suitable: ${visitedDestinations.join(", ") || "none supplied"}.`
+        : `Previously visited places may be included, but prefer fresh options: ${visitedDestinations.join(", ") || "none"}.`;
+
+    const prompt = `Recommend exactly 5 realistic travel destinations for a TripBalancing user.
+
+User profile:
+- Starting city: ${origin}
+- Trip scope: ${tripScope || "Both"}
+- Duration: ${days} days
+- Travelers: ${travelers}
+- Traveler type: ${travelerType}
+- Travel style: ${travelStyle}
+- Budget mode: ${budgetMode || "fixed"}
+- Budget: ${budgetAmount || "AI Recommended"}
+- Purpose: ${tripPurpose || "Vacation"}
+- Preferred weather: ${preferredWeather || "Any"}
+- Interests: ${(interests || []).join(", ") || "General sightseeing"}
+- Approximate start date: ${startDate || "Flexible"}
+- Previously visited: ${(visitedDestinations || []).join(", ") || "None"}
+- Revisit rule: ${visitedRule}
+
+Rules:
+1. Recommendations must be practical from the stated origin and duration.
+2. For a fixed budget, estimatedCostRange must be realistic for the complete group and should fit or stay close to the stated total budget. Do not recommend obviously unaffordable destinations.
+3. Smart Luxury means boutique/heritage stays and selective premium experiences, not wasteful ultra-luxury.
+4. Explain why each destination fits in one concise sentence.
+5. Use a 0-100 match score and order highest match first.
+6. Return realistic full-trip group cost ranges, including round-trip travel, accommodation, food, local transport, activities and buffer.
+7. Do not invent impossible prices and do not repeat essentially identical destinations.
+
+Return strict JSON only.`;
+
+    const response = await ai.models.generateContent({
+      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            recommendations: {
+              type: Type.ARRAY,
+              minItems: 5,
+              maxItems: 5,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  destination: { type: Type.STRING },
+                  matchScore: { type: Type.NUMBER },
+                  whyItFits: { type: Type.STRING },
+                  estimatedCostRange: { type: Type.STRING },
+                  bestFor: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  bestMonths: { type: Type.STRING },
+                },
+                required: ["destination", "matchScore", "whyItFits", "estimatedCostRange", "bestFor"],
+              },
+            },
+          },
+          required: ["recommendations"],
+        },
+      },
+    });
+
+    const parsed = JSON.parse(response.text || "{}");
+    const recommendations = Array.isArray(parsed.recommendations)
+      ? parsed.recommendations
+          .map((item: any) => ({
+            destination: String(item.destination || "").trim(),
+            matchScore: Math.max(0, Math.min(100, Math.round(Number(item.matchScore) || 0))),
+            whyItFits: String(item.whyItFits || "").trim(),
+            estimatedCostRange: String(item.estimatedCostRange || "").trim(),
+            bestFor: Array.isArray(item.bestFor) ? item.bestFor.map(String).slice(0, 4) : [],
+            bestMonths: item.bestMonths ? String(item.bestMonths) : undefined,
+          }))
+          .filter((item: any) => item.destination)
+          .sort((a: any, b: any) => b.matchScore - a.matchScore)
+          .slice(0, 5)
+      : [];
+
+    if (!recommendations.length) {
+      return res.status(502).json({ error: "The AI did not return usable destination recommendations." });
+    }
+
+    return res.json({ recommendations });
+  } catch (error: any) {
+    console.error("Destination recommendation failed:", error?.message || error);
+    return res.status(500).json({ error: "Unable to recommend destinations right now. Please try again." });
+  }
+});
+
 // AI Itinerary Generator Endpoint
 app.post("/api/generate-itinerary", async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;
   let diffDays = 3;
   try {
-    const { destination, origin, startDate, endDate, budgetAmount, travelers, travelStyle, plan, freeTripsUsed, paidTripsBalance, isAiBudgetPlanner } = req.body;
+    const { destination, origin, startDate, endDate, budgetAmount, travelers, travelerType, travelStyle, budgetMode, tripPurpose, preferredWeather, interests, visitedDestinations, revisitPreference, planningMode, plan, freeTripsUsed, paidTripsBalance, isAiBudgetPlanner } = req.body;
 
     if (!destination || !startDate || !endDate || !travelers || !travelStyle || (travelStyle !== "Smart Luxury" && !budgetAmount)) {
       return res.status(400).json({ error: "Missing required trip fields." });
@@ -1321,7 +1439,13 @@ ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
 - Duration: From ${startDate} to ${endDate} (${diffDays} days)
 - Budget Level/Amount: ${effectiveBudgetAmount}
 - Travelers: ${travelers} people
+- Traveler Type: ${travelerType || "Not specified"}
 - Travel Style: ${travelStyle}
+- Budget Mode: ${budgetMode || "fixed"}
+- Trip Purpose: ${tripPurpose || "Vacation"}
+- Preferred Weather: ${preferredWeather || "Any"}
+- Interests: ${Array.isArray(interests) ? interests.join(", ") : "General"}
+- Planning Mode: ${planningMode || "known_destination"}
 - Style Planning Rules: ${selectedStyleGuidance}
 
 Please tailor the recommendations explicitly:
@@ -1348,7 +1472,7 @@ Please tailor the recommendations explicitly:
 7. List essential packing items suitable for the destination's climate during those dates.
 8. Provide essential transportation suggestions for getting around.
 9. List very practical travel tips, safety hacks, and cultural etiquettes.
-9A. STYLE PERSONALIZATION IS MANDATORY: hotels, food, fun activities, transport, pace, hidden gems and daily itinerary must visibly match the selected travel style.
+9A. STYLE PERSONALIZATION IS MANDATORY: hotels, food, fun activities, transport, pace, hidden gems and daily itinerary must visibly match the selected travel style and traveler type (${travelerType || "general traveler"}).
 9B. PRICE INTEGRITY IS MANDATORY: never change the real price of the same item at the same outlet merely because the travel style changed. Distinguish per-piece, per-plate, per-person and group totals. Change the venue/service level, not the factual unit price.
 9C. For Smart Luxury, set budgetAmount to the Recommended Smart Luxury total and explain Minimum Luxury, Recommended Smart Luxury and Premium Luxury in aiBudgetSummary.
 
