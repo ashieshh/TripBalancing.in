@@ -4,16 +4,13 @@ import {
   Pencil, ShieldCheck, Shield, Mail, Check, AlertCircle, LogOut, Luggage, Cloud, ExternalLink, Coins,
   Tag, MessageSquare, TrendingUp, ArrowUpDown, ChevronDown, Clock
 } from "lucide-react";
-import { 
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend 
-} from "recharts";
 import { TripRecord, BuddyInvitation } from "../types";
 
 // Lazy load heavy components to reduce initial bundle size and speed up page load
-import WorldMap from "./WorldMap";
 import GlobalPackingChecklist from "./GlobalPackingChecklist";
 import CurrencyConverter from "./CurrencyConverter";
 import TravelBuddyInvitationsSection from "./TravelBuddyInvitationsSection";
+import DashboardOverview from "./DashboardOverview";
 
 interface DashboardProps {
   trips: TripRecord[];
@@ -552,197 +549,18 @@ export default function Dashboard({
 
       {activeTab === "trips" ? (
         <>
-          {/* Travel Stats panel */}
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-6 w-full max-w-full min-w-0">
-        
-        <div className="p-6 bg-gradient-to-br from-teal-500/5 to-emerald-500/5 dark:from-teal-950/20 dark:to-emerald-950/20 border border-teal-100/40 dark:border-teal-900/30 rounded-3xl flex flex-col items-center justify-center text-center gap-3 min-h-[140px] h-full relative overflow-hidden">
-          <div className="p-2.5 bg-teal-500/10 dark:bg-teal-500/20 rounded-2xl text-teal-600 dark:text-teal-400">
-            <Globe2 className="w-5 h-5" />
-          </div>
-          <div className="flex flex-col items-center">
-            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Total Adventures</span>
-            <span className="text-xl font-extrabold text-slate-800 dark:text-slate-100 mt-1">{totalTrips} Trips</span>
-          </div>
-        </div>
-
-        <div className="p-6 bg-gradient-to-br from-purple-500/5 to-indigo-500/5 dark:from-purple-950/20 dark:to-indigo-950/20 border border-purple-100/40 dark:border-purple-900/30 rounded-3xl flex flex-col items-center justify-center text-center gap-3 min-h-[140px] h-full relative overflow-hidden">
-          <div className="p-2.5 bg-purple-500/10 dark:bg-purple-500/20 rounded-2xl text-purple-600 dark:text-purple-400">
-            <MapPin className="w-5 h-5" />
-          </div>
-          <div className="flex flex-col items-center">
-            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Places Explored</span>
-            <span className="text-xl font-extrabold text-slate-800 dark:text-slate-100 mt-1">{uniqueDestinations} Cities</span>
-          </div>
-        </div>
-
-        <div className="p-6 bg-gradient-to-br from-amber-500/5 to-orange-500/5 dark:from-amber-950/20 dark:to-orange-950/20 border border-amber-100/40 dark:border-amber-900/30 rounded-3xl flex flex-col items-center justify-center text-center gap-3 min-h-[140px] h-full relative overflow-hidden">
-          <div className="p-2.5 bg-amber-500/10 dark:bg-amber-500/20 rounded-2xl text-amber-600 dark:text-amber-400">
-            <Users className="w-5 h-5" />
-          </div>
-          <div className="flex flex-col items-center">
-            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Travel Companions</span>
-            <span className="text-xl font-extrabold text-slate-800 dark:text-slate-100 mt-1">{totalTravelers} People</span>
-          </div>
-        </div>
-
-        <div className="p-6 bg-gradient-to-br from-blue-500/5 to-cyan-500/5 dark:from-blue-950/20 dark:to-cyan-950/20 border border-blue-100/40 dark:border-blue-900/30 rounded-3xl flex flex-col items-center justify-center text-center gap-3 min-h-[140px] h-full relative overflow-hidden">
-          <div className="p-2.5 bg-blue-500/10 dark:bg-blue-500/20 rounded-2xl text-blue-600 dark:text-blue-400">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <div className="flex flex-col items-center w-full min-w-0">
-            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Plan Status</span>
-            <span className="text-sm font-black text-slate-850 dark:text-slate-100 block capitalize truncate mt-1 w-full">
-              {plan === "free" ? "Free Plan" : plan === "pay_per_trip" ? "Pay Per Trip" : plan === "yearly" ? "Yearly Premium" : "Lifetime Premium"}
-            </span>
-            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block mt-0.5 truncate w-full">
-              {plan === "free" 
-                ? `${Math.max(0, 2 - freeTripsUsed)} / 2 Free Left` 
-                : plan === "pay_per_trip" 
-                  ? `${paidTripsBalance} Paid Balance` 
-                  : "Unlimited AI Plans"}
-            </span>
-          </div>
-          {onUpgradeClick && (
-            <button
-              onClick={onUpgradeClick}
-              className="absolute bottom-1.5 text-[10px] font-black text-teal-600 dark:text-teal-400 hover:underline cursor-pointer"
-            >
-              Upgrade
-            </button>
-          )}
-        </div>
-
-      </div>
-
-      {/* World Map Visualization */}
-      <Suspense fallback={
-        <div className="h-[380px] bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-900 rounded-3xl flex flex-col items-center justify-center space-y-3 animate-pulse">
-          <Globe2 className="w-8 h-8 text-teal-400 animate-spin" />
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Loading Interactive Travel Map...</span>
-        </div>
-      }>
-        <WorldMap trips={trips} onSelectTrip={onSelectTrip} />
-      </Suspense>
-
-      {/* Spend Category Pie Chart Visualization */}
-      <div id="category-budget-distribution" className="bg-white dark:bg-slate-950 border border-slate-150 dark:border-slate-850 rounded-3xl p-6 shadow-sm space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-900 pb-4">
-          <div className="space-y-1">
-            <h3 className="text-lg font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-              <span>Budget Distribution by Trip Category</span>
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Visualization of your total travel investments across custom categories</p>
-          </div>
-          
-          <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-900 px-4 py-2.5 rounded-2xl text-right sm:text-right">
-            <span className="text-[10px] font-black text-slate-450 dark:text-slate-500 uppercase tracking-wider block">Total Spent (Planned)</span>
-            <span className="text-xl font-black text-teal-600 dark:text-teal-400">
-              ${categoryData.reduce((acc, curr) => acc + curr.value, 0).toLocaleString()}
-            </span>
-          </div>
-        </div>
-
-        {categoryData.length === 0 ? (
-          <div className="h-[240px] flex flex-col items-center justify-center text-center space-y-2 bg-slate-50/50 dark:bg-slate-900/10 rounded-2xl border border-dashed border-slate-200/40 dark:border-slate-800/40 p-6">
-            <Coins className="w-8 h-8 text-slate-350 dark:text-slate-650 animate-bounce" />
-            <p className="text-sm font-bold text-slate-600 dark:text-slate-400">No Category Spending Data Available</p>
-            <p className="text-xs text-slate-450 dark:text-slate-500 max-w-sm leading-relaxed">
-              To visualize your budget breakdown, assign custom categories to your travel itineraries and define planned budget amounts.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-center">
-            {/* Pie Chart container */}
-            <div className="lg:col-span-2 h-[280px] w-full flex items-center justify-center relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={categoryData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={65}
-                    outerRadius={95}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {categoryData.map((entry, index) => (
-                      <Cell 
-                        key={`cell-${index}`} 
-                        fill={CHART_COLORS[index % CHART_COLORS.length]} 
-                        className="stroke-white dark:stroke-slate-950 stroke-2 focus:outline-none"
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    formatter={(value: any) => [`$${Number(value).toLocaleString()}`, "Total Budget"]}
-                    contentStyle={{
-                      backgroundColor: "rgba(15, 23, 42, 0.95)",
-                      borderRadius: "12px",
-                      border: "1px solid rgba(255, 255, 255, 0.1)",
-                      color: "#fff",
-                      fontSize: "12px",
-                      fontWeight: "bold",
-                      boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)"
-                    }}
-                    itemStyle={{ color: "#fff" }}
-                    labelStyle={{ display: "none" }}
-                  />
-                  <Legend 
-                    verticalAlign="bottom" 
-                    height={36}
-                    iconType="circle"
-                    iconSize={8}
-                    formatter={(value: string) => {
-                      const item = categoryData.find(d => d.name === value);
-                      const amountStr = item ? ` ($${item.value.toLocaleString()})` : "";
-                      return <span className="text-xs font-bold text-slate-600 dark:text-slate-400">{value}{amountStr}</span>;
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              
-              {/* Inner Circle stats display */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none pb-9">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">Categories</span>
-                <span className="text-2xl font-black text-slate-800 dark:text-slate-100">{categoryData.length}</span>
-              </div>
-            </div>
-
-            {/* Side list with progress bars */}
-            <div className="space-y-4 bg-slate-50/50 dark:bg-slate-900/10 p-5 rounded-2xl border border-slate-100 dark:border-slate-900 max-h-[280px] overflow-y-auto">
-              <h4 className="text-xs font-black uppercase tracking-wider text-slate-455 dark:text-slate-500 mb-2">Category Overview</h4>
-              <div className="space-y-3.5">
-                {categoryData.map((item, index) => {
-                  const total = categoryData.reduce((acc, curr) => acc + curr.value, 0);
-                  const percent = total > 0 ? (item.value / total) * 100 : 0;
-                  const color = CHART_COLORS[index % CHART_COLORS.length];
-                  return (
-                    <div key={item.name} className="space-y-1">
-                      <div className="flex items-center justify-between text-xs font-bold">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-                          <span className="text-slate-700 dark:text-slate-300 truncate font-extrabold">{item.name}</span>
-                        </div>
-                        <div className="text-right flex-shrink-0 space-x-1.5">
-                          <span className="text-slate-850 dark:text-slate-200">${item.value.toLocaleString()}</span>
-                          <span className="text-slate-400 dark:text-slate-500 text-[10px]">({percent.toFixed(0)}%)</span>
-                        </div>
-                      </div>
-                      <div className="h-2 w-full bg-slate-200/50 dark:bg-slate-850 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full rounded-full transition-all duration-700" 
-                          style={{ width: `${percent}%`, backgroundColor: color }} 
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+          <DashboardOverview
+            trips={trips}
+            onSelectTrip={onSelectTrip}
+            totalTrips={totalTrips}
+            uniqueDestinations={uniqueDestinations}
+            totalTravelers={totalTravelers}
+            plan={plan}
+            freeTripsUsed={freeTripsUsed}
+            paidTripsBalance={paidTripsBalance}
+            onUpgradeClick={onUpgradeClick}
+            categoryData={categoryData}
+          />
 
       {/* Trips list section */}
       <div className="max-w-[1400px] w-full mx-auto p-6 space-y-6">
