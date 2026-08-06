@@ -1221,9 +1221,11 @@ app.post("/api/generate-itinerary", async (req, res) => {
   try {
     const { destination, origin, startDate, endDate, budgetAmount, travelers, travelStyle, plan, freeTripsUsed, paidTripsBalance, isAiBudgetPlanner } = req.body;
 
-    if (!destination || !startDate || !endDate || !budgetAmount || !travelers || !travelStyle) {
-      return res.status(400).json({ error: "Missing required fields: destination, startDate, endDate, budgetAmount, travelers, travelStyle" });
+    if (!destination || !startDate || !endDate || !travelers || !travelStyle || (travelStyle !== "Smart Luxury" && !budgetAmount)) {
+      return res.status(400).json({ error: "Missing required trip fields." });
     }
+
+    const effectiveBudgetAmount = travelStyle === "Smart Luxury" ? "AI Recommended" : budgetAmount;
 
     // Determine the number of days (1 to 365)
     const start = new Date(startDate);
@@ -1242,7 +1244,7 @@ app.post("/api/generate-itinerary", async (req, res) => {
     }
 
     // 1. Check Itinerary Cache first to prevent redundant generations and reduce response time
-    const cacheKey = `${destination.toLowerCase().trim()}_${origin ? origin.toLowerCase().trim() : ""}_${startDate}_${endDate}_${budgetAmount}_${travelers}_${String(travelStyle).toLowerCase().trim()}_${isAiBudgetPlanner ? "ai" : "manual"}`;
+    const cacheKey = `${destination.toLowerCase().trim()}_${origin ? origin.toLowerCase().trim() : ""}_${startDate}_${endDate}_${effectiveBudgetAmount}_${travelers}_${String(travelStyle).toLowerCase().trim()}_${isAiBudgetPlanner ? "ai" : "manual"}`;
     const cached = ITINERARY_CACHE.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < ITINERARY_TTL)) {
       console.log(`[Cache Hit] Returning cached itinerary for destination: ${destination} from origin: ${origin || "any"}`);
@@ -1275,7 +1277,7 @@ app.post("/api/generate-itinerary", async (req, res) => {
 Target Details:
 - Destination: ${destination}
 ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
-- Budget Level/Amount: ${budgetAmount}
+- Budget Level/Amount: ${effectiveBudgetAmount}
 - Travelers: ${travelers} people
 - Travel Style: Budget (Optimized by AI Budget Planner)
 - Start Date: ${startDate}
@@ -1296,14 +1298,31 @@ CRITICAL MANDATES FOR "AI BUDGET PLANNER ✨" MODE:
 
 Return the response in strict JSON format.`;
     } else {
+      const styleGuidance: Record<string, string> = {
+        "Budget": "Prioritize lowest practical cost, clean budget stays, public transport, free attractions and authentic local food. Never inflate real item prices.",
+        "Smart Luxury": "Do not use a user-entered spending cap. Calculate three realistic totals: Minimum Luxury, Recommended Smart Luxury (best value), and Premium Luxury. Build the itinerary around Recommended Smart Luxury. Maximize luxury feel through boutique or heritage hotels, selective private transfers, premium dining moments and high-value experiences without wasteful overspending.",
+        "Luxury": "Treat the entered budget as a hard maximum. Create the most luxurious-feeling trip possible within it using best-value boutique/heritage stays, premium experiences and selective upgrades. Do not recommend unaffordable ultra-luxury items unless clearly marked as optional upgrades.",
+        "Family": "Prioritize safety, family rooms, kid-friendly attractions, manageable travel times, parks, museums and family dining.",
+        "Solo": "Prioritize safe neighborhoods, social experiences, walkability, flexible transport, cafés and well-reviewed solo-friendly stays.",
+        "Adventure": "Prioritize outdoor activities, trekking, water sports, wildlife, active routes and safety requirements.",
+        "Business": "Prioritize airport access, reliable Wi-Fi, work desks, meeting-friendly hotels, lounges, efficient transport and flexible dining.",
+        "Honeymoon": "Prioritize romantic stays, privacy, couple experiences, sunset locations, special dining and relaxed pacing.",
+        "Backpacker": "Prioritize hostels, public transport, local eateries, free walking routes, social activities and low daily spend.",
+        "Food Explorer": "Build the trip around authentic food: breakfast, street food, lunch, dinner, desserts, markets, cooking classes and signature local dishes. Keep unit prices realistic and identify price units such as per piece, per plate or per person.",
+        "Wellness & Spa": "Prioritize spa, yoga, meditation, healthy food, nature, thermal experiences and slow pacing.",
+        "Culture & History": "Prioritize museums, heritage sites, architecture, local traditions, performances, guided history and UNESCO places.",
+        "Beach Escape": "Prioritize beaches, suitable beachfront stays, sunset points, water activities, seafood/local dining and weather-aware relaxation."
+      };
+      const selectedStyleGuidance = styleGuidance[String(travelStyle)] || styleGuidance.Budget;
       prompt = `Create a highly comprehensive, personalized travel itinerary for TripBalancing.
 Target Details:
 - Destination: ${destination}
 ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
 - Duration: From ${startDate} to ${endDate} (${diffDays} days)
-- Budget Level/Amount: ${budgetAmount}
+- Budget Level/Amount: ${effectiveBudgetAmount}
 - Travelers: ${travelers} people
 - Travel Style: ${travelStyle}
+- Style Planning Rules: ${selectedStyleGuidance}
 
 Please tailor the recommendations explicitly:
 1. Since the app serves travelers from India and around the world, provide helpful insights for local Indian travelers (e.g. food options like vegetarian food, flight/train connectivity, visa requirements if international) as well as global details. If a Starting/Origin City (${origin || ""}) is provided, explicitly include customized transit, flight, or train suggestions from ${origin} to ${destination} inside your transit suggestions and daily descriptions.
@@ -1314,7 +1333,7 @@ Please tailor the recommendations explicitly:
    - Specific local transit/transportation suggestions for that day ('transportationSuggestions' field).
    - Estimated daily budget for that day ('dailyBudget' field).
 4. CRITICAL: For longer trips (up to 365 days), make sure to generate entries for every requested day without omitting or skipping any days. Keep daily descriptions concise but complete to stay within token limits.
-5. The "localFood" recommendations should describe must-try street foods and popular restaurants, explicitly labeling veg/non-veg. For every localFood item, include an "estimatedPrice" per-person range in the same reporting currency as the itinerary. Use realistic values for the specific venue and travel style; never use placeholder prices.
+5. The "localFood" recommendations should describe must-try street foods and popular restaurants, explicitly labeling veg/non-veg.
 6. Estimate highly realistic, accurate budgets based on the destination's current average living costs, the travel style (${travelStyle}), duration (${diffDays} days), and number of travelers (${travelers}).
    - You MUST estimate expected cost ranges (a minimum expected cost and a maximum expected cost, e.g., "₹10,000 - ₹15,000" or "$150 - $220") instead of a single fixed value for each.
    - Breakdown costs into 6 specific categories:
@@ -1329,6 +1348,9 @@ Please tailor the recommendations explicitly:
 7. List essential packing items suitable for the destination's climate during those dates.
 8. Provide essential transportation suggestions for getting around.
 9. List very practical travel tips, safety hacks, and cultural etiquettes.
+9A. STYLE PERSONALIZATION IS MANDATORY: hotels, food, fun activities, transport, pace, hidden gems and daily itinerary must visibly match the selected travel style.
+9B. PRICE INTEGRITY IS MANDATORY: never change the real price of the same item at the same outlet merely because the travel style changed. Distinguish per-piece, per-plate, per-person and group totals. Change the venue/service level, not the factual unit price.
+9C. For Smart Luxury, set budgetAmount to the Recommended Smart Luxury total and explain Minimum Luxury, Recommended Smart Luxury and Premium Luxury in aiBudgetSummary.
 
 10. CURATED COST BREAKDOWN AND RECOMMENDATIONS (MANDATORY):
    - Under 'hotelRecommendations', recommend 3 Budget, 3 Mid-range, and 3 Luxury Hotels. Each hotel must have a name, pricePerNight in local currency (e.g. ₹ or $), rating (1.0 to 5.0), distanceFromCenter, and bookingLink (a placeholder searching booking.com for that hotel name).
@@ -1435,8 +1457,7 @@ Return the response in strict JSON format.`;
                   name: { type: Type.STRING },
                   description: { type: Type.STRING },
                   type: { type: Type.STRING, description: "veg, non-veg, both, dessert, or beverage" },
-                  mustTryAt: { type: Type.STRING },
-                  estimatedPrice: { type: Type.STRING, description: "Realistic per-person price range in the same reporting currency as the itinerary, e.g. Rs. 800 - Rs. 1,500" }
+                  mustTryAt: { type: Type.STRING }
                 },
                 required: ["name", "description", "type", "mustTryAt"]
               }

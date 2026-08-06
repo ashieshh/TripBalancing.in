@@ -1,4 +1,4 @@
-export type TravelStyle = 'Budget' | 'Luxury' | 'Family' | 'Solo' | 'Adventure';
+export type TravelStyle = 'Budget' | 'Smart Luxury' | 'Luxury' | 'Family' | 'Solo' | 'Adventure' | 'Business' | 'Honeymoon' | 'Backpacker' | 'Food Explorer' | 'Wellness & Spa' | 'Culture & History' | 'Beach Escape';
 
 export interface TripInput {
   destination: string;
@@ -102,7 +102,6 @@ export interface FoodItem {
   description: string;
   type: 'veg' | 'non-veg' | 'both' | 'dessert' | 'beverage';
   mustTryAt: string;
-  estimatedPrice?: string;
 }
 
 export interface TransportSuggestion {

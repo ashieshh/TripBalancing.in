@@ -16,6 +16,22 @@ const POPULAR_DESTINATIONS = [
   { name: "Goa, India", icon: "🌴" },
 ];
 
+const TRAVEL_STYLES: Array<{ name: TravelStyle; icon: string; description: string }> = [
+  { name: "Budget", icon: "💰", description: "Best trip at the lowest practical cost" },
+  { name: "Smart Luxury", icon: "✨", description: "AI finds the best-value luxury budget for you" },
+  { name: "Luxury", icon: "👑", description: "Maximum luxury within your chosen budget" },
+  { name: "Family", icon: "👨‍👩‍👧", description: "Safe, comfortable and family-friendly" },
+  { name: "Solo", icon: "🧍", description: "Safe, social and flexible solo travel" },
+  { name: "Adventure", icon: "🧗", description: "Outdoor thrills and active experiences" },
+  { name: "Business", icon: "💼", description: "Efficient stays, workspaces and fast transport" },
+  { name: "Honeymoon", icon: "💕", description: "Romantic stays, dining and private moments" },
+  { name: "Backpacker", icon: "🎒", description: "Hostels, local food and low-cost exploration" },
+  { name: "Food Explorer", icon: "🍽️", description: "Local dishes, markets, cafés and food tours" },
+  { name: "Wellness & Spa", icon: "🌿", description: "Spa, yoga, nature and slow travel" },
+  { name: "Culture & History", icon: "🏛️", description: "Museums, heritage, traditions and local stories" },
+  { name: "Beach Escape", icon: "🏖️", description: "Beaches, resorts, sunsets and water activities" },
+];
+
 export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const [destination, setDestination] = useState("");
   const [origin, setOrigin] = useState("");
@@ -90,6 +106,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
       return;
     }
 
+    const isSmartLuxury = travelStyle === "Smart Luxury";
     const isAiMode = travelStyle === "Budget" && isAiBudgetPlanner;
 
     if (!isAiMode && (!startDate || !endDate)) {
@@ -140,7 +157,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
       origin: origin.trim() || undefined,
       startDate: finalStartDate,
       endDate: finalEndDate,
-      budgetAmount: `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
+      budgetAmount: isSmartLuxury ? "AI Recommended" : `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
       travelers,
       travelStyle,
       isAiBudgetPlanner: isAiMode,
@@ -179,12 +196,9 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
           accent: "indigo"
         };
       case "Adventure":
-        return {
-          bg: "bg-amber-50 dark:bg-amber-950/20",
-          border: "border-amber-200 dark:border-amber-900",
-          text: "text-amber-700 dark:text-amber-400",
-          accent: "amber"
-        };
+        return { bg: "bg-amber-50 dark:bg-amber-950/20", border: "border-amber-200 dark:border-amber-900", text: "text-amber-700 dark:text-amber-400", accent: "amber" };
+      default:
+        return { bg: "bg-cyan-50 dark:bg-cyan-950/20", border: "border-cyan-200 dark:border-cyan-900", text: "text-cyan-700 dark:text-cyan-400", accent: "cyan" };
     }
   };
 
@@ -267,40 +281,31 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
           Select Your Travel Style
         </label>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] w-full max-w-full min-w-0 gap-3">
-          {(["Budget", "Luxury", "Family", "Solo", "Adventure"] as TravelStyle[]).map((style) => {
+          {TRAVEL_STYLES.map(({ name: style, icon, description }) => {
             const isSelected = travelStyle === style;
             const styleTheme = getStyleTheme(style);
-            
             return (
               <button
-                id={`style-btn-${style.toLowerCase()}`}
-                type="button"
-                key={style}
-                disabled={loading}
-                onClick={() => {
-                  setTravelStyle(style);
-                  if (style !== "Budget") {
-                    setIsAiBudgetPlanner(false);
-                  }
-                }}
-                className={`p-4 rounded-2xl text-center border-2 transition-all cursor-pointer h-full flex flex-col justify-between items-center ${
-                  isSelected
-                    ? `${styleTheme.bg} ${styleTheme.border} ${styleTheme.text} ring-2 ring-offset-2 ring-teal-500/10`
-                    : "border-slate-100 dark:border-slate-900 bg-slate-50/50 dark:bg-slate-900/30 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-850"
-                }`}
+                id={`style-btn-${style.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                type="button" key={style} disabled={loading}
+                onClick={() => { setTravelStyle(style); if (style !== "Budget") setIsAiBudgetPlanner(false); }}
+                title={description}
+                className={`p-3 rounded-2xl text-center border-2 transition-all cursor-pointer min-h-[112px] flex flex-col justify-center items-center ${isSelected ? `${styleTheme.bg} ${styleTheme.border} ${styleTheme.text} ring-2 ring-offset-2 ring-teal-500/10` : "border-slate-100 dark:border-slate-900 bg-slate-50/50 dark:bg-slate-900/30 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-850"}`}
               >
-                <div className="text-lg mb-1">
-                  {style === "Budget" && "💰"}
-                  {style === "Luxury" && "✨"}
-                  {style === "Family" && "👨‍👩‍👧‍👦"}
-                  {style === "Solo" && "🎒"}
-                  {style === "Adventure" && "🧗"}
-                </div>
-                <div className="text-sm font-bold">{style}</div>
+                <div className="text-xl mb-1">{icon}</div>
+                <div className="text-sm font-bold leading-tight">{style}{style === "Smart Luxury" && <span className="ml-1 text-[9px] text-fuchsia-500">NEW</span>}</div>
+                <div className="mt-1 text-[10px] leading-tight opacity-75">{description}</div>
               </button>
             );
           })}
         </div>
+
+        {travelStyle === "Smart Luxury" && (
+          <div className="mt-4 p-4 bg-fuchsia-500/5 border border-fuchsia-200 dark:border-fuchsia-900/40 rounded-2xl">
+            <div className="font-extrabold text-fuchsia-700 dark:text-fuchsia-400">✨ Smart Luxury — no budget required</div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">AI will calculate Minimum Luxury, Best-Value Smart Luxury and Premium Luxury, then build the recommended best-value plan.</p>
+          </div>
+        )}
 
         {travelStyle === "Budget" && (
           <div className="mt-4 p-4 bg-teal-500/5 dark:bg-teal-500/5 border border-teal-100 dark:border-teal-900/40 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-1 duration-200">
@@ -416,7 +421,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
 
       {/* 6, 7. Budget & Travelers */}
       <div className="flex flex-wrap gap-6 w-full max-w-full min-w-0">
-        <div className="flex-1 min-w-[280px] space-y-2">
+        {travelStyle !== "Smart Luxury" && <div className="flex-1 min-w-[280px] space-y-2">
           <label htmlFor="budget-input" className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
             {budgetPrefix === "₹" ? <IndianRupee className="w-4 h-4 text-teal-500" /> : <DollarSign className="w-4 h-4 text-teal-500" />}
             Total Trip Budget
@@ -452,7 +457,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
               required
             />
           </div>
-        </div>
+        </div>}
 
         <div className="flex-1 min-w-[280px] space-y-2">
           <label htmlFor="travelers-input" className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
