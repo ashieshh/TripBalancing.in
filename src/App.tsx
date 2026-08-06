@@ -927,13 +927,13 @@ export default function App() {
 
         {/* NORMAL PLANNER & DASHBOARD DISPLAY */}
         {!generating && !activeItinerary && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             
             {/* Left planner form */}
-            <div className="lg:col-span-5 space-y-6">
+            <div className="lg:col-span-7 space-y-5">
               <div className="space-y-1">
-                <h2 className="text-2xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Create a Personalized Trip Guide</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Specify details to let Gemini AI draft your tailored travel companion.</p>
+                <h2 className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Create Your Trip</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Plan around your destination, traveler type, style and budget.</p>
               </div>
 
               {/* Premium Plan Quota Widget */}
@@ -1035,10 +1035,10 @@ export default function App() {
             </div>
 
             {/* Right Dashboard list */}
-            <div className="lg:col-span-7 space-y-6">
+            <div className="lg:col-span-5 space-y-5">
               <div className="space-y-1">
-                <h2 className="text-2xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Your Travel Hub Dashboard</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Previously generated itineraries and historic trip logs.</p>
+                <h2 className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Your Trips</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Continue a saved trip or review recent plans.</p>
               </div>
 
               {tripsLoading ? (
