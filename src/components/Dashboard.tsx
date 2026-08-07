@@ -81,6 +81,25 @@ function formatTimeSent(dateStr?: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function getTripStatus(startDate: string, endDate: string): { label: string; classes: string } {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    return { label: "Saved", classes: "bg-slate-500/10 text-slate-500 dark:text-slate-400" };
+  }
+  start.setHours(0, 0, 0, 0);
+  end.setHours(23, 59, 59, 999);
+  if (now < start) {
+    return { label: "Upcoming", classes: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" };
+  }
+  if (now > end) {
+    return { label: "Completed", classes: "bg-slate-500/10 text-slate-500 dark:text-slate-400" };
+  }
+  return { label: "In progress", classes: "bg-amber-500/10 text-amber-600 dark:text-amber-400" };
+}
+
 export default function Dashboard({ 
   trips, 
   sharedTrips = [],
@@ -576,15 +595,21 @@ export default function Dashboard({
         {hasAnyTrips && (
           <div className="w-full space-y-6">
             <div className="pb-4 border-b border-slate-100 dark:border-slate-900 w-full">
-              <div className="grid grid-cols-1 lg:grid-cols-[35%_65%] gap-8 items-start w-full">
-                {/* Left column (title & description) */}
-                <div className="space-y-1 min-w-0">
-                  <h3 className="text-xl font-bold text-slate-800 dark:text-slate-200">Saved Travel Itineraries</h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">Manage, view, and export your curated travel guides.</p>
+              <div className="grid grid-cols-1 xl:grid-cols-[minmax(240px,0.72fr)_minmax(420px,1.28fr)] gap-6 items-start w-full">
+                <div className="min-w-0 flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400 flex items-center justify-center flex-shrink-0">
+                    <Compass className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-xl font-black text-slate-800 dark:text-slate-100">My Trips</h3>
+                      <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-900 text-[10px] font-black text-slate-500 dark:text-slate-400">{trips.length} saved</span>
+                    </div>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Open, review and manage your personal travel guides.</p>
+                  </div>
                 </div>
                 
-                {/* Right column: Search, Sort and Date Range on the right */}
-                <div className="flex flex-col gap-4 w-full">
+                <div className="flex flex-col gap-3 w-full">
                   {/* First row: Search by destination (full width of right column) */}
                   <div className="relative w-full">
                     <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-400">
@@ -838,36 +863,43 @@ export default function Dashboard({
               });
 
               const isDeletingTrip = isDeleting === trip.id;
+              const tripStatus = getTripStatus(trip.startDate, trip.endDate);
 
               return (
                 <div 
                   key={trip.id} 
-                  className="h-full flex flex-col justify-between bg-white dark:bg-slate-950 border border-slate-150 dark:border-slate-850 rounded-[32px] overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.02)] dark:shadow-[0_4px_20px_rgba(0,0,0,0.15)] hover:shadow-[0_20px_40px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_20px_40px_rgba(0,0,0,0.3)] hover:-translate-y-1.5 hover:border-teal-500/30 dark:hover:border-teal-500/40 transition-all duration-300"
+                  className="group h-full flex flex-col bg-white dark:bg-slate-950 border border-slate-200/80 dark:border-slate-850 rounded-3xl overflow-hidden shadow-sm hover:shadow-xl hover:shadow-slate-900/5 dark:hover:shadow-black/20 hover:-translate-y-1 hover:border-teal-500/35 transition-all duration-300"
                 >
-                  <div className="p-8 sm:p-9 flex-1 flex flex-col justify-between space-y-5">
+                  <div className="h-1.5 w-full bg-gradient-to-r from-teal-500 via-cyan-500 to-indigo-500" />
+                  <div className="p-5 sm:p-6 flex-1 flex flex-col justify-between space-y-5">
                     {/* Top Content Group */}
                     <div className="space-y-4">
                       {/* Destination & Style */}
                       <div className="space-y-2">
-                        <div className="flex flex-wrap gap-1.5">
-                          <span className="inline-flex items-center px-2.5 py-0.5 text-[10px] font-extrabold uppercase bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400 rounded-full tracking-wide">
-                            {trip.travelStyle} Style
-                          </span>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex flex-wrap gap-1.5 min-w-0">
+                            <span className="inline-flex items-center px-2.5 py-1 text-[10px] font-extrabold uppercase bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400 rounded-full tracking-wide">
+                              {trip.travelStyle} Style
+                            </span>
                           {(trip.category || trip.itinerary?.category) && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-extrabold uppercase bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-full tracking-wide border border-amber-200/20 dark:border-amber-900/20">
                               <Tag className="w-2.5 h-2.5 text-amber-500" />
                               {trip.category || trip.itinerary?.category}
                             </span>
                           )}
+                          </div>
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wide flex-shrink-0 ${tripStatus.classes}`}>
+                            {tripStatus.label}
+                          </span>
                         </div>
-                        <h4 className="text-lg md:text-xl font-extrabold text-slate-800 dark:text-slate-100 leading-snug line-clamp-1 flex items-center gap-1.5 min-w-0">
+                        <h4 className="text-xl md:text-2xl font-black text-slate-800 dark:text-slate-100 leading-snug line-clamp-1 flex items-center gap-1.5 min-w-0">
                           <MapPin className="w-5 h-5 text-teal-500 flex-shrink-0" />
                           <span className="truncate">{trip.destination}</span>
                         </h4>
                       </div>
 
                       {/* Meta Indicators */}
-                      <div className="space-y-2.5 text-sm font-semibold text-slate-500 dark:text-slate-400 border-t border-slate-50 dark:border-slate-900 pt-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm font-semibold text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-900 pt-4">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <Calendar className="w-4.5 h-4.5 text-slate-400 flex-shrink-0" />
                           <span className="truncate">{startDateFormatted} - {endDateFormatted}</span>
@@ -876,9 +908,12 @@ export default function Dashboard({
                           <Users className="w-4.5 h-4.5 text-slate-400 flex-shrink-0" />
                           <span className="truncate">{trip.travelers} {trip.travelers === 1 ? 'traveler' : 'travelers'}</span>
                         </div>
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <Briefcase className="w-4.5 h-4.5 text-slate-400 flex-shrink-0" />
-                          <span className="truncate">Budget: {trip.budgetAmount}</span>
+                        <div className="sm:col-span-2 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 dark:bg-slate-900/45 px-3.5 py-3 border border-slate-100 dark:border-slate-850">
+                          <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                            <Briefcase className="w-4 h-4 flex-shrink-0" />
+                            <span className="text-xs font-bold">Planned budget</span>
+                          </div>
+                          <span className="text-sm font-black text-slate-800 dark:text-slate-100 truncate">{trip.budgetAmount}</span>
                         </div>
                       </div>
                     </div>
@@ -1029,29 +1064,29 @@ export default function Dashboard({
                   </div>
 
                   {/* Actions footer */}
-                  <div className="px-8 pb-6 pt-5 bg-slate-50 dark:bg-slate-900/40 border-t border-slate-100 dark:border-slate-900 flex flex-col gap-3">
+                  <div className="px-5 sm:px-6 py-4 bg-slate-50/80 dark:bg-slate-900/40 border-t border-slate-100 dark:border-slate-900 flex items-center gap-2">
                     <button
                       id={`view-trip-btn-${trip.id}`}
                       onClick={() => onSelectTrip(trip)}
-                      className="w-full h-11 flex items-center justify-center gap-2 px-4 bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer shadow-sm shadow-teal-500/10 hover:shadow-teal-500/25"
+                      className="flex-1 h-11 flex items-center justify-center gap-2 px-4 bg-teal-600 hover:bg-teal-700 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer shadow-sm shadow-teal-500/10 hover:shadow-teal-500/25"
                     >
                       <Eye className="w-4 h-4" />
-                      <span>View Itinerary</span>
+                      <span>Open Trip Guide</span>
                     </button>
 
                     <button
                       id={`delete-trip-btn-${trip.id}`}
                       onClick={() => onDeleteTrip(trip.id)}
                       disabled={isDeletingTrip}
-                      className="w-full h-10 flex items-center justify-center gap-2 px-4 bg-transparent hover:bg-rose-50 dark:hover:bg-rose-950/10 text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 font-bold text-xs rounded-xl transition-all duration-200 cursor-pointer"
-                      title="Delete Trip"
+                      className="w-11 h-11 flex items-center justify-center bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/20 hover:border-rose-200 dark:hover:border-rose-900/40 text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 rounded-xl transition-all duration-200 cursor-pointer flex-shrink-0"
+                      title="Delete itinerary"
                     >
                       {isDeletingTrip ? (
                         <span className="inline-block w-4 h-4 border-2 border-rose-600 dark:border-rose-400 border-t-transparent rounded-full animate-spin" />
                       ) : (
                         <>
-                          <Trash className="w-3.5 h-3.5" />
-                          <span>Delete Itinerary</span>
+                          <Trash className="w-4 h-4" />
+                          <span className="sr-only">Delete itinerary</span>
                         </>
                       )}
                     </button>
