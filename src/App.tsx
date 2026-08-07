@@ -925,156 +925,70 @@ export default function App() {
           </div>
         )}
 
-        {/* NORMAL PLANNER & DASHBOARD DISPLAY */}
+        {/* NORMAL PLANNER & TRAVEL LIBRARY DISPLAY */}
         {!generating && !activeItinerary && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            
-            {/* Left planner form */}
-            <div className="lg:col-span-7 space-y-5">
-              <div className="space-y-1">
-                <h2 className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Create Your Trip</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Plan around your destination, traveler type, style and budget.</p>
-              </div>
-
-              {/* Premium Plan Quota Widget */}
-              <div className="p-5 bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-900 rounded-3xl shadow-sm space-y-3">
-                <div className="flex items-center justify-between text-xs font-bold">
-                  <span className="text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px]">Account Tier</span>
-                  {plan === "lifetime" ? (
-                    <span className="text-amber-500 dark:text-amber-400 flex items-center gap-1 font-black uppercase tracking-wider text-[10px]">
-                      <Crown className="w-3.5 h-3.5 fill-amber-500 text-amber-500" /> Lifetime Premium
-                    </span>
-                  ) : plan === "yearly" ? (
-                    <span className="text-emerald-500 dark:text-emerald-400 flex items-center gap-1 font-black uppercase tracking-wider text-[10px]">
-                      <Crown className="w-3.5 h-3.5 fill-emerald-500 text-emerald-500" /> Yearly Premium
-                    </span>
-                  ) : plan === "pay_per_trip" ? (
-                    <span className="text-blue-500 dark:text-blue-400 flex items-center gap-1 font-black uppercase tracking-wider text-[10px]">
-                      <Zap className="w-3.5 h-3.5 fill-blue-500 text-blue-500" /> Pay Per Trip ({paidTripsBalance} Left)
-                    </span>
-                  ) : (
-                    <span className="text-teal-600 dark:text-teal-400 font-bold uppercase tracking-wider text-[10px]">Free Tier</span>
-                  )}
-                </div>
-
-                {isPremium ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-slate-700 dark:text-slate-300">Unlimited Trip Plans</span>
-                      <span className="font-black text-emerald-600 dark:text-emerald-400">Active</span>
+          <div className="mx-auto w-full max-w-[1240px] space-y-10">
+            <section className="overflow-hidden rounded-[34px] border border-slate-200/70 bg-white shadow-[0_20px_70px_rgba(15,23,42,0.06)] dark:border-slate-800 dark:bg-slate-950 dark:shadow-none">
+              <div className="border-b border-slate-100 bg-gradient-to-br from-slate-50 via-white to-teal-50/40 px-5 py-6 dark:border-slate-900 dark:from-slate-950 dark:via-slate-950 dark:to-teal-950/10 sm:px-8 sm:py-8">
+                <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+                  <div className="max-w-2xl">
+                    <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-teal-500/15 bg-teal-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-teal-600 dark:text-teal-400">
+                      <Sparkles className="h-3.5 w-3.5" /> AI Travel Planner
                     </div>
-                    <div className="h-2 bg-gradient-to-r from-teal-500 via-emerald-500 to-cyan-500 rounded-full w-full animate-pulse" />
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
-                      Plan as many beautiful travel guides as your heart desires! Thank you for being a premium supporter.
+                    <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white sm:text-4xl">Plan your next trip, your way.</h1>
+                    <p className="mt-2 max-w-xl text-sm font-medium leading-relaxed text-slate-500 dark:text-slate-400 sm:text-base">
+                      Choose your destination or let TripBalancing help you find the right one for your time, style and budget.
                     </p>
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-slate-700 dark:text-slate-300">Remaining Free Plans</span>
-                      <span className="font-bold text-slate-800 dark:text-slate-100">{Math.max(0, 2 - freeTripsUsed)} / 2 Left</span>
+
+                  <div className="min-w-[210px] rounded-2xl border border-slate-200/70 bg-white/80 px-4 py-3 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/70">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Your plan</span>
+                      <span className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${isPremium ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-teal-500/10 text-teal-600 dark:text-teal-400"}`}>
+                        {plan === "lifetime" ? "Lifetime" : plan === "yearly" ? "Yearly" : plan === "pay_per_trip" ? "Pay per trip" : "Free"}
+                      </span>
                     </div>
-                    <div className="h-2 bg-slate-100 dark:bg-slate-900 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          freeTripsUsed >= 2 ? "bg-rose-500" : "bg-teal-500"
-                        }`}
-                        style={{ width: `${Math.max(0, (2 - freeTripsUsed) * 50)}%` }}
-                      />
-                    </div>
-                    {plan === "pay_per_trip" && (
-                      <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100/50 dark:border-slate-900/50">
-                        <span className="font-semibold text-slate-700 dark:text-slate-300">Paid Trips Balance</span>
-                        <span className="font-black text-blue-600 dark:text-blue-400">{paidTripsBalance} Trips</span>
+                    <div className="mt-2 flex items-end justify-between gap-3">
+                      <div>
+                        <div className="text-xl font-black text-slate-900 dark:text-white">{isPremium ? "Unlimited" : `${Math.max(0, 2 - freeTripsUsed) + paidTripsBalance}`}</div>
+                        <div className="text-[10px] font-bold text-slate-400">{isPremium ? "Trip plans active" : "Plans available"}</div>
                       </div>
-                    )}
-                    <div className="flex items-center justify-between gap-2 pt-1">
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
-                        {freeTripsUsed >= 2 && paidTripsBalance <= 0
-                          ? "⚠️ Limit reached. Upgrade for unlimited plans!" 
-                          : `${Math.max(0, 2 - freeTripsUsed)} free trip plans left. ${paidTripsBalance > 0 ? `+ ${paidTripsBalance} paid trips available.` : ""}`}
-                      </p>
-                      <button
-                        type="button"
-                        id="plan-quota-upgrade-btn"
-                        onClick={() => setShowPremiumModal(true)}
-                        className="text-[10px] font-black text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-0.5 cursor-pointer shrink-0"
-                      >
-                        Upgrade Now
-                        <ChevronRight className="w-3 h-3" />
-                      </button>
+                      {!isPremium && (
+                        <button onClick={() => setShowPremiumModal(true)} className="text-[10px] font-black text-teal-600 hover:underline dark:text-teal-400">Upgrade</button>
+                      )}
                     </div>
                   </div>
-                )}
+                </div>
               </div>
 
-              {freeTripsUsed >= 2 && paidTripsBalance <= 0 && !isPremium && (
-                <div 
-                  id="dashboard-upgrade-prompt"
-                  className="p-5 bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-400 rounded-3xl space-y-3 shadow-sm animate-in fade-in slide-in-from-top-3 duration-300"
-                >
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 animate-pulse" />
-                    <h4 className="font-extrabold text-sm tracking-tight text-slate-800 dark:text-slate-200">AI Trip Planner Limit Reached</h4>
+              <div className="p-5 sm:p-8">
+                {freeTripsUsed >= 2 && paidTripsBalance <= 0 && !isPremium && (
+                  <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2 text-xs font-bold text-amber-800 dark:text-amber-300"><AlertCircle className="h-4 w-4" />Your free trip limit is reached.</div>
+                    <button onClick={() => setShowPremiumModal(true)} className="rounded-xl bg-amber-500 px-3 py-2 text-[10px] font-black text-slate-950">View plans</button>
                   </div>
-                  <p className="text-xs font-semibold leading-relaxed text-slate-600 dark:text-slate-400">
-                    You have utilized both of your free AI-generated trip plans. To customize and save another high-quality itinerary, unlock another trip or upgrade to an unlimited plan now.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setShowPremiumModal(true)}
-                    className="w-full py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 text-xs font-black rounded-xl cursor-pointer shadow-md shadow-amber-500/5 active:scale-95 transition-all text-center flex items-center justify-center gap-1.5"
-                  >
-                    <Crown className="w-3.5 h-3.5 fill-slate-950 text-slate-950" />
-                    <span>View Upgrade & Pricing Options (from ₹99)</span>
-                  </button>
+                )}
+                <TripForm onSubmit={handleGenerateItinerary} loading={generating} />
+              </div>
+            </section>
+
+            <section className="space-y-4">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-600 dark:text-teal-400">Your travel space</p>
+                  <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-900 dark:text-white">Trips & travel tools</h2>
                 </div>
-              )}
-
-              <TripForm onSubmit={handleGenerateItinerary} loading={generating} />
-            </div>
-
-            {/* Right Dashboard list */}
-            <div className="lg:col-span-5 space-y-5">
-              <div className="space-y-1">
-                <h2 className="text-xl font-extrabold text-slate-800 dark:text-slate-100 tracking-tight">Your Trips</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Continue a saved trip or review recent plans.</p>
+                <p className="text-xs font-medium text-slate-400">Your guides, packing, alerts and currency tools in one place.</p>
               </div>
 
               {tripsLoading ? (
-                <div className="space-y-6">
-                  {/* Pulsing interactive map skeleton shape */}
-                  <div className="h-[220px] w-full bg-slate-100/70 dark:bg-slate-900/40 rounded-3xl border border-slate-200/20 dark:border-slate-800/20 animate-pulse flex flex-col items-center justify-center space-y-2">
-                    <TripBalancingLogo className="w-8 h-8 opacity-60" spin />
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Loading Travel Hub Visualization...</span>
-                  </div>
-                  {/* Grid layout of trips cards skeletons */}
-                  <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,380px),1fr))] w-full max-w-full min-w-0 gap-6">
-                    {[1, 2].map((n) => (
-                      <div key={n} className="p-6 bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-900 rounded-3xl space-y-4 animate-pulse">
-                        <div className="flex justify-between items-start">
-                          <div className="space-y-2 w-2/3">
-                            <div className="h-4.5 bg-slate-200 dark:bg-slate-800 rounded-lg" />
-                            <div className="h-3 bg-slate-150 dark:bg-slate-850 rounded-md w-1/2" />
-                          </div>
-                          <div className="h-8 w-8 bg-slate-100 dark:bg-slate-900 rounded-xl" />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="h-3 bg-slate-150 dark:bg-slate-850 rounded-md w-11/12" />
-                          <div className="h-3 bg-slate-150 dark:bg-slate-850 rounded-md w-4/6" />
-                        </div>
-                        <div className="flex justify-between items-center pt-3.5 border-t border-slate-100/50 dark:border-slate-900/50">
-                          <div className="h-3 bg-slate-150 dark:bg-slate-850 rounded-md w-24" />
-                          <div className="h-6 bg-slate-150 dark:bg-slate-850 rounded-full w-16" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {[1, 2, 3].map((n) => <div key={n} className="h-52 animate-pulse rounded-[26px] border border-slate-200 bg-slate-100/60 dark:border-slate-800 dark:bg-slate-900/50" />)}
                 </div>
               ) : (
                 <Suspense fallback={<SuspenseFallback />}>
-                  <Dashboard 
-                    trips={trips} 
+                  <Dashboard
+                    trips={trips}
                     sharedTrips={sharedTrips}
                     acceptedInvitations={acceptedInvitations}
                     incomingInvitations={incomingInvitations}
@@ -1084,7 +998,7 @@ export default function App() {
                       setActiveItinerary(trip.itinerary);
                       setActiveTripId(trip.id);
                       setActiveTripIsReadOnly(isReadOnly);
-                    }} 
+                    }}
                     onDeleteTrip={handleDeleteTrip}
                     isDeleting={deletingId}
                     onUpdateNotesAndRating={handleUpdateTripNotesAndRating}
@@ -1095,8 +1009,7 @@ export default function App() {
                   />
                 </Suspense>
               )}
-            </div>
-
+            </section>
           </div>
         )}
 
