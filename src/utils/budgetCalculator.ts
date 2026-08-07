@@ -38,6 +38,18 @@ export interface CalculatedCategoryBreakdown {
   warningMessage?: string;
 }
 
+export interface BudgetFeasibilityResult {
+  feasible: boolean;
+  userBudget: number;
+  minimumBudget: number;
+  recommendedBudget: number;
+  comfortableBudget: number;
+  shortfall: number;
+  budgetCoveragePercent: number;
+  status: "no_budget" | "insufficient" | "tight" | "comfortable";
+  estimate: CalculatedCategoryBreakdown;
+}
+
 // Detect currency symbol from input string or default
 export const detectCurrencySymbol = (str?: string | number, destination?: string): string => {
   if (typeof str === "string") {
@@ -122,7 +134,10 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   const styleRaw = (input.travelStyle || "Mid-range").toLowerCase();
 
   let style: "budget" | "mid" | "luxury" = "mid";
-  if (styleRaw.includes("budget") || styleRaw.includes("solo") || styleRaw.includes("backpacker")) {
+  // Smart Luxury is deliberately best-value premium travel, not ultra-luxury.
+  if (styleRaw.includes("smart luxury")) {
+    style = "mid";
+  } else if (styleRaw.includes("budget") || styleRaw.includes("solo") || styleRaw.includes("backpacker")) {
     style = "budget";
   } else if (styleRaw.includes("luxury") || styleRaw.includes("premium") || styleRaw.includes("vip")) {
     style = "luxury";
@@ -236,7 +251,7 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   let isBudgetTooLow = false;
   let warningMessage: string | undefined = undefined;
 
-  if (userNum > 0 && userNum < expectedMin * 0.75) {
+  if (userNum > 0 && userNum < expectedMin) {
     isBudgetTooLow = true;
     const travelStyleLabel = input.travelStyle || (style === "luxury" ? "Luxury" : style === "budget" ? "Budget" : "Mid-range");
     warningMessage = `Your selected budget (${currencySymbol}${userNum.toLocaleString()}) is lower than the realistic estimated cost for a ${travelStyleLabel} trip to ${input.destination} (${currencySymbol}${grandTotal.toLocaleString()}). Consider increasing your budget or choosing a more economical travel style.`;
@@ -271,6 +286,42 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
       expectedRange: `${fmt(expectedMin)} – ${fmt(expectedMax)}`,
       averageDailyBudget: fmt(averageDailyBudgetNum)
     }
+  };
+};
+
+/**
+ * Gate itinerary generation when a fixed user budget cannot realistically cover
+ * the selected destination, duration, traveler count and travel style.
+ *
+ * The minimum is the lower edge of the realistic estimate range; the user is
+ * never allowed to generate an impossible fixed-budget itinerary below it.
+ */
+export const evaluateBudgetFeasibility = (input: BudgetFactorsInput): BudgetFeasibilityResult => {
+  const estimate = calculateRealWorldBudget(input);
+  const userBudget = parseNumericValue(input.userBudgetInput);
+  const minimumBudget = estimate.expectedMin;
+  const recommendedBudget = estimate.grandTotal;
+  const comfortableBudget = estimate.expectedMax;
+  const shortfall = userBudget > 0 ? Math.max(0, minimumBudget - userBudget) : 0;
+  const budgetCoveragePercent = minimumBudget > 0 && userBudget > 0
+    ? Math.min(999, Math.round((userBudget / minimumBudget) * 100))
+    : 0;
+
+  let status: BudgetFeasibilityResult["status"] = "no_budget";
+  if (userBudget > 0 && userBudget < minimumBudget) status = "insufficient";
+  else if (userBudget > 0 && userBudget < recommendedBudget) status = "tight";
+  else if (userBudget > 0) status = "comfortable";
+
+  return {
+    feasible: userBudget <= 0 || userBudget >= minimumBudget,
+    userBudget,
+    minimumBudget,
+    recommendedBudget,
+    comfortableBudget,
+    shortfall,
+    budgetCoveragePercent,
+    status,
+    estimate,
   };
 };
 

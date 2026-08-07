@@ -20,6 +20,7 @@ import {
   TravelStyle,
   TripInput,
 } from "../types";
+import { BudgetFeasibilityResult, evaluateBudgetFeasibility } from "../utils/budgetCalculator";
 
 interface TripFormProps {
   onSubmit: (input: TripInput) => void;
@@ -89,6 +90,8 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const [recommendations, setRecommendations] = useState<DestinationRecommendation[]>([]);
   const [recommendationLoading, setRecommendationLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [feasibility, setFeasibility] = useState<BudgetFeasibilityResult | null>(null);
+  const [dreamTripSaved, setDreamTripSaved] = useState(false);
 
   const recommendBudget = budgetMode === "recommended" || travelStyle === "Smart Luxury";
 
@@ -182,11 +185,29 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     setError(null);
+    setDreamTripSaved(false);
 
     if (!destination.trim()) return setError(planningMode === "help_choose" ? "Select one recommended destination first." : "Please enter a destination.");
     if (!origin.trim()) return setError("Please enter your starting city.");
     if (!tripDatesValid) return setError("Please select the trip dates.");
     if (!recommendBudget && (!budgetVal || Number(budgetVal) <= 0)) return setError("Please enter your total trip budget.");
+
+    // Fixed-budget trips must pass the feasibility gate before any AI itinerary is generated.
+    if (!recommendBudget) {
+      const check = evaluateBudgetFeasibility({
+        destination: destination.trim(),
+        origin: origin.trim(),
+        travelers,
+        days: Math.max(1, Number(travelDays) || Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1),
+        travelStyle,
+        userBudgetInput: `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
+      });
+
+      setFeasibility(check);
+      if (!check.feasible) return;
+    } else {
+      setFeasibility(null);
+    }
 
     onSubmit({
       planningMode,
@@ -208,6 +229,55 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
     });
   };
 
+  const formatFeasibilityMoney = (value: number) => {
+    const symbol = feasibility?.estimate.currencySymbol || budgetPrefix;
+    return `${symbol}${Math.round(value).toLocaleString()}`;
+  };
+
+  const useMinimumBudget = () => {
+    if (!feasibility) return;
+    setBudgetVal(String(Math.ceil(feasibility.minimumBudget / 1000) * 1000));
+    setFeasibility(null);
+    setError(null);
+  };
+
+  const chooseAnotherStyle = () => {
+    setFeasibility(null);
+    setError("Choose another Travel Style below, then generate again.");
+    setTimeout(() => document.getElementById("travel-style-section")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+  };
+
+  const findSimilarDestinations = () => {
+    setFeasibility(null);
+    setPlanningMode("help_choose");
+    setDestination("");
+    setRecommendations([]);
+    setError("We kept your budget. Complete Help Me Choose to find destinations that fit it.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const saveDreamTrip = () => {
+    try {
+      const key = "tripbalancing_dream_trips";
+      const existing = JSON.parse(localStorage.getItem(key) || "[]");
+      const record = {
+        destination: destination.trim(),
+        origin: origin.trim(),
+        travelers,
+        travelStyle,
+        startDate,
+        endDate,
+        plannedBudget: `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
+        minimumBudget: feasibility ? formatFeasibilityMoney(feasibility.minimumBudget) : undefined,
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(key, JSON.stringify([record, ...existing].slice(0, 50)));
+      setDreamTripSaved(true);
+    } catch {
+      setError("We could not save this Dream Trip on this device.");
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:p-6">
       {error && (
@@ -215,6 +285,51 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
           <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
           <span>{error}</span>
         </div>
+      )}
+
+      {feasibility && !feasibility.feasible && (
+        <section className="rounded-3xl border border-amber-300/70 bg-gradient-to-br from-amber-50 to-orange-50 p-5 shadow-sm dark:border-amber-800/50 dark:from-amber-950/20 dark:to-orange-950/10 sm:p-6">
+          <div className="flex flex-col gap-5">
+            <div className="flex items-start gap-3">
+              <div className="rounded-2xl bg-amber-500/15 p-2.5 text-amber-700 dark:text-amber-400">
+                <AlertCircle className="h-6 w-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-700 dark:text-amber-400">Budget Check</p>
+                <h3 className="mt-1 text-xl font-black text-slate-900 dark:text-white">This trip is not realistic with the current budget</h3>
+                <p className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                  We stopped generation before creating impossible prices. For {destination}, your current budget covers about {feasibility.budgetCoveragePercent}% of the minimum realistic estimate.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="rounded-2xl border border-white/70 bg-white/80 p-3 dark:border-slate-800 dark:bg-slate-950/60">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Your Budget</span>
+                <strong className="mt-1 block text-base text-slate-900 dark:text-white">{formatFeasibilityMoney(feasibility.userBudget)}</strong>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/80 p-3 dark:border-slate-800 dark:bg-slate-950/60">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Minimum Realistic</span>
+                <strong className="mt-1 block text-base text-slate-900 dark:text-white">{formatFeasibilityMoney(feasibility.minimumBudget)}</strong>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/80 p-3 dark:border-slate-800 dark:bg-slate-950/60">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Recommended</span>
+                <strong className="mt-1 block text-base text-teal-700 dark:text-teal-400">{formatFeasibilityMoney(feasibility.recommendedBudget)}</strong>
+              </div>
+              <div className="rounded-2xl border border-rose-100 bg-rose-50/80 p-3 dark:border-rose-900/30 dark:bg-rose-950/20">
+                <span className="text-[10px] font-black uppercase tracking-wider text-rose-500">Shortfall</span>
+                <strong className="mt-1 block text-base text-rose-700 dark:text-rose-400">{formatFeasibilityMoney(feasibility.shortfall)}</strong>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <button type="button" onClick={useMinimumBudget} className="rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-black text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100">Increase Budget</button>
+              <button type="button" onClick={chooseAnotherStyle} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 transition hover:border-teal-300 hover:text-teal-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">Change Travel Style</button>
+              <button type="button" onClick={findSimilarDestinations} className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-2.5 text-xs font-black text-teal-700 transition hover:bg-teal-100 dark:border-teal-900 dark:bg-teal-950/30 dark:text-teal-400">Find Similar Destinations</button>
+              <button type="button" onClick={saveDreamTrip} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-black text-amber-700 transition hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400">{dreamTripSaved ? "✓ Dream Trip Saved" : "Save as Dream Trip"}</button>
+            </div>
+          </div>
+        </section>
       )}
 
       <section className="space-y-4 border-b border-slate-100 pb-6 dark:border-slate-900">
@@ -257,7 +372,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{TRAVELER_TYPES.map((item) => <ChoiceButton key={item.name} selected={travelerType === item.name} onClick={() => setTravelerType(item.name)}><span className="mr-1">{item.icon}</span>{item.name}</ChoiceButton>)}</div>
       </section>
 
-      <section className="space-y-3">
+      <section id="travel-style-section" className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Select your travel style</p>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(125px,1fr))] gap-3">{TRAVEL_STYLES.map((item) => <button key={item.name} type="button" onClick={() => setTravelStyle(item.name)} title={item.description} className={`min-h-[112px] rounded-2xl border-2 p-3 text-center transition ${travelStyle === item.name ? "border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-950/20 dark:text-teal-300" : "border-slate-100 bg-slate-50/50 text-slate-600 dark:border-slate-900 dark:bg-slate-900/30 dark:text-slate-400"}`}><div className="text-xl">{item.icon}</div><div className="mt-1 text-sm font-bold">{item.name}{item.name === "Smart Luxury" && <span className="ml-1 text-[9px] text-fuchsia-500">NEW</span>}</div><p className="mt-1 text-[10px] leading-tight opacity-75">{item.description}</p></button>)}</div>
       </section>
