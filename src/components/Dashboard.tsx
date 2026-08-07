@@ -20,6 +20,8 @@ import {
   BookOpen,
   Sparkles,
   Clock3,
+  Home,
+  ArrowRight,
 } from "lucide-react";
 import { TripRecord, BuddyInvitation } from "../types";
 import GlobalPackingChecklist from "./GlobalPackingChecklist";
@@ -49,7 +51,7 @@ interface DashboardProps {
   onUpgradeClick?: () => void;
 }
 
-type DashboardTab = "trips" | "packing" | "tips" | "currency";
+type DashboardTab = "home" | "trips" | "packing" | "tips" | "currency";
 type TripStatusFilter = "all" | "upcoming" | "completed";
 
 function getInviterDisplayName(email: string): string {
@@ -101,7 +103,7 @@ export default function Dashboard({
   onDeleteTrip,
   isDeleting,
 }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<DashboardTab>("trips");
+  const [activeTab, setActiveTab] = useState<DashboardTab>("home");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "alphabetical">("newest");
   const [statusFilter, setStatusFilter] = useState<TripStatusFilter>("all");
@@ -221,7 +223,18 @@ export default function Dashboard({
   const upcomingCount = useMemo(() => trips.filter((t) => getTripStatus(t) === "Upcoming").length, [trips]);
   const completedCount = trips.length - upcomingCount;
 
+  const recentTrips = useMemo(() => {
+    return [...trips]
+      .sort((a, b) => {
+        const aTime = new Date(a.startDate).getTime() || 0;
+        const bTime = new Date(b.startDate).getTime() || 0;
+        return bTime - aTime;
+      })
+      .slice(0, 3);
+  }, [trips]);
+
   const tabs: { id: DashboardTab; label: string; icon: any }[] = [
+    { id: "home", label: "Home", icon: Home },
     { id: "trips", label: "My Trips", icon: Compass },
     { id: "packing", label: "Packing", icon: Luggage },
     { id: "tips", label: "Travel Alerts", icon: AlertCircle },
@@ -268,6 +281,69 @@ export default function Dashboard({
           );
         })}
       </div>
+
+      {activeTab === "home" && (
+        <div className="space-y-5">
+          <div className="rounded-[28px] border border-slate-200/70 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-teal-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-teal-600 dark:text-teal-400">
+                  <Home className="h-3 w-3" /> Travel Home
+                </div>
+                <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Your trips, without the clutter</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Plan above, continue your latest trip here, or open your full travel library.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab("trips")}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-xs font-black text-white transition hover:bg-teal-600 dark:bg-white dark:text-slate-950 dark:hover:bg-teal-400"
+              >
+                My Trips {trips.length > 0 ? `(${trips.length})` : ""} <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {recentTrips.length === 0 ? (
+            <div className="rounded-[26px] border border-dashed border-slate-300 bg-white px-6 py-12 text-center dark:border-slate-800 dark:bg-slate-950">
+              <Compass className="mx-auto h-9 w-9 text-teal-500" />
+              <h3 className="mt-3 text-base font-black text-slate-900 dark:text-white">No saved trips yet</h3>
+              <p className="mt-1 text-sm text-slate-500">Create your first itinerary with the planner above.</p>
+            </div>
+          ) : (
+            <div className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:p-6">
+              {(() => {
+                const trip = recentTrips[0];
+                const status = getTripStatus(trip);
+                return (
+                  <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-center">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${status === "Upcoming" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400"}`}>{status}</span>
+                        <span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-violet-600 dark:text-violet-400">{trip.travelStyle}</span>
+                      </div>
+                      <div className="mt-3 text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Continue last trip</div>
+                      <h3 className="mt-1 truncate text-2xl font-black tracking-tight text-slate-900 dark:text-white">{trip.destination}</h3>
+                      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                        <span className="inline-flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5" />{formatTripDate(trip.startDate)}</span>
+                        <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" />{trip.travelers} {trip.travelers === 1 ? "traveler" : "travelers"}</span>
+                        <span className="inline-flex items-center gap-1.5"><Briefcase className="h-3.5 w-3.5" />{trip.budgetAmount || "Budget not set"}</span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row lg:flex-col">
+                      <button onClick={() => onSelectTrip(trip)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 py-3 text-xs font-black text-white transition hover:bg-teal-500">
+                        <BookOpen className="h-4 w-4" /> Continue Trip
+                      </button>
+                      <button onClick={() => setActiveTab("trips")} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-xs font-black text-slate-700 transition hover:border-teal-500/30 hover:text-teal-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                        View All Trips <ArrowRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
 
       {activeTab === "trips" && (
         <div className="space-y-6">
