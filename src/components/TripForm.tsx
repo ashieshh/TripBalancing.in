@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Calendar,
@@ -92,8 +92,29 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [feasibility, setFeasibility] = useState<BudgetFeasibilityResult | null>(null);
   const [dreamTripSaved, setDreamTripSaved] = useState(false);
+  const [feasibilityHighlight, setFeasibilityHighlight] = useState(false);
+  const feasibilityRef = useRef<HTMLElement | null>(null);
 
   const recommendBudget = budgetMode === "recommended" || travelStyle === "Smart Luxury";
+
+  useEffect(() => {
+    if (!feasibility || feasibility.feasible || !feasibilityRef.current) return;
+
+    // The feasibility result is rendered above the form controls. Bring it into view
+    // immediately so users never think the Generate button did nothing.
+    const timer = window.setTimeout(() => {
+      feasibilityRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      feasibilityRef.current?.focus({ preventScroll: true });
+      setFeasibilityHighlight(true);
+    }, 60);
+
+    const highlightTimer = window.setTimeout(() => setFeasibilityHighlight(false), 2800);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(highlightTimer);
+    };
+  }, [feasibility]);
 
   const tripDatesValid = useMemo(() => Boolean(startDate && endDate), [startDate, endDate]);
 
@@ -288,7 +309,16 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
       )}
 
       {feasibility && !feasibility.feasible && (
-        <section className="rounded-3xl border border-amber-300/70 bg-gradient-to-br from-amber-50 to-orange-50 p-5 shadow-sm dark:border-amber-800/50 dark:from-amber-950/20 dark:to-orange-950/10 sm:p-6">
+        <section
+          ref={feasibilityRef}
+          tabIndex={-1}
+          aria-live="assertive"
+          className={`rounded-3xl border bg-gradient-to-br from-amber-50 to-orange-50 p-5 shadow-sm outline-none transition-all duration-500 dark:from-amber-950/20 dark:to-orange-950/10 sm:p-6 ${
+            feasibilityHighlight
+              ? "border-amber-400 ring-4 ring-amber-400/25 shadow-[0_0_0_8px_rgba(251,191,36,0.08)] scale-[1.01]"
+              : "border-amber-300/70 dark:border-amber-800/50"
+          }`}
+        >
           <div className="flex flex-col gap-5">
             <div className="flex items-start gap-3">
               <div className="rounded-2xl bg-amber-500/15 p-2.5 text-amber-700 dark:text-amber-400">
