@@ -203,7 +203,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
     }
   };
 
-  const handleSubmit = (event: FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
     setDreamTripSaved(false);
@@ -213,41 +213,75 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
     if (!tripDatesValid) return setError("Please select the trip dates.");
     if (!recommendBudget && (!budgetVal || Number(budgetVal) <= 0)) return setError("Please enter your total trip budget.");
 
-    // Fixed-budget trips must pass the feasibility gate before any AI itinerary is generated.
-    if (!recommendBudget) {
-      const check = evaluateBudgetFeasibility({
-        destination: destination.trim(),
-        origin: origin.trim(),
-        travelers,
-        days: Math.max(1, Number(travelDays) || Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1),
-        travelStyle,
-        userBudgetInput: `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
+    // Validate both locations before any budget calculation. Never allow the AI to
+    // silently reinterpret a typo such as "mumu" as a completely different city.
+    try {
+      const validationResponse = await fetch("/api/validate-locations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ origin: origin.trim(), destination: destination.trim() }),
       });
+      const validation = await validationResponse.json();
+      if (!validationResponse.ok) {
+        setError(validation.error || "Please enter valid city, state or country names.");
+        return;
+      }
+      if (!validation.origin?.valid) {
+        setError(`Starting location "${origin.trim()}" could not be verified. Please select a real city, state or country.`);
+        return;
+      }
+      if (!validation.destination?.valid) {
+        setError(`Destination "${destination.trim()}" could not be verified. Please select a real city, state or country.`);
+        return;
+      }
 
-      setFeasibility(check);
-      if (!check.feasible) return;
-    } else {
-      setFeasibility(null);
+      // Use the geocoder's canonical labels for every downstream calculation.
+      const canonicalOrigin = validation.origin.canonicalName || origin.trim();
+      const canonicalDestination = validation.destination.canonicalName || destination.trim();
+      setOrigin(canonicalOrigin);
+      setDestination(canonicalDestination);
+
+      // Fixed-budget trips must pass the feasibility gate before any AI itinerary is generated.
+      if (!recommendBudget) {
+        const check = evaluateBudgetFeasibility({
+          destination: canonicalDestination,
+          origin: canonicalOrigin,
+          travelers,
+          days: Math.max(1, Number(travelDays) || Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1),
+          travelStyle,
+          userBudgetInput: `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
+        });
+
+        setFeasibility(check);
+        if (!check.feasible) return;
+      } else {
+        setFeasibility(null);
+      }
+
+      onSubmit({
+        planningMode,
+        destination: canonicalDestination,
+        origin: canonicalOrigin,
+        startDate,
+        endDate,
+        budgetAmount: recommendBudget ? "AI Recommended" : `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
+        travelers,
+        travelerType,
+        travelStyle,
+        budgetMode,
+        tripPurpose,
+        preferredWeather,
+        interests: selectedInterests,
+        visitedDestinations,
+        revisitPreference,
+        isAiBudgetPlanner: recommendBudget,
+      });
+      return;
+    } catch {
+      setError("We could not verify the locations right now. Please try again.");
+      return;
     }
 
-    onSubmit({
-      planningMode,
-      destination: destination.trim(),
-      origin: origin.trim(),
-      startDate,
-      endDate,
-      budgetAmount: recommendBudget ? "AI Recommended" : `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
-      travelers,
-      travelerType,
-      travelStyle,
-      budgetMode,
-      tripPurpose,
-      preferredWeather,
-      interests: selectedInterests,
-      visitedDestinations,
-      revisitPreference,
-      isAiBudgetPlanner: recommendBudget,
-    });
   };
 
   const formatFeasibilityMoney = (value: number) => {

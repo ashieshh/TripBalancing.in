@@ -428,6 +428,89 @@ async function geocodeDestination(destination: string): Promise<{ latitude: numb
   return null;
 }
 
+interface StrictLocationResult {
+  valid: boolean;
+  canonicalName?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+// Strict location validation intentionally does NOT use Gemini. A generative model can
+// "correct" nonsense into a different city, which is unsafe for travel and budget math.
+async function resolveLocationStrict(query: string): Promise<StrictLocationResult> {
+  const raw = String(query || "").trim();
+  if (raw.length < 2) return { valid: false };
+
+  try {
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(raw)}&count=5&language=en&format=json`;
+    const response = await fetch(url);
+    if (response.ok) {
+      const data: any = await response.json();
+      const result = Array.isArray(data?.results) ? data.results[0] : null;
+      if (result && Number.isFinite(Number(result.latitude)) && Number.isFinite(Number(result.longitude))) {
+        const parts = [result.name, result.admin1, result.country].filter(Boolean);
+        return {
+          valid: true,
+          canonicalName: Array.from(new Set(parts)).join(", "),
+          latitude: Number(result.latitude),
+          longitude: Number(result.longitude),
+        };
+      }
+    }
+  } catch (error) {
+    console.warn("Strict Open-Meteo validation failed:", error);
+  }
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(raw)}&format=json&addressdetails=1&limit=1`;
+    const response = await fetch(url, { headers: { "User-Agent": "TripBalancing/2.0 (location-validation)" } });
+    if (response.ok) {
+      const data: any = await response.json();
+      const result = Array.isArray(data) ? data[0] : null;
+      if (result && Number.isFinite(Number(result.lat)) && Number.isFinite(Number(result.lon))) {
+        const address = result.address || {};
+        const locality = address.city || address.town || address.village || address.municipality || address.state || result.name;
+        const parts = [locality, address.state, address.country].filter(Boolean);
+        return {
+          valid: true,
+          canonicalName: Array.from(new Set(parts)).join(", ") || result.display_name,
+          latitude: Number(result.lat),
+          longitude: Number(result.lon),
+        };
+      }
+    }
+  } catch (error) {
+    console.warn("Strict Nominatim validation failed:", error);
+  }
+
+  return { valid: false };
+}
+
+app.post("/api/validate-locations", async (req, res) => {
+  const origin = String(req.body?.origin || "").trim();
+  const destination = String(req.body?.destination || "").trim();
+  if (!origin || !destination) {
+    return res.status(400).json({ error: "Please enter both a starting location and destination." });
+  }
+
+  const [originResult, destinationResult] = await Promise.all([
+    resolveLocationStrict(origin),
+    resolveLocationStrict(destination),
+  ]);
+
+  if (!originResult.valid || !destinationResult.valid) {
+    return res.status(422).json({
+      error: !originResult.valid
+        ? `Starting location "${origin}" could not be verified.`
+        : `Destination "${destination}" could not be verified.`,
+      origin: originResult,
+      destination: destinationResult,
+    });
+  }
+
+  return res.json({ origin: originResult, destination: destinationResult });
+});
+
 // API Health Check
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
@@ -1355,11 +1438,19 @@ app.post("/api/generate-itinerary", async (req, res) => {
     if (diffDays <= 0) diffDays = 1;
     if (diffDays > 365) diffDays = 365; // cap to 365 days for safety
 
-    // Geocode destination first to validate the location and get coordinates
-    geoCoords = await geocodeDestination(destination);
-    if (!geoCoords) {
-      return res.status(404).json({ error: "Location not found. Please enter a more specific destination." });
+    // Strictly validate BOTH locations. Do not let Gemini reinterpret invalid text
+    // into another city (for example "mumu" -> Mumbai).
+    const [validatedOrigin, validatedDestination] = await Promise.all([
+      origin ? resolveLocationStrict(origin) : Promise.resolve({ valid: true, canonicalName: "" } as StrictLocationResult),
+      resolveLocationStrict(destination),
+    ]);
+    if (origin && !validatedOrigin.valid) {
+      return res.status(422).json({ error: `Starting location "${origin}" could not be verified. Please enter a real city, state or country.` });
     }
+    if (!validatedDestination.valid) {
+      return res.status(422).json({ error: `Destination "${destination}" could not be verified. Please enter a real city, state or country.` });
+    }
+    geoCoords = { latitude: validatedDestination.latitude!, longitude: validatedDestination.longitude! };
 
     // 1. Check Itinerary Cache first to prevent redundant generations and reduce response time
     const cacheKey = `${destination.toLowerCase().trim()}_${origin ? origin.toLowerCase().trim() : ""}_${startDate}_${endDate}_${effectiveBudgetAmount}_${travelers}_${String(travelStyle).toLowerCase().trim()}_${isAiBudgetPlanner ? "ai" : "manual"}`;
