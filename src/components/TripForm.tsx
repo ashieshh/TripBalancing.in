@@ -96,8 +96,18 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const [dreamTripSaved, setDreamTripSaved] = useState(false);
   const [feasibilityHighlight, setFeasibilityHighlight] = useState(false);
   const feasibilityRef = useRef<HTMLElement | null>(null);
+  const errorRef = useRef<HTMLDivElement | null>(null);
 
   const recommendBudget = budgetMode === "recommended" || travelStyle === "Smart Luxury";
+
+  useEffect(() => {
+    if (!error || !errorRef.current) return;
+    const timer = window.setTimeout(() => {
+      errorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      errorRef.current?.focus({ preventScroll: true });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [error]);
 
   useEffect(() => {
     if (!feasibility || feasibility.feasible || !feasibilityRef.current) return;
@@ -342,9 +352,15 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   return (
     <form onSubmit={handleSubmit} className="space-y-6 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:p-6">
       {error && (
-        <div className="flex items-start gap-2.5 rounded-2xl border border-rose-100 bg-rose-50/50 p-4 text-sm text-rose-800 dark:border-rose-900/30 dark:bg-rose-950/10 dark:text-rose-400">
-          <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
-          <span>{error}</span>
+        <div ref={errorRef} tabIndex={-1} role="alert" aria-live="assertive" className="flex flex-col gap-3 rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-800 outline-none ring-4 ring-rose-500/10 dark:border-rose-900/40 dark:bg-rose-950/15 dark:text-rose-400">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+            <div><div className="font-black">Please check this before continuing</div><span>{error}</span></div>
+          </div>
+          <div className="flex flex-wrap gap-2 pl-7">
+            <button type="button" onClick={() => setError(null)} className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-black text-white hover:bg-rose-700">Try Again</button>
+            <button type="button" onClick={() => { setError(null); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-black text-rose-700 dark:border-rose-900 dark:bg-slate-950 dark:text-rose-300">Back to form</button>
+          </div>
         </div>
       )}
 

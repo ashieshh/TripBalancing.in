@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { 
   Globe, LogOut, ArrowLeft, Sparkles, Database, WifiOff, MapPin, 
   ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users, ShieldCheck
@@ -208,6 +208,23 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [lastGenerationInput, setLastGenerationInput] = useState<TripInput | null>(null);
+  const apiErrorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!apiError || !apiErrorRef.current) return;
+    const timer = window.setTimeout(() => {
+      apiErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      apiErrorRef.current?.focus({ preventScroll: true });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [apiError]);
+
+  useEffect(() => {
+    if (!activeItinerary) return;
+    const timer = window.setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 80);
+    return () => window.clearTimeout(timer);
+  }, [activeItinerary]);
 
   // Share mode state
   const [isSharedMode, setIsSharedMode] = useState(false);
@@ -425,6 +442,7 @@ export default function App() {
 
   // Generate Itinerary via Backend Express API proxying Gemini
   const handleGenerateItinerary = async (input: TripInput) => {
+    setLastGenerationInput(input);
     const remainingFree = Math.max(0, 2 - freeTripsUsed);
     
     // Premium plan limitation check (Free users max 2 plans, unless they have paid-per-trip balance or upgraded)
@@ -863,11 +881,17 @@ export default function App() {
         
         {/* Error Notification */}
         {apiError && (
-          <div className="flex items-start gap-3 p-4 mb-8 border rounded-3xl bg-rose-50/50 dark:bg-rose-950/10 border-rose-100 dark:border-rose-900/30 text-rose-800 dark:text-rose-400">
-            <AlertCircle className="w-5 h-5 flex-shrink-0 text-rose-500 mt-0.5" />
-            <div className="space-y-1">
-              <h4 className="font-bold">Trip Planning Error</h4>
-              <p className="text-sm leading-relaxed">{apiError}</p>
+          <div ref={apiErrorRef} tabIndex={-1} role="alert" aria-live="assertive" className="mb-8 rounded-3xl border border-rose-200 bg-rose-50/70 p-4 text-rose-800 outline-none ring-4 ring-rose-500/10 dark:border-rose-900/40 dark:bg-rose-950/15 dark:text-rose-400">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-rose-500" />
+              <div className="space-y-1">
+                <h4 className="font-bold">We couldn't generate your trip</h4>
+                <p className="text-sm leading-relaxed">{apiError}</p>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2 pl-8">
+              <button type="button" disabled={generating || !lastGenerationInput} onClick={() => lastGenerationInput && handleGenerateItinerary(lastGenerationInput)} className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-black text-white hover:bg-rose-700 disabled:opacity-50">Try Again</button>
+              <button type="button" onClick={() => { setApiError(null); document.querySelector('form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-xs font-black text-rose-700 dark:border-rose-900 dark:bg-slate-950 dark:text-rose-300">Back to form</button>
             </div>
           </div>
         )}
