@@ -486,6 +486,97 @@ async function resolveLocationStrict(query: string): Promise<StrictLocationResul
   return { valid: false };
 }
 
+
+interface LocationSuggestionResult {
+  canonicalName: string;
+  name: string;
+  admin1?: string;
+  country?: string;
+  latitude: number;
+  longitude: number;
+}
+
+async function searchLocationSuggestions(query: string): Promise<LocationSuggestionResult[]> {
+  const raw = String(query || "").trim();
+  if (raw.length < 2) return [];
+
+  const seen = new Set<string>();
+  const out: LocationSuggestionResult[] = [];
+
+  const pushSuggestion = (item: LocationSuggestionResult) => {
+    const key = `${item.canonicalName.toLowerCase()}|${item.latitude.toFixed(3)}|${item.longitude.toFixed(3)}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(item);
+    }
+  };
+
+  try {
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(raw)}&count=8&language=en&format=json`;
+    const response = await fetch(url);
+    if (response.ok) {
+      const data: any = await response.json();
+      for (const result of Array.isArray(data?.results) ? data.results : []) {
+        const latitude = Number(result.latitude);
+        const longitude = Number(result.longitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !result.name) continue;
+        const parts = [result.name, result.admin1, result.country].filter(Boolean);
+        pushSuggestion({
+          canonicalName: Array.from(new Set(parts)).join(", "),
+          name: String(result.name),
+          admin1: result.admin1 ? String(result.admin1) : undefined,
+          country: result.country ? String(result.country) : undefined,
+          latitude,
+          longitude,
+        });
+      }
+    }
+  } catch (error) {
+    console.warn("Open-Meteo location suggestions failed:", error);
+  }
+
+  // Fallback when Open-Meteo has no useful result.
+  if (out.length === 0) {
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(raw)}&format=json&addressdetails=1&limit=6`;
+      const response = await fetch(url, { headers: { "User-Agent": "TripBalancing/2.0 (location-autocomplete)" } });
+      if (response.ok) {
+        const data: any = await response.json();
+        for (const result of Array.isArray(data) ? data : []) {
+          const latitude = Number(result.lat);
+          const longitude = Number(result.lon);
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+          const address = result.address || {};
+          const name = address.city || address.town || address.village || address.municipality || result.name || String(result.display_name || "").split(",")[0];
+          if (!name) continue;
+          const admin1 = address.state || address.region || undefined;
+          const country = address.country || undefined;
+          const parts = [name, admin1, country].filter(Boolean);
+          pushSuggestion({
+            canonicalName: Array.from(new Set(parts)).join(", ") || result.display_name,
+            name: String(name),
+            admin1: admin1 ? String(admin1) : undefined,
+            country: country ? String(country) : undefined,
+            latitude,
+            longitude,
+          });
+        }
+      }
+    } catch (error) {
+      console.warn("Nominatim location suggestions failed:", error);
+    }
+  }
+
+  return out.slice(0, 6);
+}
+
+app.get("/api/location-suggestions", async (req, res) => {
+  const q = String(req.query?.q || "").trim();
+  if (q.length < 2) return res.json({ suggestions: [] });
+  const suggestions = await searchLocationSuggestions(q);
+  return res.json({ suggestions });
+});
+
 app.post("/api/validate-locations", async (req, res) => {
   const origin = String(req.body?.origin || "").trim();
   const destination = String(req.body?.destination || "").trim();
