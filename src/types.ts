@@ -12,7 +12,7 @@ export interface DestinationRecommendation {
   bestMonths?: string;
 }
 
-export type TravelStyle = 'Budget' | 'Smart Luxury' | 'Luxury' | 'Family' | 'Solo' | 'Adventure' | 'Business' | 'Honeymoon' | 'Backpacker' | 'Food Explorer' | 'Wellness & Spa' | 'Culture & History' | 'Beach Escape';
+export type TravelStyle = 'Budget' | 'Smart Luxury' | 'Luxury' | 'Adventure' | 'Backpacker' | 'Food Explorer' | 'Wellness & Spa' | 'Culture & History' | 'Beach Escape' | 'Nature & Wildlife' | 'Shopping' | 'Nightlife';
 
 export interface TripInput {
   planningMode?: PlanningMode;

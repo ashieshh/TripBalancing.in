@@ -1602,16 +1602,15 @@ Return the response in strict JSON format.`;
         "Budget": "Prioritize lowest practical cost, clean budget stays, public transport, free attractions and authentic local food. Never inflate real item prices.",
         "Smart Luxury": "Do not use a user-entered spending cap. Calculate three realistic totals: Minimum Luxury, Recommended Smart Luxury (best value), and Premium Luxury. Build the itinerary around Recommended Smart Luxury. Maximize luxury feel through boutique or heritage hotels, selective private transfers, premium dining moments and high-value experiences without wasteful overspending.",
         "Luxury": "Treat the entered budget as a hard maximum. Create the most luxurious-feeling trip possible within it using best-value boutique/heritage stays, premium experiences and selective upgrades. Do not recommend unaffordable ultra-luxury items unless clearly marked as optional upgrades.",
-        "Family": "Prioritize safety, family rooms, kid-friendly attractions, manageable travel times, parks, museums and family dining.",
-        "Solo": "Prioritize safe neighborhoods, social experiences, walkability, flexible transport, cafés and well-reviewed solo-friendly stays.",
         "Adventure": "Prioritize outdoor activities, trekking, water sports, wildlife, active routes and safety requirements.",
-        "Business": "Prioritize airport access, reliable Wi-Fi, work desks, meeting-friendly hotels, lounges, efficient transport and flexible dining.",
-        "Honeymoon": "Prioritize romantic stays, privacy, couple experiences, sunset locations, special dining and relaxed pacing.",
         "Backpacker": "Prioritize hostels, public transport, local eateries, free walking routes, social activities and low daily spend.",
         "Food Explorer": "Build the trip around authentic food: breakfast, street food, lunch, dinner, desserts, markets, cooking classes and signature local dishes. Keep unit prices realistic and identify price units such as per piece, per plate or per person.",
         "Wellness & Spa": "Prioritize spa, yoga, meditation, healthy food, nature, thermal experiences and slow pacing.",
         "Culture & History": "Prioritize museums, heritage sites, architecture, local traditions, performances, guided history and UNESCO places.",
-        "Beach Escape": "Prioritize beaches, suitable beachfront stays, sunset points, water activities, seafood/local dining and weather-aware relaxation."
+        "Beach Escape": "Prioritize beaches, suitable beachfront stays, sunset points, water activities, seafood/local dining and weather-aware relaxation.",
+        "Nature & Wildlife": "Prioritize scenic landscapes, national parks, wildlife experiences, nature stays, viewpoints and environmentally responsible activities.",
+        "Shopping": "Prioritize authentic markets, local crafts, shopping districts, malls when relevant, price-conscious buying tips and enough free time for browsing.",
+        "Nightlife": "Prioritize safe evening districts, live music, lounges, night markets, entertainment and late-evening transport planning appropriate to the traveler type."
       };
       const selectedStyleGuidance = styleGuidance[String(travelStyle)] || styleGuidance.Budget;
       prompt = `Create a highly comprehensive, personalized travel itinerary for TripBalancing.

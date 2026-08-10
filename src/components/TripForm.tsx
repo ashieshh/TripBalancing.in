@@ -51,19 +51,18 @@ const TRAVELER_TYPES: Array<{ name: TravelerType; icon: string }> = [
 ];
 
 const TRAVEL_STYLES: Array<{ name: TravelStyle; icon: string; description: string }> = [
-  { name: "Budget", icon: "💰", description: "Safe and enjoyable at the lowest practical cost" },
-  { name: "Smart Luxury", icon: "✨", description: "Best luxury feeling for the best value" },
-  { name: "Luxury", icon: "👑", description: "Maximum luxury within your selected limit" },
-  { name: "Family", icon: "👨‍👩‍👧", description: "Comfortable, safe and child-friendly" },
-  { name: "Solo", icon: "🧍", description: "Safe, social and flexible solo travel" },
-  { name: "Adventure", icon: "🧗", description: "Outdoor thrills and active experiences" },
-  { name: "Business", icon: "💼", description: "Fast transport, workspaces and reliable stays" },
-  { name: "Honeymoon", icon: "💕", description: "Romantic stays and memorable couple experiences" },
-  { name: "Backpacker", icon: "🎒", description: "Hostels, local food and low-cost exploration" },
-  { name: "Food Explorer", icon: "🍽️", description: "Markets, local dishes, cafés and food tours" },
-  { name: "Wellness & Spa", icon: "🌿", description: "Spa, yoga, nature and slow travel" },
-  { name: "Culture & History", icon: "🏛️", description: "Museums, heritage and local traditions" },
-  { name: "Beach Escape", icon: "🏖️", description: "Beaches, sunsets, resorts and water activities" },
+  { name: "Budget", icon: "💰", description: "Lowest practical cost" },
+  { name: "Smart Luxury", icon: "✨", description: "Best premium value" },
+  { name: "Luxury", icon: "👑", description: "High-end comfort and service" },
+  { name: "Adventure", icon: "🧗", description: "Outdoor thrills and active days" },
+  { name: "Backpacker", icon: "🎒", description: "Hostels and low-cost exploring" },
+  { name: "Food Explorer", icon: "🍽️", description: "Local food and culinary experiences" },
+  { name: "Wellness & Spa", icon: "🌿", description: "Spa, yoga and slow travel" },
+  { name: "Culture & History", icon: "🏛️", description: "Heritage, museums and traditions" },
+  { name: "Beach Escape", icon: "🏖️", description: "Beaches, resorts and water activities" },
+  { name: "Nature & Wildlife", icon: "🌲", description: "Nature, wildlife and scenic escapes" },
+  { name: "Shopping", icon: "🛍️", description: "Markets, malls and local finds" },
+  { name: "Nightlife", icon: "🌃", description: "Evenings, music and entertainment" },
 ];
 
 const INTERESTS = ["Beach", "Mountains", "Food", "Culture", "Nature", "Shopping", "Nightlife", "Adventure", "Wildlife", "Relaxation"];
