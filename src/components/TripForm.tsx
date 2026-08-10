@@ -10,8 +10,6 @@ import {
   PlaneTakeoff,
   Sparkles,
   Users,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react";
 import {
   BudgetMode,
@@ -98,19 +96,9 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const [dreamTripSaved, setDreamTripSaved] = useState(false);
   const [feasibilityHighlight, setFeasibilityHighlight] = useState(false);
   const feasibilityRef = useRef<HTMLElement | null>(null);
-  const [helpStep, setHelpStep] = useState(1);
-  const wizardTopRef = useRef<HTMLDivElement | null>(null);
-
-  const goToHelpStep = (step: number) => {
-    const next = Math.max(1, Math.min(5, step));
-    setHelpStep(next);
-    const targets = ["wizard-location", "wizard-travelers", "wizard-budget", "wizard-preferences", "wizard-results"];
-    window.setTimeout(() => {
-      const target = document.getElementById(targets[next - 1]);
-      (target || wizardTopRef.current)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 40);
-  };
-
+  const errorRef = useRef<HTMLDivElement | null>(null);
+  const recommendationsRef = useRef<HTMLElement | null>(null);
+  const [errorHighlight, setErrorHighlight] = useState(false);
   const recommendBudget = budgetMode === "recommended" || travelStyle === "Smart Luxury";
 
   useEffect(() => {
@@ -131,6 +119,29 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
       window.clearTimeout(highlightTimer);
     };
   }, [feasibility]);
+
+  useEffect(() => {
+    if (!error || !errorRef.current) return;
+    const timer = window.setTimeout(() => {
+      errorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      errorRef.current?.focus({ preventScroll: true });
+      setErrorHighlight(true);
+    }, 120);
+    const highlightTimer = window.setTimeout(() => setErrorHighlight(false), 2600);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(highlightTimer);
+    };
+  }, [error]);
+
+  useEffect(() => {
+    if (recommendations.length === 0 || !recommendationsRef.current) return;
+    const timer = window.setTimeout(() => {
+      recommendationsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      recommendationsRef.current?.focus({ preventScroll: true });
+    }, 140);
+    return () => window.clearTimeout(timer);
+  }, [recommendations]);
 
   const tripDatesValid = useMemo(() => Boolean(startDate && endDate), [startDate, endDate]);
 
@@ -212,8 +223,11 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to recommend destinations.");
-      setRecommendations(data.recommendations || []);
-      if ((data.recommendations || []).length > 0) goToHelpStep(5);
+      const nextRecommendations = data.recommendations || [];
+      setRecommendations(nextRecommendations);
+      if (nextRecommendations.length === 0) {
+        throw new Error("No destination recommendations were returned. Please try again.");
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to recommend destinations.");
     } finally {
@@ -357,9 +371,42 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   return (
     <form onSubmit={handleSubmit} className="space-y-6 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:p-6">
       {error && (
-        <div className="flex items-start gap-2.5 rounded-2xl border border-rose-100 bg-rose-50/50 p-4 text-sm text-rose-800 dark:border-rose-900/30 dark:bg-rose-950/10 dark:text-rose-400">
-          <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
-          <span>{error}</span>
+        <div
+          ref={errorRef}
+          tabIndex={-1}
+          aria-live="assertive"
+          className={`rounded-2xl border bg-rose-50/70 p-4 text-sm text-rose-800 outline-none transition-all duration-300 dark:bg-rose-950/10 dark:text-rose-300 ${
+            errorHighlight
+              ? "border-rose-400 ring-4 ring-rose-400/20 shadow-lg"
+              : "border-rose-100 dark:border-rose-900/30"
+          }`}
+        >
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="font-black">We could not complete that action</p>
+              <p className="mt-1">{error}</p>
+              {planningMode === "help_choose" && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={getDestinationRecommendations}
+                    disabled={recommendationLoading || loading}
+                    className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50"
+                  >
+                    Try Again
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPlanningMode("known_destination")}
+                    className="rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-black text-rose-700 dark:border-rose-900/40 dark:bg-slate-950 dark:text-rose-300"
+                  >
+                    ← Back
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -424,29 +471,28 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose a destination or let TripBalancing match one to your time and budget.</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <button type="button" onClick={() => { setPlanningMode("known_destination"); setRecommendations([]); setDestination(""); setDestinationConfirmed(false); setHelpStep(1); }} className={`flex min-h-[92px] items-center gap-3 rounded-2xl border-2 p-3 text-left transition hover:-translate-y-0.5 ${planningMode === "known_destination" ? "border-teal-500 bg-teal-50 dark:bg-teal-950/20" : "border-slate-200 dark:border-slate-800"}`}>
+          <button type="button" onClick={() => { setPlanningMode("known_destination"); setRecommendations([]); setDestination(""); setDestinationConfirmed(false); }} className={`flex min-h-[92px] items-center gap-3 rounded-2xl border-2 p-3 text-left transition hover:-translate-y-0.5 ${planningMode === "known_destination" ? "border-teal-500 bg-teal-50 dark:bg-teal-950/20" : "border-slate-200 dark:border-slate-800"}`}>
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-teal-500 text-xl text-white">📍</div><div><div className="font-black text-slate-900 dark:text-white">I Know My Destination</div><p className="mt-1 text-xs text-slate-500">Plan the complete trip for a place you selected.</p></div>
           </button>
-          <button type="button" onClick={() => { setPlanningMode("help_choose"); setDestination(""); setDestinationConfirmed(false); setHelpStep(1); }} className={`flex min-h-[92px] items-center gap-3 rounded-2xl border-2 p-3 text-left transition hover:-translate-y-0.5 ${planningMode === "help_choose" ? "border-fuchsia-500 bg-fuchsia-50 dark:bg-fuchsia-950/20" : "border-slate-200 dark:border-slate-800"}`}>
+          <button type="button" onClick={() => { setPlanningMode("help_choose"); setDestination(""); setDestinationConfirmed(false); }} className={`flex min-h-[92px] items-center gap-3 rounded-2xl border-2 p-3 text-left transition hover:-translate-y-0.5 ${planningMode === "help_choose" ? "border-fuchsia-500 bg-fuchsia-50 dark:bg-fuchsia-950/20" : "border-slate-200 dark:border-slate-800"}`}>
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-xl dark:bg-violet-950/50">✨</div><div><div className="font-black text-slate-900 dark:text-white">Help Me Choose</div><p className="mt-1 text-xs text-slate-500">Get destination matches from your time, budget and interests.</p></div>
           </button>
         </div>
       </section>
 
       {planningMode === "help_choose" && (
-        <div ref={wizardTopRef} className="sticky top-2 z-20 rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-lg backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
-          <div className="flex items-center justify-between gap-3">
-            <button type="button" onClick={() => helpStep > 1 ? goToHelpStep(helpStep - 1) : setPlanningMode("known_destination")} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:border-teal-400 dark:border-slate-800 dark:text-slate-200">
-              <ChevronLeft className="h-4 w-4" /> Back
-            </button>
-            <div className="min-w-0 flex-1 text-center">
-              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-600 dark:text-teal-400">Help Me Choose · Step {helpStep} of 5</div>
-              <div className="mx-auto mt-2 flex max-w-xl gap-1.5">{[1,2,3,4,5].map((step) => <div key={step} className={`h-1.5 flex-1 rounded-full ${step <= helpStep ? "bg-teal-500" : "bg-slate-200 dark:bg-slate-800"}`} />)}</div>
-            </div>
-            <button type="button" onClick={() => goToHelpStep(helpStep + 1)} disabled={helpStep >= 5} className="inline-flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white disabled:opacity-30 dark:bg-white dark:text-slate-950">
-              Next <ChevronRight className="h-4 w-4" />
-            </button>
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/40">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-fuchsia-600 dark:text-fuchsia-400">Help Me Choose</p>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">Tell us your time, budget and preferences. We’ll recommend destinations that fit.</p>
           </div>
+          <button
+            type="button"
+            onClick={() => { setPlanningMode("known_destination"); setRecommendations([]); setError(null); }}
+            className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-teal-400 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200"
+          >
+            ← Back
+          </button>
         </div>
       )}
 
@@ -527,7 +573,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
       )}
 
       {recommendations.length > 0 && (
-        <section id="wizard-results" className="space-y-3"><div><p className="text-xs font-bold uppercase tracking-wider text-slate-500">Best matches</p><h3 className="text-xl font-black">Select one destination to continue</h3></div><div className="grid gap-4 md:grid-cols-3">{recommendations.map((item, index) => <button key={`${item.destination}-${index}`} type="button" onClick={() => { setDestination(item.destination); setDestinationConfirmed(true); setError(null); }} className={`rounded-2xl border-2 p-5 text-left transition ${destination === item.destination ? "border-teal-500 bg-teal-50 dark:bg-teal-950/20" : "border-slate-200 dark:border-slate-800"}`}><div className="flex items-center justify-between"><span className="font-black">{index + 1}. {item.destination}</span><span className="rounded-full bg-teal-100 px-2 py-1 text-xs font-black text-teal-700">{item.matchScore}%</span></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{item.whyItFits}</p><p className="mt-3 text-xs font-bold text-slate-500">Estimated: {item.estimatedCostRange}</p><p className="mt-1 text-xs text-slate-500">Best for: {item.bestFor.join(", ")}</p></button>)}</div></section>
+        <section ref={recommendationsRef} tabIndex={-1} id="wizard-results" className="space-y-3 outline-none"><div><p className="text-xs font-bold uppercase tracking-wider text-slate-500">Best matches</p><h3 className="text-xl font-black">Select one destination to continue</h3></div><div className="grid gap-4 md:grid-cols-3">{recommendations.map((item, index) => <button key={`${item.destination}-${index}`} type="button" onClick={() => { setDestination(item.destination); setDestinationConfirmed(true); setError(null); }} className={`rounded-2xl border-2 p-5 text-left transition ${destination === item.destination ? "border-teal-500 bg-teal-50 dark:bg-teal-950/20" : "border-slate-200 dark:border-slate-800"}`}><div className="flex items-center justify-between"><span className="font-black">{index + 1}. {item.destination}</span><span className="rounded-full bg-teal-100 px-2 py-1 text-xs font-black text-teal-700">{item.matchScore}%</span></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{item.whyItFits}</p><p className="mt-3 text-xs font-bold text-slate-500">Estimated: {item.estimatedCostRange}</p><p className="mt-1 text-xs text-slate-500">Best for: {item.bestFor.join(", ")}</p></button>)}</div></section>
       )}
 
       <button type="submit" disabled={loading || recommendationLoading || (planningMode === "help_choose" && !destination)} className="flex w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-teal-600 to-emerald-500 py-4 text-base font-bold text-white shadow-md transition hover:shadow-lg disabled:opacity-50">{loading ? <><span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />Consulting AI Travel Expert...</> : <><Sparkles className="h-5 w-5" />{planningMode === "help_choose" ? "Build Trip for Selected Destination" : "Generate Itinerary with AI"}</>}</button>
