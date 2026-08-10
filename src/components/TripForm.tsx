@@ -10,6 +10,8 @@ import {
   PlaneTakeoff,
   Sparkles,
   Users,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   BudgetMode,
@@ -96,18 +98,20 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const [dreamTripSaved, setDreamTripSaved] = useState(false);
   const [feasibilityHighlight, setFeasibilityHighlight] = useState(false);
   const feasibilityRef = useRef<HTMLElement | null>(null);
-  const errorRef = useRef<HTMLDivElement | null>(null);
+  const [helpStep, setHelpStep] = useState(1);
+  const wizardTopRef = useRef<HTMLDivElement | null>(null);
+
+  const goToHelpStep = (step: number) => {
+    const next = Math.max(1, Math.min(5, step));
+    setHelpStep(next);
+    const targets = ["wizard-location", "wizard-travelers", "wizard-budget", "wizard-preferences", "wizard-results"];
+    window.setTimeout(() => {
+      const target = document.getElementById(targets[next - 1]);
+      (target || wizardTopRef.current)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 40);
+  };
 
   const recommendBudget = budgetMode === "recommended" || travelStyle === "Smart Luxury";
-
-  useEffect(() => {
-    if (!error || !errorRef.current) return;
-    const timer = window.setTimeout(() => {
-      errorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      errorRef.current?.focus({ preventScroll: true });
-    }, 60);
-    return () => window.clearTimeout(timer);
-  }, [error]);
 
   useEffect(() => {
     if (!feasibility || feasibility.feasible || !feasibilityRef.current) return;
@@ -209,6 +213,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to recommend destinations.");
       setRecommendations(data.recommendations || []);
+      if ((data.recommendations || []).length > 0) goToHelpStep(5);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to recommend destinations.");
     } finally {
@@ -352,15 +357,9 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   return (
     <form onSubmit={handleSubmit} className="space-y-6 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950 sm:p-6">
       {error && (
-        <div ref={errorRef} tabIndex={-1} role="alert" aria-live="assertive" className="flex flex-col gap-3 rounded-2xl border border-rose-200 bg-rose-50/70 p-4 text-sm text-rose-800 outline-none ring-4 ring-rose-500/10 dark:border-rose-900/40 dark:bg-rose-950/15 dark:text-rose-400">
-          <div className="flex items-start gap-2.5">
-            <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
-            <div><div className="font-black">Please check this before continuing</div><span>{error}</span></div>
-          </div>
-          <div className="flex flex-wrap gap-2 pl-7">
-            <button type="button" onClick={() => setError(null)} className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-black text-white hover:bg-rose-700">Try Again</button>
-            <button type="button" onClick={() => { setError(null); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-black text-rose-700 dark:border-rose-900 dark:bg-slate-950 dark:text-rose-300">Back to form</button>
-          </div>
+        <div className="flex items-start gap-2.5 rounded-2xl border border-rose-100 bg-rose-50/50 p-4 text-sm text-rose-800 dark:border-rose-900/30 dark:bg-rose-950/10 dark:text-rose-400">
+          <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+          <span>{error}</span>
         </div>
       )}
 
@@ -425,16 +424,33 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose a destination or let TripBalancing match one to your time and budget.</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <button type="button" onClick={() => { setPlanningMode("known_destination"); setRecommendations([]); setDestination(""); setDestinationConfirmed(false); }} className={`flex min-h-[92px] items-center gap-3 rounded-2xl border-2 p-3 text-left transition hover:-translate-y-0.5 ${planningMode === "known_destination" ? "border-teal-500 bg-teal-50 dark:bg-teal-950/20" : "border-slate-200 dark:border-slate-800"}`}>
+          <button type="button" onClick={() => { setPlanningMode("known_destination"); setRecommendations([]); setDestination(""); setDestinationConfirmed(false); setHelpStep(1); }} className={`flex min-h-[92px] items-center gap-3 rounded-2xl border-2 p-3 text-left transition hover:-translate-y-0.5 ${planningMode === "known_destination" ? "border-teal-500 bg-teal-50 dark:bg-teal-950/20" : "border-slate-200 dark:border-slate-800"}`}>
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-teal-500 text-xl text-white">📍</div><div><div className="font-black text-slate-900 dark:text-white">I Know My Destination</div><p className="mt-1 text-xs text-slate-500">Plan the complete trip for a place you selected.</p></div>
           </button>
-          <button type="button" onClick={() => { setPlanningMode("help_choose"); setDestination(""); setDestinationConfirmed(false); }} className={`flex min-h-[92px] items-center gap-3 rounded-2xl border-2 p-3 text-left transition hover:-translate-y-0.5 ${planningMode === "help_choose" ? "border-fuchsia-500 bg-fuchsia-50 dark:bg-fuchsia-950/20" : "border-slate-200 dark:border-slate-800"}`}>
+          <button type="button" onClick={() => { setPlanningMode("help_choose"); setDestination(""); setDestinationConfirmed(false); setHelpStep(1); }} className={`flex min-h-[92px] items-center gap-3 rounded-2xl border-2 p-3 text-left transition hover:-translate-y-0.5 ${planningMode === "help_choose" ? "border-fuchsia-500 bg-fuchsia-50 dark:bg-fuchsia-950/20" : "border-slate-200 dark:border-slate-800"}`}>
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-xl dark:bg-violet-950/50">✨</div><div><div className="font-black text-slate-900 dark:text-white">Help Me Choose</div><p className="mt-1 text-xs text-slate-500">Get destination matches from your time, budget and interests.</p></div>
           </button>
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2">
+      {planningMode === "help_choose" && (
+        <div ref={wizardTopRef} className="sticky top-2 z-20 rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-lg backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" onClick={() => helpStep > 1 ? goToHelpStep(helpStep - 1) : setPlanningMode("known_destination")} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:border-teal-400 dark:border-slate-800 dark:text-slate-200">
+              <ChevronLeft className="h-4 w-4" /> Back
+            </button>
+            <div className="min-w-0 flex-1 text-center">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-600 dark:text-teal-400">Help Me Choose · Step {helpStep} of 5</div>
+              <div className="mx-auto mt-2 flex max-w-xl gap-1.5">{[1,2,3,4,5].map((step) => <div key={step} className={`h-1.5 flex-1 rounded-full ${step <= helpStep ? "bg-teal-500" : "bg-slate-200 dark:bg-slate-800"}`} />)}</div>
+            </div>
+            <button type="button" onClick={() => goToHelpStep(helpStep + 1)} disabled={helpStep >= 5} className="inline-flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white disabled:opacity-30 dark:bg-white dark:text-slate-950">
+              Next <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <section id="wizard-location" className="grid gap-4 md:grid-cols-2">
         <LocationAutocomplete
           label="Travelling from"
           icon={<PlaneTakeoff className="h-4 w-4 text-violet-500" />}
@@ -465,7 +481,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
         <div className="flex flex-wrap gap-2">{POPULAR_DESTINATIONS.map((item) => <button key={item.name} type="button" onClick={() => { setDestination(item.name); setDestinationConfirmed(true); setError(null); }} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-400">{item.icon} {item.name}</button>)}</div>
       )}
 
-      <section className="space-y-3">
+      <section id="wizard-travelers" className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Who is travelling?</p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{TRAVELER_TYPES.map((item) => <ChoiceButton key={item.name} selected={travelerType === item.name} onClick={() => setTravelerType(item.name)}><span className="mr-1">{item.icon}</span>{item.name}</ChoiceButton>)}</div>
       </section>
@@ -475,7 +491,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
         <div className="grid grid-cols-[repeat(auto-fit,minmax(125px,1fr))] gap-3">{TRAVEL_STYLES.map((item) => <button key={item.name} type="button" onClick={() => setTravelStyle(item.name)} title={item.description} className={`min-h-[112px] rounded-2xl border-2 p-3 text-center transition ${travelStyle === item.name ? "border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-950/20 dark:text-teal-300" : "border-slate-100 bg-slate-50/50 text-slate-600 dark:border-slate-900 dark:bg-slate-900/30 dark:text-slate-400"}`}><div className="text-xl">{item.icon}</div><div className="mt-1 text-sm font-bold">{item.name}{item.name === "Smart Luxury" && <span className="ml-1 text-[9px] text-fuchsia-500">NEW</span>}</div><p className="mt-1 text-[10px] leading-tight opacity-75">{item.description}</p></button>)}</div>
       </section>
 
-      <section className="space-y-3">
+      <section id="wizard-budget" className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Budget mode</p>
         <div className="grid gap-3 md:grid-cols-2">
           <ChoiceButton selected={budgetMode === "fixed" && travelStyle !== "Smart Luxury"} onClick={() => { setBudgetMode("fixed"); if (travelStyle === "Smart Luxury") setTravelStyle("Luxury"); }}>💳 I have a fixed budget</ChoiceButton>
@@ -500,7 +516,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
       </section>
 
       {planningMode === "help_choose" && (
-        <section className="space-y-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/40">
+        <section id="wizard-preferences" className="space-y-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-5 dark:border-slate-800 dark:bg-slate-900/40">
           <h3 className="font-black text-slate-900 dark:text-white">Destination preferences</h3>
           <div className="grid gap-4 md:grid-cols-3"><FieldLabel label="Trip purpose"><select value={tripPurpose} onChange={(event) => setTripPurpose(event.target.value)} className="input-field"><option>Vacation</option><option>Weekend Trip</option><option>Honeymoon</option><option>Birthday</option><option>Anniversary</option><option>Friends Reunion</option><option>Relaxation</option><option>Food Tour</option><option>Adventure</option><option>Pilgrimage</option></select></FieldLabel><FieldLabel label="Preferred weather"><select value={preferredWeather} onChange={(event) => setPreferredWeather(event.target.value)} className="input-field"><option>Any</option><option>Sunny</option><option>Cold</option><option>Mild</option><option>Rainy</option><option>Snow</option></select></FieldLabel><FieldLabel label="Visited-place rule"><select value={revisitPreference} onChange={(event) => setRevisitPreference(event.target.value as RevisitPreference)} className="input-field"><option value="new_only">New places only</option><option value="allow_revisit">New + visited places</option><option value="favorites_only">Revisit favourites</option></select></FieldLabel></div>
           <div><p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600">What do you enjoy?</p><div className="flex flex-wrap gap-2">{INTERESTS.map((interest) => <button key={interest} type="button" onClick={() => toggleInterest(interest)} className={`rounded-full border px-3 py-2 text-xs font-semibold ${selectedInterests.includes(interest) ? "border-fuchsia-500 bg-fuchsia-500 text-white" : "border-slate-200 bg-white text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"}`}>{selectedInterests.includes(interest) && <Check className="mr-1 inline h-3 w-3" />}{interest}</button>)}</div></div>
@@ -511,7 +527,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
       )}
 
       {recommendations.length > 0 && (
-        <section className="space-y-3"><div><p className="text-xs font-bold uppercase tracking-wider text-slate-500">Best matches</p><h3 className="text-xl font-black">Select one destination to continue</h3></div><div className="grid gap-4 md:grid-cols-3">{recommendations.map((item, index) => <button key={`${item.destination}-${index}`} type="button" onClick={() => { setDestination(item.destination); setDestinationConfirmed(true); setError(null); }} className={`rounded-2xl border-2 p-5 text-left transition ${destination === item.destination ? "border-teal-500 bg-teal-50 dark:bg-teal-950/20" : "border-slate-200 dark:border-slate-800"}`}><div className="flex items-center justify-between"><span className="font-black">{index + 1}. {item.destination}</span><span className="rounded-full bg-teal-100 px-2 py-1 text-xs font-black text-teal-700">{item.matchScore}%</span></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{item.whyItFits}</p><p className="mt-3 text-xs font-bold text-slate-500">Estimated: {item.estimatedCostRange}</p><p className="mt-1 text-xs text-slate-500">Best for: {item.bestFor.join(", ")}</p></button>)}</div></section>
+        <section id="wizard-results" className="space-y-3"><div><p className="text-xs font-bold uppercase tracking-wider text-slate-500">Best matches</p><h3 className="text-xl font-black">Select one destination to continue</h3></div><div className="grid gap-4 md:grid-cols-3">{recommendations.map((item, index) => <button key={`${item.destination}-${index}`} type="button" onClick={() => { setDestination(item.destination); setDestinationConfirmed(true); setError(null); }} className={`rounded-2xl border-2 p-5 text-left transition ${destination === item.destination ? "border-teal-500 bg-teal-50 dark:bg-teal-950/20" : "border-slate-200 dark:border-slate-800"}`}><div className="flex items-center justify-between"><span className="font-black">{index + 1}. {item.destination}</span><span className="rounded-full bg-teal-100 px-2 py-1 text-xs font-black text-teal-700">{item.matchScore}%</span></div><p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{item.whyItFits}</p><p className="mt-3 text-xs font-bold text-slate-500">Estimated: {item.estimatedCostRange}</p><p className="mt-1 text-xs text-slate-500">Best for: {item.bestFor.join(", ")}</p></button>)}</div></section>
       )}
 
       <button type="submit" disabled={loading || recommendationLoading || (planningMode === "help_choose" && !destination)} className="flex w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-teal-600 to-emerald-500 py-4 text-base font-bold text-white shadow-md transition hover:shadow-lg disabled:opacity-50">{loading ? <><span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />Consulting AI Travel Expert...</> : <><Sparkles className="h-5 w-5" />{planningMode === "help_choose" ? "Build Trip for Selected Destination" : "Generate Itinerary with AI"}</>}</button>
