@@ -33,6 +33,12 @@ export default function App() {
     return window.location.pathname === "/admin" ? "admin" : "app";
   });
   const [isAdminVerified, setIsAdminVerified] = useState<boolean>(false);
+  const [adminAccessChecked, setAdminAccessChecked] = useState<boolean>(false);
+
+  // Auth state
+  const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [userDataLoading, setUserDataLoading] = useState(false);
 
   // Handle browser navigation / popstate
   useEffect(() => {
@@ -50,12 +56,16 @@ export default function App() {
   // Check Admin Status when user session loads
   useEffect(() => {
     async function verifyAdminAccess() {
+      setAdminAccessChecked(false);
       try {
-        const token = localStorage.getItem("sb-access-token") || localStorage.getItem("tripbalancing_mock_token") || "admin_session";
+        const token = await db.getAccessToken();
+        if (!token) {
+          setIsAdminVerified(false);
+          setAdminAccessChecked(true);
+          return;
+        }
         const res = await fetch("/api/admin/check-access", {
-          headers: {
-            "Authorization": `Bearer ${token}`
-          }
+          headers: { "Authorization": `Bearer ${token}` }
         });
         if (res.ok) {
           const data = await res.json();
@@ -69,11 +79,13 @@ export default function App() {
         }
       } catch (err) {
         setIsAdminVerified(false);
+      } finally {
+        setAdminAccessChecked(true);
       }
     }
 
     verifyAdminAccess();
-  }, []);
+  }, [user?.id]);
 
   // Initialize theme choice on initial load
   useEffect(() => {
@@ -85,11 +97,6 @@ export default function App() {
       root.classList.remove("dark");
     }
   }, []);
-
-  // Auth state
-  const [user, setUser] = useState<any>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [userDataLoading, setUserDataLoading] = useState(false);
 
   // Premium Subscription state
   const [plan, setPlan] = useState<"free" | "pay_per_trip" | "yearly" | "lifetime">("free");
@@ -742,17 +749,24 @@ export default function App() {
   }
 
   if (currentView === "admin" || window.location.pathname === "/admin") {
-    return (
-      <Suspense fallback={<SuspenseFallback />}>
-        <AdminDashboard
-          onBackToApp={() => {
-            window.history.pushState({}, "", "/");
-            setCurrentView("app");
-          }}
-          sessionToken={localStorage.getItem("sb-access-token") || localStorage.getItem("tripbalancing_mock_token") || "admin_session"}
-        />
-      </Suspense>
-    );
+    if (!adminAccessChecked) {
+      return <SuspenseFallback />;
+    }
+    if (!isAdminVerified) {
+      if (window.location.pathname === "/admin") window.history.replaceState({}, "", "/");
+      if (currentView !== "app") setTimeout(() => setCurrentView("app"), 0);
+    } else {
+      return (
+        <Suspense fallback={<SuspenseFallback />}>
+          <AdminDashboard
+            onBackToApp={() => {
+              window.history.pushState({}, "", "/");
+              setCurrentView("app");
+            }}
+          />
+        </Suspense>
+      );
+    }
   }
 
   return (

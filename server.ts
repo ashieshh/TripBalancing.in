@@ -109,34 +109,11 @@ interface FailedAccessLog {
 }
 
 // In-memory collections populated on initialization / user interactions
-const IN_MEMORY_USERS: UserProfileRecord[] = [
-  { id: "usr_001", email: "admin@tripbalancing.in", full_name: "TripBalancing Super Admin", plan: "lifetime", trips_count: 14, paid_trip_credits: 999, status: "active", created_at: "2026-01-01T00:00:00Z" },
-  { id: "usr_002", email: "yadavvashish@gmail.com", full_name: "Vashish Yadav", plan: "lifetime", trips_count: 8, paid_trip_credits: 99, status: "active", created_at: "2026-02-10T12:00:00Z" },
-  { id: "usr_003", email: "demo.traveler@example.com", full_name: "Demo Traveler", plan: "pay_per_trip", trips_count: 3, paid_trip_credits: 2, status: "active", created_at: "2026-03-01T10:30:00Z" },
-  { id: "usr_004", email: "explorergirl@gmail.com", full_name: "Ananya Sharma", plan: "yearly", trips_count: 12, paid_trip_credits: 0, status: "active", created_at: "2026-03-15T08:15:00Z" },
-  { id: "usr_005", email: "backpack.rahul@yahoo.com", full_name: "Rahul Verma", plan: "free", trips_count: 2, paid_trip_credits: 0, status: "active", created_at: "2026-03-28T16:45:00Z" }
-];
-
-const IN_MEMORY_PAYMENTS: PaymentRecord[] = [
-  { id: "pay_rec_001", user_email: "yadavvashish@gmail.com", razorpay_order_id: "order_Qz9812A", razorpay_payment_id: "pay_Qz9812A_01", plan_purchased: "lifetime", amount: 1999, currency: "INR", payment_status: "captured", is_test_mode: false, created_at: "2026-02-10T12:05:00Z" },
-  { id: "pay_rec_002", user_email: "explorergirl@gmail.com", razorpay_order_id: "order_Rx4419B", razorpay_payment_id: "pay_Rx4419B_02", plan_purchased: "yearly", amount: 499, currency: "INR", payment_status: "captured", is_test_mode: false, created_at: "2026-03-15T08:20:00Z" },
-  { id: "pay_rec_003", user_email: "demo.traveler@example.com", razorpay_order_id: "order_P1123C", razorpay_payment_id: "pay_P1123C_03", plan_purchased: "pay_per_trip", amount: 99, currency: "INR", payment_status: "captured", is_test_mode: true, created_at: "2026-03-01T10:35:00Z" }
-];
-
-const IN_MEMORY_SUBSCRIPTIONS: SubscriptionRecord[] = [
-  { id: "sub_001", user_email: "yadavvashish@gmail.com", current_plan: "lifetime", purchase_date: "2026-02-10T12:05:00Z", expiry_date: null, remaining_trip_credits: 999, status: "active" },
-  { id: "sub_002", user_email: "explorergirl@gmail.com", current_plan: "yearly", purchase_date: "2026-03-15T08:20:00Z", expiry_date: "2027-03-15T08:20:00Z", remaining_trip_credits: 999, status: "active" },
-  { id: "sub_003", user_email: "demo.traveler@example.com", current_plan: "pay_per_trip", purchase_date: "2026-03-01T10:35:00Z", expiry_date: null, remaining_trip_credits: 2, status: "active" }
-];
-
-const IN_MEMORY_SUPPORT_TICKETS: SupportTicketRecord[] = [
-  { id: "tkt_001", ticket_ref: "#TB-882190", user_email: "backpack.rahul@yahoo.com", subject: "Inquiry regarding offline PDF download", message: "Hi, can I export my Goa itinerary to PDF for offline viewing while flying?", status: "open", created_at: "2026-03-29T11:20:00Z" },
-  { id: "tkt_002", ticket_ref: "#TB-773104", user_email: "demo.traveler@example.com", subject: "Payment confirmation question", message: "My payment went through via Razorpay UPI. Want to confirm my extra trip credits.", razorpay_payment_id: "pay_P1123C_03", status: "resolved", created_at: "2026-03-01T11:00:00Z" }
-];
-
-const IN_MEMORY_REFUND_REQUESTS: RefundRequestRecord[] = [
-  { id: "ref_001", user_email: "demo.traveler@example.com", razorpay_payment_id: "pay_P1123C_03", plan: "pay_per_trip", purchase_date: "2026-03-01T10:35:00Z", trips_used_since_purchase: 0, refund_eligible: true, status: "pending", created_at: "2026-03-02T09:10:00Z" }
-];
+const IN_MEMORY_USERS: UserProfileRecord[] = [];
+const IN_MEMORY_PAYMENTS: PaymentRecord[] = [];
+const IN_MEMORY_SUBSCRIPTIONS: SubscriptionRecord[] = [];
+const IN_MEMORY_SUPPORT_TICKETS: SupportTicketRecord[] = [];
+const IN_MEMORY_REFUND_REQUESTS: RefundRequestRecord[] = [];
 
 const FAILED_ADMIN_ACCESS_LOGS: FailedAccessLog[] = [];
 
@@ -188,28 +165,15 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
           authenticatedUserId = user.id;
           authenticatedEmail = user.email || null;
 
-          // Query admin_users table in Supabase by authenticated user_id
-          const { data: adminRow, error: adminErr } = await supabaseAdmin
-            .from("admin_users")
-            .select("role")
-            .eq("user_id", user.id)
-            .maybeSingle();
-
-          if (!adminErr && adminRow && adminRow.role === "admin") {
+          // Admin access is restricted to the configured owner email.
+          // Set ADMIN_EMAIL in Render. The default preserves the current owner account.
+          const adminEmail = (process.env.ADMIN_EMAIL || "yadavvashish@gmail.com").trim().toLowerCase();
+          if ((authenticatedEmail || "").trim().toLowerCase() === adminEmail) {
             isAdminVerified = true;
           }
         }
       } catch (err) {
         console.warn("[Admin Auth] Supabase check exception:", err);
-      }
-    }
-
-    // 2. Fallback check for admin session tokens or default super admin in dev/demo mode
-    if (!isAdminVerified) {
-      if (token === "admin_session" || token.includes("mock_admin") || token.includes("admin")) {
-        authenticatedUserId = "usr_001";
-        authenticatedEmail = "admin@tripbalancing.in";
-        isAdminVerified = true;
       }
     }
 
@@ -226,7 +190,7 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
     // Attach admin context
     (req as any).adminUser = {
       id: authenticatedUserId,
-      email: authenticatedEmail || "admin@tripbalancing.in",
+      email: authenticatedEmail || "",
       role: "admin"
     };
 
@@ -951,18 +915,32 @@ app.get("/api/admin/users", verifyAdminAuth, async (req, res) => {
     const search = (req.query.search as string || "").toLowerCase().trim();
     const plan = (req.query.plan as string || "all").toLowerCase().trim();
 
-    let usersList = [...IN_MEMORY_USERS];
+    let usersList: UserProfileRecord[] = [];
 
-    if (supabaseAdmin) {
-      try {
-        const { data: dbUsers } = await supabaseAdmin.from("user_profiles").select("*");
-        if (dbUsers && dbUsers.length > 0) {
-          usersList = dbUsers;
-        }
-      } catch (e) {
-        console.warn("[Admin Users] DB query fallback:", e);
-      }
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase admin connection is not configured" });
     }
+
+    // Read the actual Supabase Auth users, then enrich them with user_profiles when available.
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    if (authError) throw authError;
+
+    const { data: profiles } = await supabaseAdmin.from("user_profiles").select("*");
+    const profileById = new Map((profiles || []).map((p: any) => [p.id || p.user_id, p]));
+
+    usersList = (authData?.users || []).map((authUser: any) => {
+      const profile: any = profileById.get(authUser.id) || {};
+      return {
+        id: authUser.id,
+        email: authUser.email || profile.email || "",
+        full_name: profile.full_name || authUser.user_metadata?.full_name || authUser.user_metadata?.name || "",
+        plan: profile.plan || "free",
+        trips_count: Number(profile.trips_count || 0),
+        paid_trip_credits: Number(profile.paid_trip_credits || 0),
+        status: profile.status || (authUser.banned_until ? "suspended" : "active"),
+        created_at: authUser.created_at || profile.created_at || new Date(0).toISOString()
+      } as UserProfileRecord;
+    });
 
     if (search) {
       usersList = usersList.filter(u => u.email.toLowerCase().includes(search) || (u.full_name && u.full_name.toLowerCase().includes(search)));

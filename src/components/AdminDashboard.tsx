@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { db } from "../lib/supabase";
 import { 
   ShieldCheck, ShieldAlert, Users, CreditCard, RefreshCw, HelpCircle, 
   Lock, AlertTriangle, Search, Filter, ChevronLeft, ChevronRight, 
@@ -49,7 +50,8 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
   const handleRefundDecision = async (r: any, action: "approve" | "reject") => {
     setRefActionLoading(r.id);
     try {
-      const token = sessionToken || localStorage.getItem("sb-access-token") || localStorage.getItem("tripbalancing_mock_token") || "admin_session";
+      const token = await db.getAccessToken();
+      if (!token) throw new Error("Admin session expired");
       const res = await fetch("/api/admin/refunds/action", {
         method: "POST",
         headers: {
@@ -128,8 +130,9 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
   };
 
   // Get Auth Header
-  const getAuthHeaders = () => {
-    const token = sessionToken || localStorage.getItem("sb-access-token") || localStorage.getItem("tripbalancing_mock_token") || "admin_session";
+  const getAuthHeaders = async () => {
+    const token = await db.getAccessToken();
+      if (!token) throw new Error("Admin session expired");
     return {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${token}`
@@ -142,7 +145,7 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
       setAccessState("checking");
       try {
         const res = await fetch("/api/admin/check-access", {
-          headers: getAuthHeaders()
+          headers: await getAuthHeaders()
         });
 
         if (res.status === 401) {
@@ -187,7 +190,7 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
       setTabLoading(true);
       setTabError(null);
       try {
-        const headers = getAuthHeaders();
+        const headers = await getAuthHeaders();
 
         if (activeTab === "overview") {
           const res = await fetch("/api/admin/overview", { headers });
@@ -314,7 +317,7 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
 
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex flex-col text-right">
-              <span className="text-xs font-bold text-slate-200">{adminUser?.email || "admin@tripbalancing.in"}</span>
+              <span className="text-xs font-bold text-slate-200">{adminUser?.email || "Admin"}</span>
               <span className="text-[10px] text-teal-400 font-semibold uppercase">Super Admin</span>
             </div>
 

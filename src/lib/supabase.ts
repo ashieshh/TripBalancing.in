@@ -337,6 +337,14 @@ export const db = {
     }
   },
 
+  async getAccessToken() {
+    if (isRealSupabaseConfigured && supabase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.access_token || null;
+    }
+    return null;
+  },
+
   async getUserProfile(userId: string, email?: string): Promise<UserProfile | null> {
     if (isRealSupabaseConfigured && supabase) {
       try {
