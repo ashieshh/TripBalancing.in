@@ -1548,7 +1548,20 @@ app.post("/api/generate-itinerary", async (req, res) => {
     const cached = ITINERARY_CACHE.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < ITINERARY_TTL)) {
       console.log(`[Cache Hit] Returning cached itinerary for destination: ${destination} from origin: ${origin || "any"}`);
-      const cachedItinerary = reconcileItineraryBudget({ ...cached.data, latitude: geoCoords.latitude, longitude: geoCoords.longitude });
+      const cachedItinerary = reconcileItineraryBudget({
+        ...cached.data,
+        latitude: geoCoords.latitude,
+        longitude: geoCoords.longitude,
+        originLatitude: validatedOrigin.latitude,
+        originLongitude: validatedOrigin.longitude,
+        originToDestinationDistanceKm: origin && validatedOrigin.latitude != null && validatedOrigin.longitude != null
+          ? Math.round(6371 * 2 * Math.asin(Math.sqrt(
+              Math.sin(((geoCoords.latitude - validatedOrigin.latitude) * Math.PI / 180) / 2) ** 2 +
+              Math.cos(validatedOrigin.latitude * Math.PI / 180) * Math.cos(geoCoords.latitude * Math.PI / 180) *
+              Math.sin(((geoCoords.longitude - validatedOrigin.longitude) * Math.PI / 180) / 2) ** 2
+            )))
+          : undefined
+      });
       return res.json({ itinerary: cachedItinerary });
     }
 
@@ -1923,6 +1936,15 @@ Return the response in strict JSON format.`;
     parsedItinerary.latitude = geoCoords.latitude;
     parsedItinerary.longitude = geoCoords.longitude;
     parsedItinerary.origin = origin || "";
+    parsedItinerary.originLatitude = validatedOrigin.latitude;
+    parsedItinerary.originLongitude = validatedOrigin.longitude;
+    if (origin && validatedOrigin.latitude != null && validatedOrigin.longitude != null) {
+      const toRad = (v: number) => v * Math.PI / 180;
+      const dLat = toRad(geoCoords.latitude - validatedOrigin.latitude);
+      const dLon = toRad(geoCoords.longitude - validatedOrigin.longitude);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(validatedOrigin.latitude)) * Math.cos(toRad(geoCoords.latitude)) * Math.sin(dLon / 2) ** 2;
+      parsedItinerary.originToDestinationDistanceKm = Math.round(6371 * 2 * Math.asin(Math.sqrt(a)));
+    }
     
     // Store in cache for future identical requests
     const reconciledItinerary = reconcileItineraryBudget(parsedItinerary);

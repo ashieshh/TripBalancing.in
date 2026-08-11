@@ -938,14 +938,14 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
 
   const acc = parseVal(b.accommodation) || parseVal(d.accommodationTotal) || 0;
   const food = parseVal(b.food) || parseVal(d.foodTotal) || 0;
-  const activities = parseVal(b.activities) || parseVal(d.attractionTotal) || 0;
+  const activitiesBudget = parseVal(b.activities) || parseVal(d.attractionTotal) || 0;
   const localTransport = parseVal(b.transport) || parseVal(d.localTransportTotal) || 0;
   const flight = hasOrigin ? (parseVal(b.originToDestinationTravel) || parseVal(d.originToDestinationCost) || 0) : 0;
   const visaInsurance = parseVal((b as any).visaAndInsurance) || parseVal((d as any).visaAndInsurance) || 0;
   let miscellaneous = parseVal(b.miscellaneous) || parseVal(d.miscellaneousExpenses) || 0;
 
   const explicitTotal = parseVal(b.total) || parseVal(d.grandTotal) || parseVal((itinerary as any).realisticEstimatedCost);
-  const visibleSubtotal = acc + food + activities + localTransport + flight + visaInsurance + miscellaneous;
+  const visibleSubtotal = acc + food + activitiesBudget + localTransport + flight + visaInsurance + miscellaneous;
   const calculatedTotal = explicitTotal > 0 ? explicitTotal : visibleSubtotal;
 
   // Put any rounding/reconciliation delta into miscellaneous so every visible
@@ -961,7 +961,7 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
   itinerary.estimatedBudgetBreakdown = {
     accommodation: fmt(acc),
     food: fmt(food),
-    activities: fmt(activities),
+    activities: fmt(activitiesBudget),
     transport: fmt(localTransport),
     miscellaneous: fmt(miscellaneous),
     originToDestinationTravel: flight > 0 ? fmt(flight) : "N/A",
@@ -972,7 +972,7 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
   itinerary.detailedBudgetSummary = {
     accommodationTotal: fmt(acc),
     foodTotal: fmt(food),
-    attractionTotal: fmt(activities),
+    attractionTotal: fmt(activitiesBudget),
     localTransportTotal: fmt(localTransport),
     miscellaneousExpenses: fmt(miscellaneous),
     originToDestinationCost: flight > 0 ? fmt(flight) : "N/A",
@@ -1000,16 +1000,14 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
   const daysData = itinerary.days || [];
   const totalDays = daysData.length || 1;
 
-  // Reconcile daily totals to the same realistic estimate used by the financial
-  // planner. Existing AI daily budgets are used only as relative weights; they
-  // are normalized so the sum of every day equals the grand total exactly.
-  const dailyWeights = daysData.map((day: any) => {
+  // Build genuine day-specific costs instead of dividing the grand total evenly.
+  // Shared trip costs are spread across days; activity costs follow each day's actual itinerary.
+  const activitySubtotals = daysData.map((day: any) => {
     const activities = Array.isArray(day.activities) ? day.activities : [];
-    const activitySubtotal = activities.reduce((sum: number, act: any) => sum + parseVal(act.cost), 0);
-    const aiRequirement = parseVal(day.dailyBudget);
-    return Math.max(aiRequirement, activitySubtotal, 1);
+    return activities.reduce((sum: number, act: any) => sum + parseVal(act.cost), 0);
   });
-  const totalWeight = dailyWeights.reduce((sum: number, value: number) => sum + value, 0) || totalDays;
+  const allActivitySubtotal = activitySubtotals.reduce((sum: number, value: number) => sum + value, 0);
+  const sharedDaily = totalDays > 0 ? (acc + food + localTransport + miscellaneous) / totalDays : 0;
   let allocatedSoFar = 0;
 
   daysData.forEach((day: any, dayIndex: number) => {
@@ -1018,20 +1016,21 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
       if (act.location) act.location = sanitizeLocation(act.location);
       act.title = sanitizeLocation(act.title);
       const costVal = parseVal(act.cost);
-      if (costVal > 0) {
-        act.cost = currencySym + costVal.toLocaleString();
-      } else if (!act.cost || String(act.cost).trim() === "") {
-        act.cost = "Free / Included";
-      }
+      if (costVal > 0) act.cost = currencySym + costVal.toLocaleString();
+      else if (!act.cost || String(act.cost).trim() === "") act.cost = "Free / Included";
     });
 
-    const activitySubtotal = activities.reduce((sum: number, act: any) => sum + parseVal(act.cost), 0);
+    const activitySubtotal = activitySubtotals[dayIndex];
+    const allocatedActivities = allActivitySubtotal > 0
+      ? (activitiesBudget * activitySubtotal / allActivitySubtotal)
+      : (totalDays > 0 ? activitiesBudget / totalDays : 0);
+    // Long-distance travel and visa/insurance are trip-level costs, shown on Day 1.
+    const tripLevelCosts = dayIndex === 0 ? flight + visaInsurance : 0;
+    const rawDayTotal = sharedDaily + allocatedActivities + tripLevelCosts;
     const isLastDay = dayIndex === daysData.length - 1;
     const allocatedDayTotal = calculatedTotal > 0
-      ? (isLastDay
-          ? Math.max(0, calculatedTotal - allocatedSoFar)
-          : Math.round((calculatedTotal * dailyWeights[dayIndex]) / totalWeight))
-      : activitySubtotal;
+      ? (isLastDay ? Math.max(0, calculatedTotal - allocatedSoFar) : Math.round(rawDayTotal))
+      : Math.round(rawDayTotal || activitySubtotal);
 
     allocatedSoFar += allocatedDayTotal;
     day.dailyBudget = currencySym + allocatedDayTotal.toLocaleString();
@@ -1463,7 +1462,13 @@ export const exportPremiumTravelPDF = async (
   doc.setFont("helvetica", "italic");
   doc.setFontSize(10);
   doc.setTextColor(203, 213, 225);
-  doc.text("A bespoke luxury guide compiled for the discerning explorer", 105, dividerY + 9, { align: "center" });
+  const styleKey = String(itinerary.travelStyle || "").toLowerCase();
+  const coverTagline = styleKey.includes("budget") || styleKey.includes("backpack")
+    ? "A personalized value-focused travel guide built around your budget"
+    : styleKey.includes("luxury")
+      ? "A bespoke luxury guide compiled for the discerning explorer"
+      : `A personalized ${itinerary.travelStyle || "travel"} guide crafted for your journey`;
+  doc.text(coverTagline, 105, dividerY + 9, { align: "center" });
 
   // Grid / Badges for Cover
   const coverTodayStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
@@ -1540,7 +1545,7 @@ export const exportPremiumTravelPDF = async (
     ...(itinerary.origin && itinerary.originToDestinationDuration && itinerary.originToDestinationDuration !== "N/A"
       ? [{ label: "TRANSIT TIME", value: itinerary.originToDestinationDuration, bg: [250, 245, 255], txt: [147, 51, 234] }]
       : []),
-    { label: "DISTANCE", value: `${(itinerary.days?.length || 1) * 5 + 8} km`, bg: [238, 242, 255], txt: [79, 70, 229] },
+    { label: "DISTANCE", value: (itinerary as any).originToDestinationDistanceKm ? `${Number((itinerary as any).originToDestinationDistanceKm).toLocaleString()} km` : "N/A", bg: [238, 242, 255], txt: [79, 70, 229] },
     { label: "ATTRACTIONS", value: `${itinerary.placesToVisit?.length || 0} Places`, bg: [254, 243, 199], txt: [217, 119, 6] },
     { label: "TRAVELERS", value: `${itinerary.travelers} Pax`, bg: [255, 241, 242], txt: [225, 29, 72] }
   ];
@@ -1609,10 +1614,21 @@ export const exportPremiumTravelPDF = async (
   doc.setLineWidth(0.25);
   doc.line(marginX + 5, y + 11, marginX + halfW - 5, y + 11);
 
+  const destinationText = String(itinerary.destination || "").toLowerCase();
+  const emergencyDirectory = (() => {
+    if (/france|paris|lyon|nice|marseille/.test(destinationText)) return { general: "112", police: "17", medical: "15" };
+    if (/india|mumbai|delhi|goa|jaipur|bengaluru|bangalore|chennai|kolkata|hyderabad/.test(destinationText)) return { general: "112", police: "112 / 100", medical: "112 / 108" };
+    if (/united kingdom|england|scotland|wales|london|manchester|edinburgh/.test(destinationText)) return { general: "999 / 112", police: "999 / 112", medical: "999 / 112" };
+    if (/united states|usa|new york|los angeles|san francisco|chicago/.test(destinationText)) return { general: "911", police: "911", medical: "911" };
+    if (/japan|tokyo|osaka|kyoto/.test(destinationText)) return { general: "110 / 119", police: "110", medical: "119" };
+    if (/uae|united arab emirates|dubai|abu dhabi/.test(destinationText)) return { general: "999 / 998", police: "999", medical: "998" };
+    if (/australia|sydney|melbourne|brisbane/.test(destinationText)) return { general: "000", police: "000", medical: "000" };
+    return { general: "112 (where supported)", police: "Check local number", medical: "Check local number" };
+  })();
   const entries = [
-    { name: "• Emergency Helpline:", value: "112 / 911" },
-    { name: "• Local Police Desk:", value: "100" },
-    { name: "• Medical Emergency:", value: "102 / 108" }
+    { name: "• Emergency Helpline:", value: emergencyDirectory.general },
+    { name: "• Local Police Desk:", value: emergencyDirectory.police },
+    { name: "• Medical Emergency:", value: emergencyDirectory.medical }
   ];
   entries.forEach((e, idx) => {
     const ey = y + 16 + (idx * 6);
@@ -2989,7 +3005,7 @@ export const exportPremiumTravelPDF = async (
       doc.setFont("helvetica", "italic");
       doc.setFontSize(7.5);
       doc.setTextColor(148, 163, 184);
-      doc.text("TripBalancing Travels © 2026. Custom Premium Guide Book.", 105, 266, { align: "center" });
+      doc.text(`TripBalancing Travels © 2026. Custom ${itinerary.travelStyle || "Travel"} Guide Book.`, 105, 266, { align: "center" });
       continue;
     }
 

@@ -162,6 +162,9 @@ export interface Itinerary {
   travelTips: string[];
   latitude?: number;
   longitude?: number;
+  originLatitude?: number;
+  originLongitude?: number;
+  originToDestinationDistanceKm?: number;
   rating?: number;
   privateNote?: string;
   reviewText?: string;
