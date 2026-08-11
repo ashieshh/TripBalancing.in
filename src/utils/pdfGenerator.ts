@@ -1527,11 +1527,13 @@ export const exportPremiumTravelPDF = async (
     doc.text(wrapVal, xPos + 5, yPos + 15);
   });
 
-  // Footer text on cover
+  // Footer text on cover — keep it below the information cards so it never overlaps them.
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
+  doc.setFontSize(7.2);
   doc.setTextColor(148, 163, 184);
-  doc.text(`EXCLUSIVE LITERARY PORTFOLIO  |  VERSION 1.0  |  GENERATED: ${coverTodayStr.toUpperCase()}`, 105, 260, { align: "center" });
+  doc.text(`TRIPBALANCING  •  PERSONALIZED TRAVEL GUIDE  •  GENERATED ${coverTodayStr.toUpperCase()}`, 105, 282, { align: "center" });
+  doc.setFontSize(6.8);
+  doc.text(`© ${new Date().getFullYear()} TripBalancing`, 105, 287, { align: "center" });
 
   // ==========================================
   // PAGE 2: TRIP SUMMARY & STATISTICS

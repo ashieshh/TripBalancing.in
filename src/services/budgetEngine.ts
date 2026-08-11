@@ -405,17 +405,38 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     grandTotal: calculated.formatted.grandTotal
   };
 
-  // Reconcile Day-by-Day budgets so sum equals grandTotal
+  // Reconcile day-by-day budgets using the same allocation rules as the PDF.
+  // Shared costs are spread across days, activity costs follow the actual day,
+  // and long-distance travel + visa/insurance are assigned to Day 1.
   if (Array.isArray(itinerary.days) && itinerary.days.length > 0) {
     const dayCount = itinerary.days.length;
-    const dailyBase = Math.floor(grandTotalNum / dayCount);
-    let remainder = grandTotalNum - (dailyBase * dayCount);
+    const parseMoney = (value: any): number => {
+      if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+      const cleaned = String(value ?? "").replace(/[^0-9.-]/g, "");
+      const parsed = Number(cleaned);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const activitySubtotals = itinerary.days.map((day: any) => {
+      const activities = Array.isArray(day.activities) ? day.activities : [];
+      return activities.reduce((sum: number, activity: any) => sum + parseMoney(activity.cost), 0);
+    });
+    const allActivitySubtotal = activitySubtotals.reduce((sum: number, value: number) => sum + value, 0);
+    const sharedDaily = (calculated.hotel + calculated.food + calculated.localTransport + calculated.miscellaneous) / dayCount;
+    let allocatedSoFar = 0;
 
     itinerary.days.forEach((day: any, idx: number) => {
-      const dayAlloc = dailyBase + (idx === 0 ? remainder : 0);
+      const allocatedActivities = allActivitySubtotal > 0
+        ? calculated.sightseeing * activitySubtotals[idx] / allActivitySubtotal
+        : calculated.sightseeing / dayCount;
+      const tripLevelCosts = idx === 0 ? calculated.flight + calculated.visaAndInsurance : 0;
+      const rawDayTotal = sharedDaily + allocatedActivities + tripLevelCosts;
+      const isLastDay = idx === dayCount - 1;
+      const dayAlloc = isLastDay
+        ? Math.max(0, Math.round(grandTotalNum - allocatedSoFar))
+        : Math.max(0, Math.round(rawDayTotal));
+      allocatedSoFar += dayAlloc;
       const formattedDay = `${currencySym}${dayAlloc.toLocaleString()}`;
       day.dailyBudget = formattedDay;
-      // Keep every visible daily total tied to the canonical trip total too.
       day.estimatedTotalSpend = formattedDay;
     });
   }
