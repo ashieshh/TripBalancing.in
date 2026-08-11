@@ -1491,7 +1491,7 @@ export const exportPremiumTravelPDF = async (
     const colIdx = idx % 3;
     const rowIdx = Math.floor(idx / 3);
     const xPos = 15 + colIdx * (56 + 6);
-    const yPos = 180 + rowIdx * (24 + 6);
+    const yPos = 172 + rowIdx * (24 + 6);
     const cardW = 56;
     const cardH = 24;
 
@@ -3004,10 +3004,7 @@ export const exportPremiumTravelPDF = async (
     doc.setPage(i);
 
     if (i === 1) {
-      doc.setFont("helvetica", "italic");
-      doc.setFontSize(7.5);
-      doc.setTextColor(148, 163, 184);
-      doc.text(`TripBalancing Travels © 2026. Custom ${itinerary.travelStyle || "Travel"} Guide Book.`, 105, 266, { align: "center" });
+      // Cover already has its final centered footer. Do not add a second legacy footer.
       continue;
     }
 

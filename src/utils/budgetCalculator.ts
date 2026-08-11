@@ -168,7 +168,16 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
     style = "luxury";
   }
 
-  const { tier, isInternational } = getDestinationTier(input.destination);
+  const destinationInfo = getDestinationTier(input.destination);
+  const originInfo = getDestinationTier(input.origin || "");
+  const tier = destinationInfo.tier;
+  // A route is international when either endpoint is recognized as foreign.
+  // This prevents foreign-origin trips to India (for example Paris -> Mumbai)
+  // from falling through to the Rs. 4,000 domestic transit baseline.
+  const isInternational = destinationInfo.isInternational || originInfo.isInternational;
+  const routeTier: 1 | 2 | 3 = isInternational
+    ? (Math.min(destinationInfo.tier, originInfo.tier) as 1 | 2 | 3)
+    : destinationInfo.tier;
   const hasOrigin = Boolean(input.origin && input.origin.trim() !== "");
   const samePlaceTrip = hasOrigin && isSamePlaceTrip(input.origin, input.destination);
   const currencySymbol = detectCurrencySymbol(input.userBudgetInput, input.destination);
@@ -186,7 +195,7 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
     flightCostPerPerson = 0;
   } else if (hasOrigin || isInternational) {
     if (isInternational) {
-      if (tier === 1) { // Long-haul luxury / West
+      if (routeTier === 1) { // Long-haul / high-cost international route
         flightCostPerPerson = style === "budget" ? 55000 : style === "mid" ? 85000 : 220000;
       } else { // Short-haul international
         flightCostPerPerson = style === "budget" ? 18000 : style === "mid" ? 28000 : 65000;
