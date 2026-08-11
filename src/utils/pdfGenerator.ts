@@ -1429,29 +1429,29 @@ export const exportPremiumTravelPDF = async (
   doc.rect(10, 10, 190, 277, "D"); // Symmetrical border
 
   // Logo on Cover
-  drawTripBalancingLogo(doc, 105, 28, true, 4.0);
+  drawTripBalancingLogo(doc, 105, 34, true, 4.0);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
   doc.setTextColor(255, 255, 255);
-  drawSpacedText(doc, "TRIPBALANCING", 105, 47, 0.45, "center");
+  drawSpacedText(doc, "TRIPBALANCING", 105, 53, 0.45, "center");
 
   // Tagline below logo
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
   doc.setTextColor(20, 184, 166);
-  drawSpacedText(doc, "TRAVEL SMARTER. SPEND BETTER. EXPLORE MORE", 105, 55, 0.22, "center");
+  drawSpacedText(doc, "TRAVEL SMARTER. SPEND BETTER. EXPLORE MORE", 105, 61, 0.22, "center");
 
   // Huge Destination name
   doc.setFont("helvetica", "bold");
   doc.setFontSize(31);
   doc.setTextColor(255, 255, 255);
   const destLines = doc.splitTextToSize(String(itinerary.destination || "").toUpperCase(), 170);
-  doc.text(destLines, 105, 92, { align: "center" });
+  doc.text(destLines, 105, 103, { align: "center" });
 
   // Dynamically calculate heights to prevent overlapping on long destination titles!
   const destLineHeight = 12.5;
   const destHeight = destLines.length * destLineHeight;
-  const dividerY = 92 + destHeight - 4;
+  const dividerY = 103 + destHeight - 4;
 
   // Luxury Divider Line below destination
   doc.setDrawColor(20, 184, 166);
@@ -1487,22 +1487,20 @@ export const exportPremiumTravelPDF = async (
       : [])
   ];
 
-  // Final cover layout: 3 + 3 + 2 large information cards, matching the approved reference.
-  // Keep the cards comfortably above the footer while using the page width well.
+  // Reference-cover layout: 4 large cards per row, 2 rows.
+  // This deliberately uses more of the page width and keeps the footer isolated below.
   coverBadges.slice(0, 8).forEach((badge, idx) => {
-    const rowIdx = idx < 3 ? 0 : idx < 6 ? 1 : 2;
-    const colIdx = idx < 3 ? idx : idx < 6 ? idx - 3 : idx - 6;
-    const cardW = 58;
-    const cardH = 24;
-    const gapX = 5;
-    const rowWidths = [3 * cardW + 2 * gapX, 3 * cardW + 2 * gapX, 2 * cardW + gapX];
-    const rowStartX = (210 - rowWidths[rowIdx]) / 2;
-    const xPos = rowStartX + colIdx * (cardW + gapX);
-    const yPos = 160 + rowIdx * 30;
+    const colIdx = idx % 4;
+    const rowIdx = Math.floor(idx / 4);
+    const cardW = 43.5;
+    const cardH = 27;
+    const gapX = 4;
+    const xPos = 10 + 7 + colIdx * (cardW + gapX);
+    const yPos = 174 + rowIdx * 34;
 
     try {
       doc.saveGraphicsState();
-      const gState = new (doc as any).GState({ opacity: 0.42 });
+      const gState = new (doc as any).GState({ opacity: 0.35 });
       doc.setGState(gState);
       doc.setFillColor(15, 23, 42);
       doc.rect(xPos, yPos, cardW, cardH, "F");
@@ -1513,31 +1511,32 @@ export const exportPremiumTravelPDF = async (
     }
 
     doc.setDrawColor(20, 184, 166);
-    doc.setLineWidth(0.4);
+    doc.setLineWidth(0.35);
     doc.rect(xPos, yPos, cardW, cardH, "D");
 
+    // Small colored vertical line on left
     doc.setFillColor(badge.color[0], badge.color[1], badge.color[2]);
-    doc.rect(xPos, yPos, 2.5, cardH, "F");
+    doc.rect(xPos, yPos, 2, cardH, "F");
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(7.4);
+    doc.setFontSize(6.8);
     doc.setTextColor(203, 213, 225);
-    doc.text(badge.label, xPos + 6, yPos + 7.5);
+    doc.text(badge.label, xPos + 5, yPos + 8);
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
+    doc.setFontSize(9.4);
     doc.setTextColor(255, 255, 255);
-    const wrapVal = doc.splitTextToSize(badge.val, cardW - 11);
-    doc.text(wrapVal, xPos + 6, yPos + 16);
+    const wrapVal = doc.splitTextToSize(badge.val, cardW - 9);
+    doc.text(wrapVal, xPos + 5, yPos + 17);
   });
 
   // Footer text on cover — keep it below the information cards so it never overlaps them.
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.2);
   doc.setTextColor(148, 163, 184);
-  doc.text(`TRIPBALANCING  •  PERSONALIZED TRAVEL GUIDE  •  GENERATED ${coverTodayStr.toUpperCase()}`, 105, 258, { align: "center" });
+  doc.text(`TRIPBALANCING  •  PERSONALIZED TRAVEL GUIDE  •  GENERATED ${coverTodayStr.toUpperCase()}`, 105, 270, { align: "center" });
   doc.setFontSize(6.8);
-  doc.text(`© ${new Date().getFullYear()} TripBalancing`, 105, 264, { align: "center" });
+  doc.text(`© ${new Date().getFullYear()} TripBalancing`, 105, 277, { align: "center" });
 
   // ==========================================
   // PAGE 2: TRIP SUMMARY & STATISTICS
@@ -3008,7 +3007,10 @@ export const exportPremiumTravelPDF = async (
     doc.setPage(i);
 
     if (i === 1) {
-      // Cover has its own footer; do not add the legacy footer again.
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(7.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`TripBalancing Travels © 2026. Custom ${itinerary.travelStyle || "Travel"} Guide Book.`, 105, 266, { align: "center" });
       continue;
     }
 
