@@ -1433,13 +1433,13 @@ export const exportPremiumTravelPDF = async (
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
   doc.setTextColor(255, 255, 255);
-  drawSpacedText(doc, "TRIPBALANCING", 105, 50, 0.45, "center");
+  drawSpacedText(doc, "TRIPBALANCING", 105, 60, 0.45, "center");
 
   // Tagline below logo
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
   doc.setTextColor(20, 184, 166);
-  drawSpacedText(doc, "TRAVEL SMARTER. SPEND BETTER. EXPLORE MORE", 105, 58, 0.22, "center");
+  drawSpacedText(doc, "TRAVEL SMARTER. SPEND BETTER. EXPLORE MORE", 105, 68, 0.22, "center");
 
   // Huge Destination name
   doc.setFont("helvetica", "bold");
