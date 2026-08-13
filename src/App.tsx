@@ -823,17 +823,6 @@ export default function App() {
               </button>
             )}
 
-            {/* Google Contacts Quick Access Button */}
-            <button
-              id="header-contacts-btn"
-              onClick={() => setShowGoogleContactsModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs cursor-pointer transition-all shadow-sm"
-              title="Manage Google Contacts"
-            >
-              <Users className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              <span className="hidden min-[580px]:inline">Google Contacts</span>
-            </button>
-
             {/* Premium Button or Badge */}
             {isPremium ? (
               <span className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-tr from-amber-400/15 to-amber-500/15 border border-amber-300/45 text-amber-650 dark:text-amber-400 font-extrabold rounded-xl text-[11px] select-none shadow-sm shadow-amber-500/5" title="Premium Member">

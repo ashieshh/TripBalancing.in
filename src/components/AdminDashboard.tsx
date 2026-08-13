@@ -199,8 +199,8 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
           setOverview(data);
         } else if (activeTab === "users") {
           const res = await fetch(`/api/admin/users?page=${userPage}&search=${encodeURIComponent(userSearch)}&plan=${userPlanFilter}`, { headers });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json();
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
           setUsersData(data);
         } else if (activeTab === "payments") {
           const res = await fetch("/api/admin/payments", { headers });

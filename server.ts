@@ -26,7 +26,7 @@ const PORT = 3000;
 
 // Initialize Server-Side Supabase Admin Client
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "";
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 const supabaseAdmin = (supabaseUrl && supabaseServiceKey)
   ? createClient(supabaseUrl, supabaseServiceKey)
@@ -918,7 +918,7 @@ app.get("/api/admin/users", verifyAdminAuth, async (req, res) => {
     let usersList: UserProfileRecord[] = [];
 
     if (!supabaseAdmin) {
-      return res.status(503).json({ error: "Supabase admin connection is not configured" });
+      return res.status(503).json({ error: "Supabase admin connection is not configured. Add SUPABASE_SERVICE_ROLE_KEY in Render Environment." });
     }
 
     // Read the actual Supabase Auth users, then enrich them with user_profiles when available.
@@ -957,7 +957,14 @@ app.get("/api/admin/users", verifyAdminAuth, async (req, res) => {
 
     res.json({ users: paginatedUsers, total, page, totalPages });
   } catch (err: any) {
-    res.status(500).json({ error: err?.message || "Failed to fetch users" });
+    console.error("[Admin Users] Failed to load Supabase Auth users:", err);
+    const message = String(err?.message || "Failed to fetch users");
+    const status = /not authorized|permission|service role|invalid api key|jwt/i.test(message) ? 503 : 500;
+    res.status(status).json({
+      error: status === 503
+        ? "Admin user access is not configured correctly. Check SUPABASE_SERVICE_ROLE_KEY in Render."
+        : message
+    });
   }
 });
 
