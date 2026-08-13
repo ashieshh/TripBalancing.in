@@ -332,7 +332,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
 
   const useMinimumBudget = () => {
     if (!feasibility) return;
-    setBudgetVal(String(Math.ceil(feasibility.minimumBudget / 1000) * 1000));
+    setBudgetVal(String(Math.round(feasibility.recommendedBudget)));
     setFeasibility(null);
     setError(null);
   };

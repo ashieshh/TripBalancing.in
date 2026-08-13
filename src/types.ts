@@ -68,6 +68,7 @@ export interface BudgetBreakdown {
   transport: string;
   miscellaneous: string;
   originToDestinationTravel?: string;
+  visaAndInsurance?: string;
   total: string;
 }
 

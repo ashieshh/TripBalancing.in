@@ -390,6 +390,7 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     delete itinerary.budgetWarning;
   }
 
+  // Grand total invariant: every component below, including visa/insurance and origin travel, is included in total.
   // Update estimatedBudgetBreakdown
   itinerary.estimatedBudgetBreakdown = {
     accommodation: calculated.formatted.hotel,

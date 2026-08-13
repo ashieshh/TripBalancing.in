@@ -1941,7 +1941,7 @@ export default function ItineraryView({
             <div className="space-y-4 border-t border-slate-100 dark:border-slate-900 pt-6">
               <div className="flex items-center gap-2">
                 <Star className="w-5 h-5 text-teal-500" />
-                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200">Estimated Budget Range ({itinerary.budgetAmount})</h3>
+                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200">Planned Budget ({itinerary.budgetAmount})</h3>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-4">
@@ -1951,6 +1951,9 @@ export default function ItineraryView({
                   { label: "🎟️ Sights & Tickets", val: itinerary.estimatedBudgetBreakdown.activities },
                   { label: "🚕 Commutes & Fuel", val: itinerary.estimatedBudgetBreakdown.transport },
                   { label: "🛍️ Misc & Shopping", val: itinerary.estimatedBudgetBreakdown.miscellaneous || "Flexible" },
+                  ...(itinerary.estimatedBudgetBreakdown.visaAndInsurance && itinerary.estimatedBudgetBreakdown.visaAndInsurance !== "₹0" && itinerary.estimatedBudgetBreakdown.visaAndInsurance !== "$0" && itinerary.estimatedBudgetBreakdown.visaAndInsurance !== "€0" && itinerary.estimatedBudgetBreakdown.visaAndInsurance !== "£0"
+                    ? [{ label: "🛡️ Travel Protection", val: itinerary.estimatedBudgetBreakdown.visaAndInsurance }]
+                    : []),
                   ...(itinerary.origin && itinerary.detailedBudgetSummary?.originToDestinationCost && itinerary.detailedBudgetSummary.originToDestinationCost !== "N/A"
                     ? [{ label: `✈️ Travel from ${itinerary.origin}`, val: itinerary.detailedBudgetSummary.originToDestinationCost, isTransit: true }]
                     : []),
