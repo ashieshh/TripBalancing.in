@@ -221,6 +221,8 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
           startDate,
         }),
       });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) throw new Error("Destination service is temporarily unavailable. Please try again.");
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to recommend destinations.");
       const nextRecommendations = data.recommendations || [];
@@ -255,6 +257,11 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ origin: origin.trim(), destination: destination.trim() }),
       });
+      const validationContentType = validationResponse.headers.get("content-type") || "";
+      if (!validationContentType.includes("application/json")) {
+        setError("Location verification is temporarily unavailable. Please try again.");
+        return;
+      }
       const validation = await validationResponse.json();
       if (!validationResponse.ok) {
         setError(validation.error || "Please enter valid city, state or country names.");

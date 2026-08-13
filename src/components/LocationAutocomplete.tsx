@@ -58,6 +58,10 @@ export default function LocationAutocomplete({
       setMessage("");
       try {
         const response = await fetch(`/api/location-suggestions?q=${encodeURIComponent(query)}`);
+        const contentType = response.headers.get("content-type") || "";
+        if (!response.ok || !contentType.includes("application/json")) {
+          throw new Error("Location service unavailable");
+        }
         const data = await response.json();
         if (currentRequest !== requestId.current) return;
         const next = Array.isArray(data?.suggestions) ? data.suggestions : [];

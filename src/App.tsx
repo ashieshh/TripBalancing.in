@@ -465,12 +465,17 @@ export default function App() {
         })
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Failed to generate your itinerary. Please try again.");
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(response.ok
+          ? "The trip service returned an invalid response. Please try again."
+          : "The trip service is temporarily unavailable. Please try again in a moment.");
       }
 
       const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to generate your itinerary. Please try again.");
+      }
       if (data.itinerary) {
         setActiveItinerary(data.itinerary);
         

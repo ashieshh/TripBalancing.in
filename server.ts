@@ -417,49 +417,17 @@ async function resolveLocationStrict(query: string): Promise<StrictLocationResul
   const raw = String(query || "").trim();
   if (raw.length < 2) return { valid: false };
 
-  try {
-    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(raw)}&count=5&language=en&format=json`;
-    const response = await fetch(url);
-    if (response.ok) {
-      const data: any = await response.json();
-      const result = Array.isArray(data?.results) ? data.results[0] : null;
-      if (result && Number.isFinite(Number(result.latitude)) && Number.isFinite(Number(result.longitude))) {
-        const parts = [result.name, result.admin1, result.country].filter(Boolean);
-        return {
-          valid: true,
-          canonicalName: Array.from(new Set(parts)).join(", "),
-          latitude: Number(result.latitude),
-          longitude: Number(result.longitude),
-        };
-      }
-    }
-  } catch (error) {
-    console.warn("Strict Open-Meteo validation failed:", error);
-  }
-
-  try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(raw)}&format=json&addressdetails=1&limit=1`;
-    const response = await fetch(url, { headers: { "User-Agent": "TripBalancing/2.0 (location-validation)" } });
-    if (response.ok) {
-      const data: any = await response.json();
-      const result = Array.isArray(data) ? data[0] : null;
-      if (result && Number.isFinite(Number(result.lat)) && Number.isFinite(Number(result.lon))) {
-        const address = result.address || {};
-        const locality = address.city || address.town || address.village || address.municipality || address.state || result.name;
-        const parts = [locality, address.state, address.country].filter(Boolean);
-        return {
-          valid: true,
-          canonicalName: Array.from(new Set(parts)).join(", ") || result.display_name,
-          latitude: Number(result.lat),
-          longitude: Number(result.lon),
-        };
-      }
-    }
-  } catch (error) {
-    console.warn("Strict Nominatim validation failed:", error);
-  }
-
-  return { valid: false };
+  // Reuse the ranked autocomplete results so validation cannot silently change a
+  // user's selected destination into a lower-quality place with the same name.
+  const suggestions = await searchLocationSuggestions(raw);
+  const best = suggestions[0];
+  if (!best) return { valid: false };
+  return {
+    valid: true,
+    canonicalName: best.canonicalName,
+    latitude: best.latitude,
+    longitude: best.longitude,
+  };
 }
 
 
@@ -476,19 +444,56 @@ async function searchLocationSuggestions(query: string): Promise<LocationSuggest
   const raw = String(query || "").trim();
   if (raw.length < 2) return [];
 
+  type RankedSuggestion = LocationSuggestionResult & { score: number };
+  const ranked: RankedSuggestion[] = [];
   const seen = new Set<string>();
-  const out: LocationSuggestionResult[] = [];
+  const q = raw.toLowerCase();
 
-  const pushSuggestion = (item: LocationSuggestionResult) => {
+  const add = (item: LocationSuggestionResult, score: number) => {
     const key = `${item.canonicalName.toLowerCase()}|${item.latitude.toFixed(3)}|${item.longitude.toFixed(3)}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      out.push(item);
-    }
+    if (seen.has(key)) return;
+    seen.add(key);
+    ranked.push({ ...item, score });
   };
 
+  // Nominatim is queried first because it includes importance + place type. This is
+  // important for ambiguous tourism names such as "Goa": the Indian state should rank
+  // above tiny villages that happen to share the same name.
   try {
-    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(raw)}&count=8&language=en&format=json`;
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(raw)}&format=json&addressdetails=1&limit=10&accept-language=en`;
+    const response = await fetch(url, { headers: { "User-Agent": "TripBalancing/2.0 (location-autocomplete)" } });
+    if (response.ok) {
+      const data: any = await response.json();
+      for (const result of Array.isArray(data) ? data : []) {
+        const latitude = Number(result.lat);
+        const longitude = Number(result.lon);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+        const address = result.address || {};
+        const name = address.city || address.town || address.village || address.municipality || address.state || result.name || String(result.display_name || "").split(",")[0];
+        if (!name) continue;
+        const admin1 = address.state && String(address.state).toLowerCase() !== String(name).toLowerCase() ? String(address.state) : undefined;
+        const country = address.country || undefined;
+        const parts = [name, admin1, country].filter(Boolean);
+        const exact = String(name).toLowerCase() === q ? 100 : String(name).toLowerCase().startsWith(q) ? 55 : 0;
+        const importance = Number(result.importance || 0) * 100;
+        const placeType = String(result.type || result.addresstype || "").toLowerCase();
+        const typeBoost = ["state", "city", "town", "administrative"].includes(placeType) ? 25 : placeType === "village" ? 2 : 8;
+        add({
+          canonicalName: Array.from(new Set(parts)).join(", ") || result.display_name,
+          name: String(name),
+          admin1,
+          country: country ? String(country) : undefined,
+          latitude,
+          longitude,
+        }, exact + importance + typeBoost);
+      }
+    }
+  } catch (error) {
+    console.warn("Nominatim location suggestions failed:", error);
+  }
+
+  try {
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(raw)}&count=10&language=en&format=json`;
     const response = await fetch(url);
     if (response.ok) {
       const data: any = await response.json();
@@ -496,54 +501,20 @@ async function searchLocationSuggestions(query: string): Promise<LocationSuggest
         const latitude = Number(result.latitude);
         const longitude = Number(result.longitude);
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !result.name) continue;
-        const parts = [result.name, result.admin1, result.country].filter(Boolean);
-        pushSuggestion({
-          canonicalName: Array.from(new Set(parts)).join(", "),
-          name: String(result.name),
-          admin1: result.admin1 ? String(result.admin1) : undefined,
-          country: result.country ? String(result.country) : undefined,
-          latitude,
-          longitude,
-        });
+        const name = String(result.name);
+        const admin1 = result.admin1 ? String(result.admin1) : undefined;
+        const country = result.country ? String(result.country) : undefined;
+        const parts = [name, admin1, country].filter(Boolean);
+        const exact = name.toLowerCase() === q ? 80 : name.toLowerCase().startsWith(q) ? 40 : 0;
+        const populationBoost = Math.min(30, Math.log10(Math.max(1, Number(result.population || 1))) * 4);
+        add({ canonicalName: Array.from(new Set(parts)).join(", "), name, admin1, country, latitude, longitude }, exact + populationBoost);
       }
     }
   } catch (error) {
     console.warn("Open-Meteo location suggestions failed:", error);
   }
 
-  // Fallback when Open-Meteo has no useful result.
-  if (out.length === 0) {
-    try {
-      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(raw)}&format=json&addressdetails=1&limit=6`;
-      const response = await fetch(url, { headers: { "User-Agent": "TripBalancing/2.0 (location-autocomplete)" } });
-      if (response.ok) {
-        const data: any = await response.json();
-        for (const result of Array.isArray(data) ? data : []) {
-          const latitude = Number(result.lat);
-          const longitude = Number(result.lon);
-          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
-          const address = result.address || {};
-          const name = address.city || address.town || address.village || address.municipality || result.name || String(result.display_name || "").split(",")[0];
-          if (!name) continue;
-          const admin1 = address.state || address.region || undefined;
-          const country = address.country || undefined;
-          const parts = [name, admin1, country].filter(Boolean);
-          pushSuggestion({
-            canonicalName: Array.from(new Set(parts)).join(", ") || result.display_name,
-            name: String(name),
-            admin1: admin1 ? String(admin1) : undefined,
-            country: country ? String(country) : undefined,
-            latitude,
-            longitude,
-          });
-        }
-      }
-    } catch (error) {
-      console.warn("Nominatim location suggestions failed:", error);
-    }
-  }
-
-  return out.slice(0, 6);
+  return ranked.sort((a, b) => b.score - a.score).slice(0, 6).map(({ score, ...item }) => item);
 }
 
 app.get("/api/location-suggestions", async (req, res) => {
