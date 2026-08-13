@@ -704,8 +704,13 @@ export default function App() {
     );
   }
 
-  // Not authenticated screen
-  if (!user) {
+  // Password recovery must always show the secure new-password form.
+  // Supabase may establish a temporary recovery session before App renders,
+  // so this check must happen before the normal authenticated dashboard.
+  const isPasswordRecoveryRoute = window.location.pathname === "/reset-password";
+
+  // Not authenticated screen (or active password recovery flow)
+  if (!user || isPasswordRecoveryRoute) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-center p-4 relative">
         {/* Floating Theme Toggle */}

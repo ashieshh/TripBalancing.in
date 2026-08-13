@@ -855,7 +855,7 @@ export const db = {
   async resetPasswordForEmail(email: string) {
     if (isRealSupabaseConfigured && supabase) {
       const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/`
+        redirectTo: `${window.location.origin}/reset-password`
       });
       return { data, error };
     } else {

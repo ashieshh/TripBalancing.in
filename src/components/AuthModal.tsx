@@ -47,7 +47,8 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
       hash.includes("type=recovery") || 
       hash.includes("access_token=") || 
       search.includes("mode=reset") ||
-      search.includes("type=recovery")
+      search.includes("type=recovery") ||
+      window.location.pathname === "/reset-password"
     ) {
       setView("create_new_password");
       setError(null);
@@ -134,7 +135,7 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
       if (err) throw err;
 
       // Clean up the query parameters or hash from the URL so the user is not stuck in reset mode on reload
-      window.history.pushState({}, "", window.location.origin);
+      window.history.replaceState({}, "", "/");
 
       // Reset local password fields and redirect
       setView("login");
