@@ -2373,8 +2373,8 @@ export default function ItineraryView({
                 alt={itinerary.destination}
                 className="w-full h-full object-cover filter brightness-95"
                 referrerPolicy="no-referrer"
-                loading="lazy"
-                decoding="async"
+                loading="eager"
+                decoding="sync"
               />
             </div>
           </div>
@@ -2427,8 +2427,8 @@ export default function ItineraryView({
                 alt="Destination Map" 
                 className="w-full h-[85mm] object-cover"
                 referrerPolicy="no-referrer"
-                loading="lazy"
-                decoding="async"
+                loading="eager"
+                decoding="sync"
               />
               <div className="bg-slate-50 px-4 py-2 border-t border-slate-200 flex justify-between items-center text-[10px] text-slate-500 font-bold">
                 <span>📍 Location Focus: {itinerary.destination} (Coordinates: {itinerary.latitude?.toFixed(4) ?? "28.6139"}°N, {itinerary.longitude?.toFixed(4) ?? "77.2090"}°E)</span>
@@ -2443,8 +2443,8 @@ export default function ItineraryView({
                 alt="QR Code" 
                 className="w-24 h-24 border border-slate-200 rounded-xl bg-white p-1 flex-shrink-0"
                 referrerPolicy="no-referrer"
-                loading="lazy"
-                decoding="async"
+                loading="eager"
+                decoding="sync"
               />
               <div className="space-y-2">
                 <h4 className="text-xs font-black uppercase tracking-wider text-teal-900">
@@ -2460,7 +2460,7 @@ export default function ItineraryView({
             </div>
           </div>
 
-          <div className="pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
+          <div className="print-section-footer pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
             Trip to {itinerary.destination} — Curated Travel Guide | Powered by TripBalancing
           </div>
         </div>
@@ -2574,7 +2574,7 @@ export default function ItineraryView({
             ))}
           </div>
 
-          <div className="pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
+          <div className="print-section-footer pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
             Trip to {itinerary.destination} — Curated Travel Guide | Powered by TripBalancing
           </div>
         </div>
@@ -2617,7 +2617,7 @@ export default function ItineraryView({
               ))}
             </div>
 
-            <div className="pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
+            <div className="print-section-footer pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
               Trip to {itinerary.destination} — Curated Travel Guide | Powered by TripBalancing
             </div>
           </div>
@@ -2657,7 +2657,7 @@ export default function ItineraryView({
               ))}
             </div>
 
-            <div className="pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
+            <div className="print-section-footer pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
               Trip to {itinerary.destination} — Curated Travel Guide | Powered by TripBalancing
             </div>
           </div>
@@ -2720,7 +2720,7 @@ export default function ItineraryView({
 
           </div>
 
-          <div className="pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
+          <div className="print-section-footer pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
             Trip to {itinerary.destination} — Curated Travel Guide | Powered by TripBalancing
           </div>
         </div>
@@ -2807,7 +2807,7 @@ export default function ItineraryView({
 
             </div>
 
-            <div className="pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
+            <div className="print-section-footer pt-6 text-center text-[9px] text-slate-400 font-bold border-t border-slate-100">
               Trip to {itinerary.destination} — Curated Travel Guide | Powered by TripBalancing
             </div>
           </div>

@@ -45,7 +45,7 @@
 @media print {
   @page {
     size: A4 portrait;
-    margin: 15mm 15mm 20mm 15mm;
+    margin: 0;
   }
 
   /* Global print rules */
@@ -94,6 +94,19 @@
     margin: 0 !important;
   }
 
+  /* Keep content inside the physical A4 sheet while @page margin stays at 0.
+     Zero @page margin prevents Chrome from reserving space for its URL/date header/footer. */
+  .print-section {
+    box-sizing: border-box !important;
+    padding: 12mm 14mm 14mm !important;
+    margin: 0 !important;
+  }
+
+  /* Repeated web-style section footers can become orphan pages in Chrome print. */
+  .print-section-footer {
+    display: none !important;
+  }
+
   /* Clean up lines & borders for print */
   .print-border {
     border: 1px solid #e5e7eb !important;
@@ -125,10 +138,7 @@
     break-inside: avoid !important;
   }
 
-  /* Standard spacing for physical paper layout */
-  .print-section {
-    margin-bottom: 2.5rem !important;
-  }
+  /* Standard section spacing is handled by the A4-safe padding above. */
 
   /* Bullet points optimization */
   ul, ol {
@@ -150,13 +160,13 @@
 
   /* Cover Page Styling */
   .print-cover-page {
-    height: 260mm !important;
+    height: 285mm !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: space-between !important;
     page-break-after: always !important;
     break-after: page !important;
-    padding: 10mm 5mm !important;
+    padding: 10mm 8mm !important;
     box-sizing: border-box !important;
   }
 
