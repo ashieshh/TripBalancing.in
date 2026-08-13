@@ -1245,6 +1245,12 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
               <span>Miscellaneous Expenses</span>
               <span className="font-bold text-slate-800 dark:text-slate-200">{detailedBudgetSummary.miscellaneousExpenses}</span>
             </div>
+            {itinerary?.estimatedBudgetBreakdown?.visaAndInsurance && parseBudgetRange(itinerary.estimatedBudgetBreakdown.visaAndInsurance).max > 0 && (
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400 font-medium">
+                <span>🛡️ Travel Protection / Insurance</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200">{itinerary.estimatedBudgetBreakdown.visaAndInsurance}</span>
+              </div>
+            )}
             {itinerary?.origin && detailedBudgetSummary.originToDestinationCost && detailedBudgetSummary.originToDestinationCost !== "N/A" && (
               <div className="flex justify-between items-center text-slate-650 dark:text-slate-350 font-bold bg-violet-500/5 p-2 rounded-xl border border-violet-500/10">
                 <span className="text-violet-600 dark:text-violet-400 flex items-center gap-1">✈️ Travel from {itinerary.origin}</span>

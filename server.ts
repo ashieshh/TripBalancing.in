@@ -15,7 +15,8 @@ import {
   generateRefundRequestReceivedEmail,
   generateRefundApprovedEmail,
   generateRefundRejectedEmail,
-  generateSupportTicketEmail
+  generateSupportTicketEmail,
+  generateBuddyInviteEmail
 } from "./src/services/emailService";
 import { reconcileItineraryBudget } from "./src/utils/budgetCalculator";
 
@@ -1329,6 +1330,14 @@ app.post("/api/email/send-transactional", async (req, res) => {
           userName: payload?.userName || recipientEmail.split("@")[0],
           razorpayPaymentId: payload?.razorpayPaymentId || "pay_mock_12345",
           reason: payload?.reason
+        });
+        break;
+      case "buddy_invite":
+        emailData = generateBuddyInviteEmail({
+          senderEmail: payload?.senderEmail || "A TripBalancing traveler",
+          destination: payload?.destination || "an upcoming trip",
+          accessType: payload?.accessType === "write" ? "write" : "read",
+          joinUrl: payload?.joinUrl || "https://tripbalancing.in"
         });
         break;
       case "support_ticket":

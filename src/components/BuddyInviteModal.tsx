@@ -4,8 +4,6 @@ import {
 } from "lucide-react";
 import { db } from "../lib/supabase";
 import { BuddyInvitation } from "../types";
-import GoogleContactsModal from "./GoogleContactsModal";
-import { GoogleContact } from "../lib/googleContacts";
 
 interface BuddyInviteModalProps {
   isOpen: boolean;
@@ -29,39 +27,7 @@ export default function BuddyInviteModal({
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [error, setError] = useState("");
-  const [isGoogleContactsOpen, setIsGoogleContactsOpen] = useState(false);
 
-  const handleSelectGoogleContact = (contact: GoogleContact) => {
-    if (contact.email) {
-      setEmail(contact.email);
-      setSuccessMessage(`Selected ${contact.name} (${contact.email}) from Google Contacts!`);
-    } else {
-      setError(`Contact ${contact.name} does not have a saved email address.`);
-    }
-  };
-
-  const handleBatchInviteGoogleContacts = async (contacts: GoogleContact[]) => {
-    if (!tripId) return;
-    setSubmitting(true);
-    setError("");
-    setSuccessMessage("");
-
-    let count = 0;
-    try {
-      for (const c of contacts) {
-        if (c.email && c.email.toLowerCase() !== userEmail.toLowerCase()) {
-          await db.inviteBuddy(tripId, userEmail, c.email.toLowerCase(), accessType);
-          count++;
-        }
-      }
-      setSuccessMessage(`Successfully invited ${count} travel buddies from Google Contacts!`);
-      loadInvitations();
-    } catch (err: any) {
-      setError(err?.message || "Failed to invite contacts.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   useEffect(() => {
     if (isOpen && tripId) {
@@ -99,11 +65,33 @@ export default function BuddyInviteModal({
     setSuccessMessage("");
 
     try {
-      // Create invitation in DB/mock
-      const newInv = await db.inviteBuddy(tripId, userEmail, email.trim().toLowerCase(), accessType);
-      
-      // Simulate sending real email invitation
-      setSuccessMessage(`Invitation successfully sent! An email was dispatched to ${email.trim().toLowerCase()} with ${accessType === "write" ? "read-write (collaborator)" : "read-only"} access.`);
+      // Store the invitation first. This remains pending even if the recipient has not registered yet,
+      // so signing up later with the same email makes it appear on their dashboard.
+      const recipientEmail = email.trim().toLowerCase();
+      await db.inviteBuddy(tripId, userEmail, recipientEmail, accessType);
+
+      // Send a real Brevo invitation email. The Join Trip link opens TripBalancing; after
+      // signup/login with this same email, the pending invitation is already waiting.
+      const emailResponse = await fetch("/api/email/send-transactional", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateType: "buddy_invite",
+          recipientEmail,
+          payload: {
+            senderEmail: userEmail,
+            destination: tripDestination || "an upcoming trip",
+            accessType,
+            joinUrl: `${window.location.origin}/?buddyInvite=1`
+          }
+        })
+      });
+      if (!emailResponse.ok) {
+        const body = await emailResponse.json().catch(() => ({}));
+        throw new Error(body?.error || "Invitation was saved, but the email could not be sent.");
+      }
+
+      setSuccessMessage(`Invitation email sent to ${recipientEmail}. If they are new to TripBalancing, they can sign up with this email and the pending invitation will appear on their dashboard.`);
       setEmail("");
       setAccessType("read");
       
@@ -206,14 +194,7 @@ Start planning here: ${appUrl}`;
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">Companion's Email</label>
-              <button
-                type="button"
-                onClick={() => setIsGoogleContactsOpen(true)}
-                className="text-[11px] font-bold text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 flex items-center gap-1 transition-all bg-teal-500/10 hover:bg-teal-500/20 px-2.5 py-1 rounded-xl cursor-pointer"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Import Google Contacts</span>
-              </button>
+              
             </div>
             <div className="relative">
               <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
@@ -365,13 +346,7 @@ Start planning here: ${appUrl}`;
         </div>
       </div>
 
-      <GoogleContactsModal
-        isOpen={isGoogleContactsOpen}
-        onClose={() => setIsGoogleContactsOpen(false)}
-        onSelectContact={handleSelectGoogleContact}
-        onInviteContacts={handleBatchInviteGoogleContacts}
-        tripDestination={tripDestination}
-      />
+      
     </div>
   );
 }

@@ -156,6 +156,32 @@ export function generateWelcomeEmail(userName: string, appUrl: string = "https:/
   };
 }
 
+// Travel Buddy Invitation Email
+export function generateBuddyInviteEmail(data: {
+  senderEmail: string;
+  destination: string;
+  accessType: "read" | "write";
+  joinUrl: string;
+}) {
+  const accessLabel = data.accessType === "write" ? "Read-Write collaborator" : "Read-Only viewer";
+  const safeDestination = data.destination || "an upcoming trip";
+  const html = `
+    ${COMMON_HEADER}
+      <h2 style="color:#f8fafc;font-size:20px;font-weight:700;margin-top:0;">You're invited to a TripBalancing journey ✈️</h2>
+      <p style="color:#cbd5e1;font-size:15px;line-height:1.6;"><strong>${data.senderEmail}</strong> invited you to join their trip to <strong>${safeDestination}</strong>.</p>
+      <div class="card-box">
+        <table class="data-table">
+          <tr><td class="data-label">Destination</td><td class="data-value">${safeDestination}</td></tr>
+          <tr><td class="data-label">Access</td><td class="data-value">${accessLabel}</td></tr>
+        </table>
+      </div>
+      <p style="color:#94a3b8;font-size:14px;line-height:1.6;">Already registered? Sign in with this email address. New to TripBalancing? Create your account with this same email. Your pending invitation will then appear on your dashboard.</p>
+      <div style="text-align:center;"><a href="${data.joinUrl}" class="btn-primary" target="_blank">Join Trip</a></div>
+    ${COMMON_FOOTER}
+  `;
+  return { subject: `You're invited to ${safeDestination} on TripBalancing`, html };
+}
+
 // 2. Payment Success Email
 export function generatePaymentSuccessEmail(data: {
   userName: string;
