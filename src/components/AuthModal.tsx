@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from "react";
-import { Mail, Lock, User, AlertCircle, ArrowRight, ArrowLeft, Check, KeyRound } from "lucide-react";
+import { Mail, Lock, User, AlertCircle, ArrowRight, ArrowLeft, Check, KeyRound, Eye, EyeOff } from "lucide-react";
 import { TripBalancingLogo } from "./TripBalancingLogo";
 import { db } from "../lib/supabase";
 
@@ -17,6 +17,9 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
   // States for new password setting
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -302,13 +305,16 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
                 </span>
                 <input
                   id="password"
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   placeholder={view === "login" ? "Enter password" : "Create strong password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800 dark:text-slate-200 text-sm transition-colors"
+                  className="w-full pl-10 pr-11 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800 dark:text-slate-200 text-sm transition-colors"
                   required
                 />
+                <button type="button" onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? "Hide password" : "Show password"} className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 hover:text-teal-500 focus:outline-none">
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
               {view === "register" && (
                 <p className={`text-xs mt-1.5 ${password && !isStrongPassword(password) ? "text-amber-600 dark:text-amber-400" : "text-slate-500 dark:text-slate-400"}`}>
@@ -428,13 +434,16 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
                 </span>
                 <input
                   id="new-password"
-                  type="password"
+                  type={showNewPassword ? "text" : "password"}
                   placeholder="At least 8 characters"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800 dark:text-slate-200 text-sm transition-colors"
+                  className="w-full pl-10 pr-11 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800 dark:text-slate-200 text-sm transition-colors"
                   required
                 />
+                <button type="button" onClick={() => setShowNewPassword((v) => !v)} aria-label={showNewPassword ? "Hide new password" : "Show new password"} className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 hover:text-teal-500 focus:outline-none">
+                  {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
               <p className={`text-xs mt-1.5 ${newPassword && !isStrongPassword(newPassword) ? "text-amber-600 dark:text-amber-400" : "text-slate-500 dark:text-slate-400"}`}>
                 {passwordRequirementText}
@@ -451,13 +460,16 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
                 </span>
                 <input
                   id="confirm-password"
-                  type="password"
+                  type={showConfirmPassword ? "text" : "password"}
                   placeholder="Confirm new password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800 dark:text-slate-200 text-sm transition-colors"
+                  className="w-full pl-10 pr-11 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800 dark:text-slate-200 text-sm transition-colors"
                   required
                 />
+                <button type="button" onClick={() => setShowConfirmPassword((v) => !v)} aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"} className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 hover:text-teal-500 focus:outline-none">
+                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 
