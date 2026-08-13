@@ -2398,7 +2398,7 @@ export default function ItineraryView({
 
             <div className="flex justify-between items-center text-[10px] text-slate-500 font-bold border-t border-slate-200 mt-6 pt-4">
               <span>Curated specifically for: <span className="text-slate-800 font-black">{getTravellerEmail()}</span></span>
-              <span>Generated: July 11, 2026</span>
+              <span>Generated: {new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</span>
             </div>
           </div>
         </div>
