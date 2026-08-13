@@ -27,9 +27,17 @@ const PORT = 3000;
 // Initialize Server-Side Supabase Admin Client
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "";
+
+// Auth verification must not depend on the service-role key. The normal Supabase
+// client can validate the signed-in user's JWT, while the service-role client is
+// reserved for privileged admin data operations (such as listing all users).
+const supabaseAuth = (supabaseUrl && supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  : null;
 
 const supabaseAdmin = (supabaseUrl && supabaseServiceKey)
-  ? createClient(supabaseUrl, supabaseServiceKey)
+  ? createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false, autoRefreshToken: false } })
   : null;
 
 // In-Memory Fallback Stores for Data Persistence and Development Mode Sync
@@ -157,10 +165,14 @@ async function verifyAdminAuth(req: express.Request, res: express.Response, next
     let authenticatedEmail: string | null = null;
     let isAdminVerified = false;
 
-    // 1. Check with Supabase Auth & Database admin_users table
-    if (supabaseAdmin) {
+    // 1. Verify the signed-in user with Supabase Auth. This intentionally uses the
+    // anon-key auth client so the Admin Panel button still works even when the
+    // service-role key is missing/misconfigured. Privileged admin endpoints below
+    // continue to require supabaseAdmin.
+    const authClient = supabaseAuth || supabaseAdmin;
+    if (authClient) {
       try {
-        const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+        const { data: { user }, error } = await authClient.auth.getUser(token);
         if (user && !error) {
           authenticatedUserId = user.id;
           authenticatedEmail = user.email || null;
