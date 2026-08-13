@@ -22,6 +22,20 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const passwordRules = {
+    length: (value: string) => value.length >= 8,
+    uppercase: (value: string) => /[A-Z]/.test(value),
+    lowercase: (value: string) => /[a-z]/.test(value),
+    number: (value: string) => /[0-9]/.test(value),
+    special: (value: string) => /[^A-Za-z0-9]/.test(value),
+  };
+
+  const isStrongPassword = (value: string) =>
+    Object.values(passwordRules).every((rule) => rule(value));
+
+  const passwordRequirementText =
+    "Use 8+ characters with uppercase, lowercase, number and special character.";
+
   // Check on mount if we've been redirected with password recovery parameters in the URL
   useEffect(() => {
     const hash = window.location.hash;
@@ -52,6 +66,10 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
           onSuccess(data.user);
         }
       } else {
+        if (!isStrongPassword(password)) {
+          setError(passwordRequirementText);
+          return;
+        }
         const { data, error: err } = await db.signUp(email, password, fullName);
         if (err) throw err;
         if (data?.user) {
@@ -96,9 +114,8 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
     setError(null);
     setSuccessMsg(null);
 
-    // Validate that the password is at least 8 characters long
-    if (newPassword.length < 8) {
-      setError("Password must be at least 8 characters long.");
+    if (!isStrongPassword(newPassword)) {
+      setError(passwordRequirementText);
       return;
     }
 
@@ -293,6 +310,11 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
                   required
                 />
               </div>
+              {view === "register" && (
+                <p className={`text-xs mt-1.5 ${password && !isStrongPassword(password) ? "text-amber-600 dark:text-amber-400" : "text-slate-500 dark:text-slate-400"}`}>
+                  {passwordRequirementText}
+                </p>
+              )}
             </div>
 
             <button
@@ -414,6 +436,9 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
                   required
                 />
               </div>
+              <p className={`text-xs mt-1.5 ${newPassword && !isStrongPassword(newPassword) ? "text-amber-600 dark:text-amber-400" : "text-slate-500 dark:text-slate-400"}`}>
+                {passwordRequirementText}
+              </p>
             </div>
 
             <div className="space-y-1.5">
