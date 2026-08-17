@@ -78,11 +78,11 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const [travelDays, setTravelDays] = useState<number | "">("");
   type BudgetCurrency = "INR" | "USD" | "AED" | "EUR" | "GBP" | "JPY";
   const [budgetCurrency, setBudgetCurrency] = useState<BudgetCurrency>("INR");
+  const [budgetVal, setBudgetVal] = useState("50000");
   const currencySymbols: Record<BudgetCurrency, string> = { INR: "₹", USD: "$", AED: "AED ", EUR: "€", GBP: "£", JPY: "¥" };
   const budgetPrefix = currencySymbols[budgetCurrency];
   const fixedBudgetAmount = `${budgetCurrency} ${Number(budgetVal || 0).toLocaleString()}`;
   const recommendedBudgetAmount = `${budgetCurrency} AI Recommended`;
-  const [budgetVal, setBudgetVal] = useState("50000");
   const [travelers, setTravelers] = useState(1);
   const [travelerType, setTravelerType] = useState<TravelerType>("Couple");
   const [travelStyle, setTravelStyle] = useState<TravelStyle>("Budget");
