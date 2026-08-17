@@ -1517,7 +1517,7 @@ app.post("/api/generate-itinerary", async (req, res) => {
       return res.status(400).json({ error: "Missing required trip fields." });
     }
 
-    const effectiveBudgetAmount = travelStyle === "Smart Luxury" ? "AI Recommended" : budgetAmount;
+    const effectiveBudgetAmount = budgetAmount || "INR AI Recommended";
 
     // Determine the number of days (1 to 365)
     const start = new Date(startDate);
@@ -1649,7 +1649,7 @@ Please tailor the recommendations explicitly:
      * Miscellaneous expenses (shopping, souvenirs, emergency funds, local SIM cards)
      * originToDestinationTravel (realistic round-trip flight/train transit costs from ${origin || "starting city"} to ${destination} for ${travelers} travelers, set to 'N/A' if no starting city is provided)
    - The "total" budget must also be a range representing the sum of all 6 categories, explicitly including the originToDestinationTravel cost if an origin is provided!
-   - CURRENCY CONSISTENCY IS MANDATORY: use the SAME currency as the user's Budget Level/Amount (${effectiveBudgetAmount}) for every monetary value in the response. If the budget uses $, every cost must be USD; if it uses ₹, every cost must be INR. Never relabel an INR-sized number with a $ symbol and never mix destination-local currency into this itinerary.
+   - CURRENCY CONSISTENCY IS MANDATORY: use the SAME currency as the user's Budget Level/Amount (${effectiveBudgetAmount}) for every monetary value in the response. Respect the explicit currency code in the Budget Level/Amount (INR, USD, AED, EUR, GBP or JPY) for every monetary value. Never change only a currency symbol, never mix currencies, and never replace the selected trip currency with the destination-local currency.
 7. List essential packing items suitable for the destination's climate during those dates.
 8. Provide essential transportation suggestions for getting around.
 9. List very practical travel tips, safety hacks, and cultural etiquettes.

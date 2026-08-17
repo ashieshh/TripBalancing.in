@@ -76,7 +76,12 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [travelDays, setTravelDays] = useState<number | "">("");
-  const [budgetPrefix, setBudgetPrefix] = useState<"₹" | "$">("₹");
+  type BudgetCurrency = "INR" | "USD" | "AED" | "EUR" | "GBP" | "JPY";
+  const [budgetCurrency, setBudgetCurrency] = useState<BudgetCurrency>("INR");
+  const currencySymbols: Record<BudgetCurrency, string> = { INR: "₹", USD: "$", AED: "AED ", EUR: "€", GBP: "£", JPY: "¥" };
+  const budgetPrefix = currencySymbols[budgetCurrency];
+  const fixedBudgetAmount = `${budgetCurrency} ${Number(budgetVal || 0).toLocaleString()}`;
+  const recommendedBudgetAmount = `${budgetCurrency} AI Recommended`;
   const [budgetVal, setBudgetVal] = useState("50000");
   const [travelers, setTravelers] = useState(1);
   const [travelerType, setTravelerType] = useState<TravelerType>("Couple");
@@ -211,7 +216,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
           travelerType,
           travelStyle,
           budgetMode,
-          budgetAmount: recommendBudget ? "AI Recommended" : `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
+          budgetAmount: recommendBudget ? recommendedBudgetAmount : fixedBudgetAmount,
           tripScope,
           tripPurpose,
           preferredWeather,
@@ -290,7 +295,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
           travelers,
           days: Math.max(1, Number(travelDays) || Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1),
           travelStyle,
-          userBudgetInput: `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
+          userBudgetInput: fixedBudgetAmount,
         });
 
         setFeasibility(check);
@@ -305,7 +310,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
         origin: canonicalOrigin,
         startDate,
         endDate,
-        budgetAmount: recommendBudget ? "AI Recommended" : `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
+        budgetAmount: recommendBudget ? recommendedBudgetAmount : fixedBudgetAmount,
         travelers,
         travelerType,
         travelStyle,
@@ -364,7 +369,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
         travelStyle,
         startDate,
         endDate,
-        plannedBudget: `${budgetPrefix}${Number(budgetVal).toLocaleString()}`,
+        plannedBudget: fixedBudgetAmount,
         minimumBudget: feasibility ? formatFeasibilityMoney(feasibility.minimumBudget) : undefined,
         savedAt: new Date().toISOString(),
       };
@@ -561,10 +566,15 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
 
       <section className="grid gap-4 md:grid-cols-2">
         {!recommendBudget ? (
-          <FieldLabel icon={budgetPrefix === "₹" ? <IndianRupee className="h-4 w-4 text-teal-500" /> : <DollarSign className="h-4 w-4 text-teal-500" />} label="Maximum total trip budget">
-            <div className="flex gap-2"><div className="flex rounded-2xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-800 dark:bg-slate-900"><button type="button" onClick={() => setBudgetPrefix("₹")} className={`rounded-xl px-3 font-bold ${budgetPrefix === "₹" ? "bg-white text-teal-600 shadow-sm dark:bg-slate-800" : "text-slate-500"}`}>₹</button><button type="button" onClick={() => setBudgetPrefix("$")} className={`rounded-xl px-3 font-bold ${budgetPrefix === "$" ? "bg-white text-teal-600 shadow-sm dark:bg-slate-800" : "text-slate-500"}`}>$</button></div><input type="number" min="1" value={budgetVal} onChange={(event) => setBudgetVal(event.target.value)} className="input-field" /></div>
+          <FieldLabel icon={budgetCurrency === "INR" ? <IndianRupee className="h-4 w-4 text-teal-500" /> : <DollarSign className="h-4 w-4 text-teal-500" />} label="Maximum total trip budget">
+            <div className="flex gap-2">
+              <select value={budgetCurrency} onChange={(event) => { setBudgetCurrency(event.target.value as BudgetCurrency); setFeasibility(null); }} className="input-field max-w-[135px] font-bold" aria-label="Budget currency">
+                <option value="INR">₹ INR</option><option value="USD">$ USD</option><option value="AED">AED</option><option value="EUR">€ EUR</option><option value="GBP">£ GBP</option><option value="JPY">¥ JPY</option>
+              </select>
+              <input type="number" min="1" value={budgetVal} onChange={(event) => setBudgetVal(event.target.value)} className="input-field" />
+            </div>
           </FieldLabel>
-        ) : <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-700 dark:border-teal-900/40 dark:bg-teal-950/20 dark:text-teal-300"><Sparkles className="mb-2 h-5 w-5" /><strong>AI budget recommendation enabled.</strong><p className="mt-1 text-xs opacity-80">You will receive minimum practical, recommended and premium estimates.</p></div>}
+        ) : <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-700 dark:border-teal-900/40 dark:bg-teal-950/20 dark:text-teal-300"><div className="flex flex-wrap items-center justify-between gap-3"><div><Sparkles className="mb-2 h-5 w-5" /><strong>AI budget recommendation enabled.</strong><p className="mt-1 text-xs opacity-80">You will receive minimum practical, recommended and premium estimates in your selected currency.</p></div><select value={budgetCurrency} onChange={(event) => setBudgetCurrency(event.target.value as BudgetCurrency)} className="rounded-xl border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-slate-800 dark:border-teal-800 dark:bg-slate-900 dark:text-white" aria-label="Recommended budget currency"><option value="INR">₹ INR</option><option value="USD">$ USD</option><option value="AED">AED</option><option value="EUR">€ EUR</option><option value="GBP">£ GBP</option><option value="JPY">¥ JPY</option></select></div></div>}
         <FieldLabel icon={<Users className="h-4 w-4 text-teal-500" />} label="Number of travelers"><div className="flex items-center gap-3"><button type="button" onClick={() => setTravelers((value) => Math.max(1, value - 1))} className="counter-btn">−</button><input type="number" min="1" value={travelers} onChange={(event) => setTravelers(Math.max(1, Number(event.target.value) || 1))} className="input-field text-center font-bold" /><button type="button" onClick={() => setTravelers((value) => value + 1)} className="counter-btn">+</button></div></FieldLabel>
       </section>
 
