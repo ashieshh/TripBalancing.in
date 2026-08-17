@@ -217,7 +217,6 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
     // Arrival local transfer baseline
     flightCostPerPerson = style === "budget" ? 1500 : style === "mid" ? 3000 : 8000;
   }
-  flightCostPerPerson = fromInr(flightCostPerPerson);
 
   // 2. Hotel / Accommodation Cost per night per room
   let hotelNightRate = 0;
@@ -228,7 +227,6 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   } else { // Luxury
     hotelNightRate = tier === 1 ? 75000 : tier === 2 ? 38000 : 22000;
   }
-  hotelNightRate = fromInr(hotelNightRate);
 
   // 3. Daily Food Cost per traveler per day
   let dailyFoodRate = 0;
@@ -239,7 +237,6 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   } else { // Luxury
     dailyFoodRate = tier === 1 ? 20000 : tier === 2 ? 9500 : 4800;
   }
-  dailyFoodRate = fromInr(dailyFoodRate);
 
   // 4. Daily Local Transport per traveler per day
   let dailyTransportRate = 0;
@@ -250,7 +247,6 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   } else { // Luxury
     dailyTransportRate = tier === 1 ? 14000 : tier === 2 ? 6500 : 3800;
   }
-  dailyTransportRate = fromInr(dailyTransportRate);
 
   // 5. Daily Sightseeing / Attractions per traveler per day
   let dailySightseeingRate = 0;
@@ -261,7 +257,6 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   } else { // Luxury
     dailySightseeingRate = tier === 1 ? 15000 : tier === 2 ? 8000 : 4200;
   }
-  dailySightseeingRate = fromInr(dailySightseeingRate);
 
   // 6. Visa & Travel Insurance per traveler (One-time)
   let visaInsurancePerPerson = 0;
@@ -272,21 +267,32 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   } else {
     visaInsurancePerPerson = 600; // Basic trip insurance/pass for non-local domestic travel
   }
-  visaInsurancePerPerson = fromInr(visaInsurancePerPerson);
 
-  // Compute category totals
-  const flightTotal = Math.round(flightCostPerPerson * travelers);
-  const hotelTotal = Math.round(hotelNightRate * nights * rooms);
-  const foodTotal = Math.round(dailyFoodRate * days * travelers);
-  const localTransportTotal = Math.round(dailyTransportRate * days * travelers);
-  const sightseeingTotal = Math.round(dailySightseeingRate * days * travelers);
-  const visaAndInsuranceTotal = Math.round(visaInsurancePerPerson * travelers);
-  
-  // 7. Miscellaneous & Taxes (6% of subtotal)
-  const subtotal = hotelTotal + foodTotal + localTransportTotal + sightseeingTotal;
-  const miscellaneousTotal = Math.round(subtotal * 0.06);
+  // Compute the economic trip cost ONCE in canonical INR.
+  // The selected currency is display-only and must never change the underlying trip price.
+  // This intentionally has no passport/nationality-specific price adjustment.
+  const flightTotalInr = Math.round(flightCostPerPerson * travelers);
+  const hotelTotalInr = Math.round(hotelNightRate * nights * rooms);
+  const foodTotalInr = Math.round(dailyFoodRate * days * travelers);
+  const localTransportTotalInr = Math.round(dailyTransportRate * days * travelers);
+  const sightseeingTotalInr = Math.round(dailySightseeingRate * days * travelers);
+  const visaAndInsuranceTotalInr = Math.round(visaInsurancePerPerson * travelers);
 
-  // Exact Grand Total
+  // 7. Miscellaneous & Taxes (6% of the same canonical subtotal)
+  const subtotalInr = hotelTotalInr + foodTotalInr + localTransportTotalInr + sightseeingTotalInr;
+  const miscellaneousTotalInr = Math.round(subtotalInr * 0.06);
+
+  // Convert only after every base cost has been calculated. This guarantees that
+  // identical trip inputs have the same economic value in INR/AED/USD/EUR/GBP/JPY.
+  const flightTotal = Math.round(fromInr(flightTotalInr));
+  const hotelTotal = Math.round(fromInr(hotelTotalInr));
+  const foodTotal = Math.round(fromInr(foodTotalInr));
+  const localTransportTotal = Math.round(fromInr(localTransportTotalInr));
+  const sightseeingTotal = Math.round(fromInr(sightseeingTotalInr));
+  const visaAndInsuranceTotal = Math.round(fromInr(visaAndInsuranceTotalInr));
+  const miscellaneousTotal = Math.round(fromInr(miscellaneousTotalInr));
+
+  // Exact visible Grand Total: always equals the displayed category sum.
   const grandTotal = flightTotal + hotelTotal + foodTotal + localTransportTotal + sightseeingTotal + visaAndInsuranceTotal + miscellaneousTotal;
 
   // Expected Range (+/- 8% to 10%)
