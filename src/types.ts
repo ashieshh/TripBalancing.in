@@ -20,6 +20,8 @@ export interface TripInput {
   origin?: string;
   startDate: string;
   endDate: string;
+  /** Exact inclusive trip duration selected by the user. */
+  tripDays?: number;
   budgetAmount: string;
   plannedBudget?: string;
   realisticEstimatedCost?: string;
@@ -151,6 +153,8 @@ export interface Itinerary {
   originToDestinationDuration?: string;
   startDate: string;
   endDate: string;
+  /** Exact inclusive trip duration selected by the user. */
+  tripDays?: number;
   budgetAmount: string;
   travelers: number;
   travelStyle: string;
@@ -204,6 +208,8 @@ export interface TripRecord {
   origin?: string;
   startDate: string;
   endDate: string;
+  /** Exact inclusive trip duration selected by the user. */
+  tripDays?: number;
   budgetAmount: string;
   travelers: number;
   travelStyle: TravelStyle;

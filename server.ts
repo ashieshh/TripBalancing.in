@@ -1488,7 +1488,7 @@ app.post("/api/generate-itinerary", async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;
   let diffDays = 3;
   try {
-    const { destination, origin, startDate, endDate, budgetAmount, travelers, travelerType, travelStyle, budgetMode, tripPurpose, preferredWeather, interests, visitedDestinations, revisitPreference, planningMode, plan, freeTripsUsed, paidTripsBalance, isAiBudgetPlanner } = req.body;
+    const { destination, origin, startDate, endDate, tripDays, budgetAmount, travelers, travelerType, travelStyle, budgetMode, tripPurpose, preferredWeather, interests, visitedDestinations, revisitPreference, planningMode, plan, freeTripsUsed, paidTripsBalance, isAiBudgetPlanner } = req.body;
 
     if (!destination || !startDate || !endDate || !travelers || !travelStyle || (travelStyle !== "Smart Luxury" && !budgetAmount)) {
       return res.status(400).json({ error: "Missing required trip fields." });
@@ -1496,15 +1496,20 @@ app.post("/api/generate-itinerary", async (req, res) => {
 
     const effectiveBudgetAmount = budgetAmount || "INR AI Recommended";
 
-    // Determine the number of days (1 to 365)
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
-      const diffTime = Math.abs(end.getTime() - start.getTime());
-      diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    // The explicit Trip Duration field is authoritative. Dates are only a
+    // secondary fallback for older clients. This prevents a selected 5-day
+    // trip from becoming 4 days because of date math/timezones/AI output.
+    const requestedTripDays = Number.parseInt(String(tripDays ?? ""), 10);
+    if (Number.isFinite(requestedTripDays) && requestedTripDays > 0) {
+      diffDays = Math.min(365, requestedTripDays);
+    } else {
+      const startMs = Date.parse(`${startDate}T00:00:00Z`);
+      const endMs = Date.parse(`${endDate}T00:00:00Z`);
+      if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs) {
+        diffDays = Math.floor((endMs - startMs) / 86400000) + 1;
+      }
+      diffDays = Math.max(1, Math.min(365, diffDays));
     }
-    if (diffDays <= 0) diffDays = 1;
-    if (diffDays > 365) diffDays = 365; // cap to 365 days for safety
 
     // Strictly validate BOTH locations. Do not let Gemini reinterpret invalid text
     // into another city (for example "mumu" -> Mumbai).
@@ -1521,7 +1526,7 @@ app.post("/api/generate-itinerary", async (req, res) => {
     geoCoords = { latitude: validatedDestination.latitude!, longitude: validatedDestination.longitude! };
 
     // 1. Check Itinerary Cache first to prevent redundant generations and reduce response time
-    const cacheKey = `${destination.toLowerCase().trim()}_${origin ? origin.toLowerCase().trim() : ""}_${startDate}_${endDate}_${effectiveBudgetAmount}_${travelers}_${String(travelStyle).toLowerCase().trim()}_${isAiBudgetPlanner ? "ai" : "manual"}`;
+    const cacheKey = `${destination.toLowerCase().trim()}_${origin ? origin.toLowerCase().trim() : ""}_${startDate}_${endDate}_${diffDays}d_${effectiveBudgetAmount}_${travelers}_${String(travelStyle).toLowerCase().trim()}_${isAiBudgetPlanner ? "ai" : "manual"}`;
     const cached = ITINERARY_CACHE.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < ITINERARY_TTL)) {
       console.log(`[Cache Hit] Returning cached itinerary for destination: ${destination} from origin: ${origin || "any"}`);
@@ -1921,6 +1926,10 @@ Return the response in strict JSON format.`;
     // Gemini is not allowed to replace it with destination-local currency.
     parsedItinerary.budgetAmount = effectiveBudgetAmount;
     parsedItinerary.plannedBudget = effectiveBudgetAmount;
+    // Never accept an AI-reported duration that conflicts with the form.
+    parsedItinerary.startDate = startDate;
+    parsedItinerary.endDate = endDate;
+    parsedItinerary.tripDays = diffDays;
     parsedItinerary.originLatitude = validatedOrigin.latitude;
     parsedItinerary.originLongitude = validatedOrigin.longitude;
     if (origin && validatedOrigin.latitude != null && validatedOrigin.longitude != null) {
@@ -1944,22 +1953,17 @@ Return the response in strict JSON format.`;
   } catch (error: any) {
     console.warn("AI Itinerary Generation Error, providing high-quality custom fallback:", error);
 
-    const { destination, startDate, endDate, budgetAmount, travelers, travelStyle, isAiBudgetPlanner } = req.body;
+    const { destination, startDate, endDate, tripDays, budgetAmount, travelers, travelStyle, isAiBudgetPlanner } = req.body;
 
-    let diffDays = 3;
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
-      const diffTime = Math.abs(end.getTime() - start.getTime());
-      diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    let diffDays = Number.parseInt(String(tripDays ?? ""), 10);
+    if (!Number.isFinite(diffDays) || diffDays <= 0) {
+      const startMs = Date.parse(`${startDate}T00:00:00Z`);
+      const endMs = Date.parse(`${endDate}T00:00:00Z`);
+      diffDays = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+        ? Math.floor((endMs - startMs) / 86400000) + 1
+        : 1;
     }
-
-    // IMPORTANT: Trip duration is controlled by the user's selected dates / Trip Duration.
-    // Recommended-budget mode must never shorten or extend the trip based on the
-    // recommended amount. For example, a user selecting 5 days must always receive
-    // a 5-day itinerary (inclusive start/end dates), regardless of currency or budget.
-    if (diffDays <= 0) diffDays = 1;
-    if (diffDays > 365) diffDays = 365;
+    diffDays = Math.max(1, Math.min(365, diffDays));
 
     const destNormalized = (destination || "").toLowerCase().trim();
     const baseLat = geoCoords?.latitude ?? 28.6139;
@@ -2163,6 +2167,7 @@ Return the response in strict JSON format.`;
       origin: origin || "",
       startDate: startDate,
       endDate: endDate,
+      tripDays: diffDays,
       budgetAmount: budgetAmount,
       travelers: Number(travelers) || 1,
       travelStyle: travelStyle,

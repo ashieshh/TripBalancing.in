@@ -310,6 +310,9 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
         origin: canonicalOrigin,
         startDate,
         endDate,
+        // Send the user-entered duration explicitly. The backend must not infer
+        // a different duration from dates, currency, AI output, or budget mode.
+        tripDays: Math.max(1, Number(travelDays) || 1),
         budgetAmount: recommendBudget ? recommendedBudgetAmount : fixedBudgetAmount,
         travelers,
         travelerType,
