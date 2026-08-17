@@ -145,10 +145,11 @@ const drawDollarIcon = (doc: any, x: number, y: number, color: number[] = [13, 1
   doc.setDrawColor(color[0], color[1], color[2]);
   doc.setLineWidth(0.1);
   doc.circle(x, y, 1.8, "D");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(5);
-  doc.setTextColor(color[0], color[1], color[2]);
-  doc.text("$", x, y + 1.7, { align: "center" });
+  // Currency-neutral money icon: avoid a literal "$" appearing in INR/AED/EUR PDFs.
+  doc.setDrawColor(color[0], color[1], color[2]);
+  doc.setLineWidth(0.35);
+  doc.line(x - 0.8, y - 0.45, x + 0.8, y - 0.45);
+  doc.line(x - 0.8, y + 0.45, x + 0.8, y + 0.45);
 };
 
 const drawTransitIcon = (doc: any, x: number, y: number, color: number[] = [13, 148, 136]) => {
@@ -839,8 +840,8 @@ const estimateFoodPriceRange = (
   itinerary: Itinerary,
   currencySym: string
 ): string => {
-  const supplied = String(food?.estimatedPrice || "").trim();
-  if (supplied) return supplied.replace(/₹/g, "Rs. ");
+  // Ignore AI-supplied price strings here. They may use destination-local currency
+  // or an unrealistic numeric scale. The reconciled trip food budget below is authoritative.
 
   const days = Math.max(1, itinerary.days?.length || 1);
   const travelers = Math.max(1, itinerary.travelers || 1);
@@ -1052,11 +1053,17 @@ export const exportPremiumTravelPDF = async (
   headerWeather: any[]
 ) => {
   const currencySym = (() => {
-    const totalText = rawItinerary.budgetAmount || "";
-    if (totalText.includes("₹") || totalText.toLowerCase().includes("inr") || totalText.toLowerCase().includes("rs")) return "Rs. ";
-    if (totalText.includes("€") || totalText.toLowerCase().includes("eur")) return "€";
-    if (totalText.includes("£") || totalText.toLowerCase().includes("gbp")) return "£";
-    return "$";
+    // Planned budget is the authoritative display currency. Fall back to budgetAmount
+    // only for older saved itineraries.
+    const totalText = String((rawItinerary as any).plannedBudget || rawItinerary.budgetAmount || "");
+    const lower = totalText.toLowerCase();
+    if (totalText.includes("₹") || lower.includes("inr") || /\brs\.?\s*/i.test(totalText)) return "Rs. ";
+    if (lower.includes("aed") || totalText.includes("د.إ")) return "AED ";
+    if (totalText.includes("€") || lower.includes("eur")) return "€";
+    if (totalText.includes("£") || lower.includes("gbp")) return "£";
+    if (totalText.includes("¥") || lower.includes("jpy")) return "¥";
+    if (totalText.includes("$") || lower.includes("usd")) return "$";
+    return "Rs. ";
   })();
 
   const itinerary = optimizeItineraryForPDF(rawItinerary, currencySym);

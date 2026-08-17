@@ -1527,6 +1527,10 @@ app.post("/api/generate-itinerary", async (req, res) => {
       console.log(`[Cache Hit] Returning cached itinerary for destination: ${destination} from origin: ${origin || "any"}`);
       const cachedItinerary = reconcileItineraryBudget({
         ...cached.data,
+        // The request budget is authoritative. Never let cached/AI content switch
+        // the trip currency (for example AED planned budget -> USD estimate).
+        budgetAmount: effectiveBudgetAmount,
+        plannedBudget: effectiveBudgetAmount,
         latitude: geoCoords.latitude,
         longitude: geoCoords.longitude,
         originLatitude: validatedOrigin.latitude,
@@ -1913,6 +1917,10 @@ Return the response in strict JSON format.`;
     parsedItinerary.latitude = geoCoords.latitude;
     parsedItinerary.longitude = geoCoords.longitude;
     parsedItinerary.origin = origin || "";
+    // The user's submitted budget/currency is the single source of truth.
+    // Gemini is not allowed to replace it with destination-local currency.
+    parsedItinerary.budgetAmount = effectiveBudgetAmount;
+    parsedItinerary.plannedBudget = effectiveBudgetAmount;
     parsedItinerary.originLatitude = validatedOrigin.latitude;
     parsedItinerary.originLongitude = validatedOrigin.longitude;
     if (origin && validatedOrigin.latitude != null && validatedOrigin.longitude != null) {
@@ -2227,7 +2235,8 @@ Return the response in strict JSON format.`;
 
     // Store in cache
     const fallbackCacheKey = `${(destination || "").toLowerCase().trim()}_${origin ? origin.toLowerCase().trim() : ""}_${startDate}_${endDate}_${budgetAmount}_${travelers}_${String(travelStyle || "").toLowerCase().trim()}_${isAiBudgetPlanner ? "ai" : "manual"}`;
-    const reconciledFallback = reconcileItineraryBudget(fallbackItinerary);
+    fallbackItinerary.budgetAmount = budgetAmount;
+    const reconciledFallback = reconcileItineraryBudget({ ...fallbackItinerary, plannedBudget: budgetAmount });
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,

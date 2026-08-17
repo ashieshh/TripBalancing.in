@@ -461,6 +461,76 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     });
   }
 
+
+
+  // GLOBAL CURRENCY NORMALIZATION
+  // The deterministic calculator is authoritative for every monetary display.
+  // AI may suggest names/descriptions, but it must not control currency or raw price scale.
+  const fmtMoney = (value: number) => `${currencySym}${Math.max(0, Math.round(value)).toLocaleString()}`;
+  const dayCountForRates = Math.max(1, days);
+  const nightsForRates = Math.max(1, days - 1);
+  const roomsForRates = Math.max(1, Math.ceil(travelers / 2));
+
+  // Hotel cards: retain hotel names/ratings, replace prices with consistent trip-currency rates.
+  if (itinerary.hotelRecommendations) {
+    const baseNight = calculated.hotel > 0
+      ? calculated.hotel / nightsForRates / roomsForRates
+      : 0;
+    const setHotelTier = (list: any[] | undefined, factor: number) => {
+      if (!Array.isArray(list)) return;
+      list.forEach((h: any) => { h.pricePerNight = `${fmtMoney(baseNight * factor)}/night`; });
+    };
+    setHotelTier(itinerary.hotelRecommendations.budget, 0.75);
+    setHotelTier(itinerary.hotelRecommendations.midRange, 1.35);
+    setHotelTier(itinerary.hotelRecommendations.luxury, 3.25);
+  }
+
+  // Food daily guide: derive from the reconciled food category, never from AI currency strings.
+  const perPersonFoodDay = calculated.food / dayCountForRates / travelers;
+  itinerary.foodBudgetDaily = {
+    budget: `${fmtMoney(perPersonFoodDay * 0.75)}/day`,
+    midRange: `${fmtMoney(perPersonFoodDay * 1.35)}/day`,
+    luxury: `${fmtMoney(perPersonFoodDay * 2.6)}/day`,
+  };
+
+  // Transport guide: deterministic representative fares in the same trip currency.
+  const perPersonTransportDay = calculated.localTransport / dayCountForRates / travelers;
+  itinerary.detailedTransportationCosts = {
+    taxiStart: fmtMoney(perPersonTransportDay * 0.35),
+    taxiPerKm: fmtMoney(Math.max(1, perPersonTransportDay * 0.08)),
+    autoRickshaw: fmtMoney(perPersonTransportDay * 0.22),
+    busFare: fmtMoney(Math.max(1, perPersonTransportDay * 0.08)),
+    metroFare: fmtMoney(Math.max(1, perPersonTransportDay * 0.10)),
+    trainFare: fmtMoney(perPersonTransportDay * 0.30),
+    scooterRental: `${fmtMoney(perPersonTransportDay * 0.80)}/day`,
+    carRental: `${fmtMoney(perPersonTransportDay * 3.0)}/day`,
+    airportTransfer: fmtMoney(perPersonTransportDay * 1.5),
+  };
+
+  // Attraction cards: preserve free attractions; normalize paid fees into the trip currency.
+  if (Array.isArray(itinerary.placesToVisit) && itinerary.placesToVisit.length) {
+    const paidPlaces = itinerary.placesToVisit.filter((p: any) => !/\bfree\b/i.test(String(p.entryFee || "")));
+    const perPaidPlace = paidPlaces.length ? calculated.sightseeing / travelers / paidPlaces.length : 0;
+    itinerary.placesToVisit.forEach((place: any) => {
+      if (/\bfree\b/i.test(String(place.entryFee || ""))) place.entryFee = "Free";
+      else place.entryFee = fmtMoney(perPaidPlace);
+    });
+    itinerary.attractionCosts = itinerary.placesToVisit.map((p: any) => ({ name: p.name, fee: p.entryFee }));
+  }
+
+  // Local food price hints (used by PDF/UI when present) are derived from the reconciled food pool.
+  if (Array.isArray(itinerary.localFood)) {
+    const baseMeal = Math.max(1, perPersonFoodDay / 3);
+    itinerary.localFood.forEach((food: any, idx: number) => {
+      const text = `${food.name || ""} ${food.type || ""}`.toLowerCase();
+      let lo = 0.55, hi = 1.05;
+      if (/tea|coffee|beverage|dessert|pastry|snack/.test(text)) { lo = 0.25; hi = 0.55; }
+      else if (/fine|luxury|truffle|tasting|michelin/.test(text)) { lo = 1.15; hi = 2.0; }
+      const variation = 1 + ((idx % 3) - 1) * 0.07;
+      food.estimatedPrice = `${fmtMoney(baseMeal * lo * variation)} - ${fmtMoney(baseMeal * hi * variation)}`;
+    });
+  }
+
   // Filter hotel recommendations according to travel style
   if (itinerary.hotelRecommendations) {
     const hr = itinerary.hotelRecommendations;
