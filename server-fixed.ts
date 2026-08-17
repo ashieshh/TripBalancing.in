@@ -1947,13 +1947,10 @@ Return the response in strict JSON format.`;
       diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     }
 
-    if (isAiBudgetPlanner) {
-      const amount = parseFloat(String(budgetAmount).replace(/[^0-9.]/g, "")) || 20000;
-      const isUSD = String(budgetAmount).includes("$");
-      const dailyCostPerPerson = isUSD ? 50 : 3000;
-      const totalDailyCost = dailyCostPerPerson * (Number(travelers) || 1);
-      diffDays = Math.max(1, Math.floor(amount / totalDailyCost));
-    }
+    // IMPORTANT: Trip duration is controlled by the user's selected dates / Trip Duration.
+    // Recommended-budget mode must never shorten or extend the trip based on the
+    // recommended amount. For example, a user selecting 5 days must always receive
+    // a 5-day itinerary (inclusive start/end dates), regardless of currency or budget.
     if (diffDays <= 0) diffDays = 1;
     if (diffDays > 365) diffDays = 365;
 
