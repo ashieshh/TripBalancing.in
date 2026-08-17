@@ -50,34 +50,48 @@ export interface BudgetFeasibilityResult {
   estimate: CalculatedCategoryBreakdown;
 }
 
-// Detect currency symbol from input string or default
-export const detectCurrencySymbol = (str?: string | number, destination?: string): string => {
-  if (typeof str === "string") {
-    if (str.includes("$")) return "$";
-    if (str.includes("€")) return "€";
-    if (str.includes("£")) return "£";
-    if (str.includes("¥")) return "¥";
-    if (str.includes("₹") || str.toLowerCase().includes("inr") || str.toLowerCase().includes("rs")) return "₹";
-    if (str.includes("AED") || str.includes("aed")) return "AED ";
-  }
-  
-  // Infer based on destination if no symbol in budget
-  const dest = (destination || "").toLowerCase();
-  if (dest.includes("usa") || dest.includes("america") || dest.includes("york") || dest.includes("singapore") || dest.includes("bali")) {
-    return "$";
-  }
-  if (dest.includes("france") || dest.includes("paris") || dest.includes("italy") || dest.includes("rome") || dest.includes("spain") || dest.includes("germany")) {
-    return "€";
-  }
-  if (dest.includes("london") || dest.includes("uk") || dest.includes("england")) {
-    return "£";
-  }
-  if (dest.includes("dubai") || dest.includes("uae")) {
-    return "AED ";
-  }
+// Central trip-currency helpers. All budget baselines in this module are stored in INR.
+// Conversion happens only after the INR amount has been calculated.
+export type TripCurrencyCode = "INR" | "USD" | "EUR" | "GBP" | "AED" | "JPY";
 
-  return "₹"; // Default to INR
+const INR_PER_CURRENCY_UNIT: Record<TripCurrencyCode, number> = {
+  INR: 1,
+  USD: 85,
+  EUR: 100,
+  GBP: 116,
+  AED: 23.15,
+  JPY: 0.58,
 };
+
+const CURRENCY_SYMBOLS: Record<TripCurrencyCode, string> = {
+  INR: "₹", USD: "$", EUR: "€", GBP: "£", AED: "AED ", JPY: "¥",
+};
+
+export const detectCurrencyCode = (str?: string | number, destination?: string): TripCurrencyCode => {
+  if (typeof str === "string") {
+    const v = str.toUpperCase();
+    if (v.includes("AED")) return "AED";
+    if (v.includes("INR") || v.includes("₹") || /\bRS\.?\s*/i.test(str)) return "INR";
+    if (v.includes("USD") || str.includes("$")) return "USD";
+    if (v.includes("EUR") || str.includes("€")) return "EUR";
+    if (v.includes("GBP") || str.includes("£")) return "GBP";
+    if (v.includes("JPY") || str.includes("¥")) return "JPY";
+  }
+  // The current trip form explicitly sends ₹ or $. This fallback is only for legacy data.
+  const dest = (destination || "").toLowerCase();
+  if (dest.includes("india")) return "INR";
+  return "INR";
+};
+
+export const currencySymbolFor = (code: TripCurrencyCode): string => CURRENCY_SYMBOLS[code];
+export const convertInrToTripCurrency = (amountInr: number, code: TripCurrencyCode): number =>
+  amountInr / INR_PER_CURRENCY_UNIT[code];
+export const formatTripCurrency = (amount: number, code: TripCurrencyCode): string =>
+  `${currencySymbolFor(code)}${Math.round(amount).toLocaleString()}`;
+
+// Detect currency symbol from input string or default
+export const detectCurrencySymbol = (str?: string | number, destination?: string): string =>
+  currencySymbolFor(detectCurrencyCode(str, destination));
 
 // Clean numeric parser
 export const parseNumericValue = (val?: string | number | null): number => {
@@ -180,13 +194,9 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
     : destinationInfo.tier;
   const hasOrigin = Boolean(input.origin && input.origin.trim() !== "");
   const samePlaceTrip = hasOrigin && isSamePlaceTrip(input.origin, input.destination);
-  const currencySymbol = detectCurrencySymbol(input.userBudgetInput, input.destination);
-  const isUSD = currencySymbol === "$";
-  const isEUR = currencySymbol === "€";
-  const isGBP = currencySymbol === "£";
-  
-  // Scale factor if currency is USD / EUR / GBP instead of INR
-  const FX = isUSD ? 1 : isEUR ? 0.92 : isGBP ? 0.80 : 85; // 1 USD = ~85 INR
+  const currencyCode = detectCurrencyCode(input.userBudgetInput, input.destination);
+  const currencySymbol = currencySymbolFor(currencyCode);
+  const fromInr = (amountInr: number) => convertInrToTripCurrency(amountInr, currencyCode);
 
   // 1. Flight / Transit Cost per traveler (Roundtrip)
   let flightCostPerPerson = 0;
@@ -207,7 +217,7 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
     // Arrival local transfer baseline
     flightCostPerPerson = style === "budget" ? 1500 : style === "mid" ? 3000 : 8000;
   }
-  if (isUSD || isEUR || isGBP) flightCostPerPerson = flightCostPerPerson / FX;
+  flightCostPerPerson = fromInr(flightCostPerPerson);
 
   // 2. Hotel / Accommodation Cost per night per room
   let hotelNightRate = 0;
@@ -218,7 +228,7 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   } else { // Luxury
     hotelNightRate = tier === 1 ? 75000 : tier === 2 ? 38000 : 22000;
   }
-  if (isUSD || isEUR || isGBP) hotelNightRate = hotelNightRate / FX;
+  hotelNightRate = fromInr(hotelNightRate);
 
   // 3. Daily Food Cost per traveler per day
   let dailyFoodRate = 0;
@@ -229,7 +239,7 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   } else { // Luxury
     dailyFoodRate = tier === 1 ? 20000 : tier === 2 ? 9500 : 4800;
   }
-  if (isUSD || isEUR || isGBP) dailyFoodRate = dailyFoodRate / FX;
+  dailyFoodRate = fromInr(dailyFoodRate);
 
   // 4. Daily Local Transport per traveler per day
   let dailyTransportRate = 0;
@@ -240,7 +250,7 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   } else { // Luxury
     dailyTransportRate = tier === 1 ? 14000 : tier === 2 ? 6500 : 3800;
   }
-  if (isUSD || isEUR || isGBP) dailyTransportRate = dailyTransportRate / FX;
+  dailyTransportRate = fromInr(dailyTransportRate);
 
   // 5. Daily Sightseeing / Attractions per traveler per day
   let dailySightseeingRate = 0;
@@ -251,7 +261,7 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   } else { // Luxury
     dailySightseeingRate = tier === 1 ? 15000 : tier === 2 ? 8000 : 4200;
   }
-  if (isUSD || isEUR || isGBP) dailySightseeingRate = dailySightseeingRate / FX;
+  dailySightseeingRate = fromInr(dailySightseeingRate);
 
   // 6. Visa & Travel Insurance per traveler (One-time)
   let visaInsurancePerPerson = 0;
@@ -262,7 +272,7 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   } else {
     visaInsurancePerPerson = 600; // Basic trip insurance/pass for non-local domestic travel
   }
-  if (isUSD || isEUR || isGBP) visaInsurancePerPerson = visaInsurancePerPerson / FX;
+  visaInsurancePerPerson = fromInr(visaInsurancePerPerson);
 
   // Compute category totals
   const flightTotal = Math.round(flightCostPerPerson * travelers);

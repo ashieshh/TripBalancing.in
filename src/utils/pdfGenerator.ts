@@ -1628,8 +1628,10 @@ export const exportPremiumTravelPDF = async (
     if (/united states|usa|new york|los angeles|san francisco|chicago/.test(destinationText)) return { general: "911", police: "911", medical: "911" };
     if (/japan|tokyo|osaka|kyoto/.test(destinationText)) return { general: "110 / 119", police: "110", medical: "119" };
     if (/uae|united arab emirates|dubai|abu dhabi/.test(destinationText)) return { general: "999 / 998", police: "999", medical: "998" };
+    if (/azerbaijan|baku/.test(destinationText)) return { general: "112", police: "102", medical: "103" };
     if (/australia|sydney|melbourne|brisbane/.test(destinationText)) return { general: "000", police: "000", medical: "000" };
-    return { general: "112 (where supported)", police: "Check local number", medical: "Check local number" };
+    // Do not invent country-specific numbers when the app does not have a verified mapping.
+    return { general: "Verify locally before travel", police: "Verify locally before travel", medical: "Verify locally before travel" };
   })();
   const entries = [
     { name: "• Emergency Helpline:", value: emergencyDirectory.general },

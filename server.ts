@@ -1639,7 +1639,7 @@ Please tailor the recommendations explicitly:
      * Miscellaneous expenses (shopping, souvenirs, emergency funds, local SIM cards)
      * originToDestinationTravel (realistic round-trip flight/train transit costs from ${origin || "starting city"} to ${destination} for ${travelers} travelers, set to 'N/A' if no starting city is provided)
    - The "total" budget must also be a range representing the sum of all 6 categories, explicitly including the originToDestinationTravel cost if an origin is provided!
-   - Clearly state these values in a friendly readable currency format appropriate for the destination (e.g., ₹ for Indian destinations, $ or local currency for international destinations).
+   - CURRENCY CONSISTENCY IS MANDATORY: use the SAME currency as the user's Budget Level/Amount (${effectiveBudgetAmount}) for every monetary value in the response. If the budget uses $, every cost must be USD; if it uses ₹, every cost must be INR. Never relabel an INR-sized number with a $ symbol and never mix destination-local currency into this itinerary.
 7. List essential packing items suitable for the destination's climate during those dates.
 8. Provide essential transportation suggestions for getting around.
 9. List very practical travel tips, safety hacks, and cultural etiquettes.
@@ -1648,7 +1648,7 @@ Please tailor the recommendations explicitly:
 9C. For Smart Luxury, set budgetAmount to the Recommended Smart Luxury total and explain Minimum Luxury, Recommended Smart Luxury and Premium Luxury in aiBudgetSummary.
 
 10. CURATED COST BREAKDOWN AND RECOMMENDATIONS (MANDATORY):
-   - Under 'hotelRecommendations', recommend 3 Budget, 3 Mid-range, and 3 Luxury Hotels. Each hotel must have a name, pricePerNight in local currency (e.g. ₹ or $), rating (1.0 to 5.0), distanceFromCenter, and bookingLink (a placeholder searching booking.com for that hotel name).
+   - Under 'hotelRecommendations', recommend 3 Budget, 3 Mid-range, and 3 Luxury Hotels. Each hotel must have a name, pricePerNight in the SAME currency as the user's Budget Level/Amount, rating (1.0 to 5.0), distanceFromCenter, and bookingLink (a placeholder searching booking.com for that hotel name).
    - Under 'detailedTransportationCosts', estimate realistic fares for: taxiStart, taxiPerKm, autoRickshaw (where available, otherwise N/A), busFare, metroFare (where available, otherwise N/A), trainFare (where available, otherwise N/A), scooterRental (per day), carRental (per day), and airportTransfer.
    - Under 'foodBudgetDaily', estimate daily costs for: budget, midRange, and luxury travelers.
    - Under 'attractionCosts', estimate entry fees for each landmark in 'placesToVisit' as a list of { name, fee }.
