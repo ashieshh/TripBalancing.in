@@ -199,14 +199,67 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   const destinationInfo = getDestinationTier(input.destination);
   const originInfo = getDestinationTier(input.origin || "");
   const tier = destinationInfo.tier;
-  // A route is international when either endpoint is recognized as foreign.
-  // This prevents foreign-origin trips to India (for example Paris -> Mumbai)
-  // from falling through to the Rs. 4,000 domestic transit baseline.
-  const isInternational = destinationInfo.isInternational || originInfo.isInternational;
-  const routeTier: 1 | 2 | 3 = isInternational
-    ? (Math.min(destinationInfo.tier, originInfo.tier) as 1 | 2 | 3)
-    : destinationInfo.tier;
   const hasOrigin = Boolean(input.origin && input.origin.trim() !== "");
+
+  // Route pricing must depend on the route, not on how expensive either city is.
+  // The previous Math.min(tier) rule incorrectly treated routes such as Dubai -> Baku
+  // as long-haul simply because Dubai is a Tier-1 destination.
+  const countryOf = (place?: string): string => {
+    const p = normalizePlaceName(place);
+    const rules: Array<[string, string]> = [
+      ["united arab emirates", "AE"], ["uae", "AE"], ["dubai", "AE"], ["abu dhabi", "AE"],
+      ["azerbaijan", "AZ"], ["baku", "AZ"],
+      ["india", "IN"], ["mumbai", "IN"], ["delhi", "IN"], ["new delhi", "IN"], ["goa", "IN"], ["jaipur", "IN"], ["kerala", "IN"],
+      ["united kingdom", "GB"], ["england", "GB"], ["london", "GB"],
+      ["united states", "US"], ["usa", "US"], ["new york", "US"], ["los angeles", "US"], ["san francisco", "US"],
+      ["france", "FR"], ["paris", "FR"], ["japan", "JP"], ["tokyo", "JP"],
+      ["singapore", "SG"], ["thailand", "TH"], ["bangkok", "TH"], ["phuket", "TH"],
+      ["indonesia", "ID"], ["bali", "ID"], ["turkey", "TR"], ["istanbul", "TR"],
+      ["italy", "IT"], ["rome", "IT"], ["venice", "IT"], ["spain", "ES"], ["barcelona", "ES"],
+      ["germany", "DE"], ["portugal", "PT"], ["lisbon", "PT"], ["greece", "GR"], ["athens", "GR"],
+      ["switzerland", "CH"], ["austria", "AT"], ["vienna", "AT"], ["netherlands", "NL"], ["amsterdam", "NL"],
+      ["australia", "AU"], ["sydney", "AU"], ["malaysia", "MY"], ["kuala lumpur", "MY"],
+      ["vietnam", "VN"], ["south korea", "KR"], ["korea", "KR"], ["seoul", "KR"],
+      ["egypt", "EG"], ["maldives", "MV"], ["iceland", "IS"], ["norway", "NO"]
+    ];
+    for (const [token, code] of rules) if (p.includes(token)) return code;
+    return "";
+  };
+
+  const regionOf = (country: string): string => {
+    if (["AE", "AZ", "TR", "EG"].includes(country)) return "WEST_ASIA";
+    if (["IN", "MV"].includes(country)) return "SOUTH_ASIA";
+    if (["TH", "SG", "MY", "ID", "VN"].includes(country)) return "SE_ASIA";
+    if (["JP", "KR"].includes(country)) return "EAST_ASIA";
+    if (["GB", "FR", "IT", "ES", "DE", "PT", "GR", "CH", "AT", "NL", "NO", "IS"].includes(country)) return "EUROPE";
+    if (["US"].includes(country)) return "N_AMERICA";
+    if (["AU"].includes(country)) return "OCEANIA";
+    return "";
+  };
+
+  const originCountry = countryOf(input.origin);
+  const destinationCountry = countryOf(input.destination);
+  const countriesKnown = Boolean(originCountry && destinationCountry);
+  const isInternational = hasOrigin
+    ? (countriesKnown ? originCountry !== destinationCountry : (destinationInfo.isInternational || originInfo.isInternational))
+    : destinationInfo.isInternational;
+
+  type RouteBand = "domestic" | "short" | "medium" | "long";
+  let routeBand: RouteBand = "domestic";
+  if (isInternational) {
+    const oRegion = regionOf(originCountry);
+    const dRegion = regionOf(destinationCountry);
+    if (oRegion && dRegion && oRegion === dRegion) routeBand = "short";
+    else if (oRegion && dRegion && (
+      (oRegion === "SOUTH_ASIA" && ["WEST_ASIA", "SE_ASIA"].includes(dRegion)) ||
+      (dRegion === "SOUTH_ASIA" && ["WEST_ASIA", "SE_ASIA"].includes(oRegion)) ||
+      (oRegion === "WEST_ASIA" && ["EUROPE", "SOUTH_ASIA"].includes(dRegion)) ||
+      (dRegion === "WEST_ASIA" && ["EUROPE", "SOUTH_ASIA"].includes(oRegion)) ||
+      (oRegion === "SE_ASIA" && ["EAST_ASIA", "SOUTH_ASIA"].includes(dRegion)) ||
+      (dRegion === "SE_ASIA" && ["EAST_ASIA", "SOUTH_ASIA"].includes(oRegion))
+    )) routeBand = "medium";
+    else routeBand = "long";
+  }
   const samePlaceTrip = hasOrigin && isSamePlaceTrip(input.origin, input.destination);
   const currencyCode = detectCurrencyCode(input.userBudgetInput, input.destination);
   const currencySymbol = currencySymbolFor(currencyCode);
@@ -219,12 +272,16 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
     flightCostPerPerson = 0;
   } else if (hasOrigin || isInternational) {
     if (isInternational) {
-      if (routeTier === 1) { // Long-haul / high-cost international route
-        flightCostPerPerson = style === "budget" ? 55000 : style === "mid" ? 85000 : 220000;
-      } else { // Short-haul international
+      // Round-trip, per traveler. Route distance band controls the baseline; travel
+      // style controls cabin/flexibility. This avoids destination-cost tier inflating airfare.
+      if (routeBand === "short") {
         flightCostPerPerson = style === "budget" ? 18000 : style === "mid" ? 28000 : 65000;
+      } else if (routeBand === "medium") {
+        flightCostPerPerson = style === "budget" ? 35000 : style === "mid" ? 55000 : 110000;
+      } else {
+        flightCostPerPerson = style === "budget" ? 55000 : style === "mid" ? 85000 : 220000;
       }
-    } else { // Domestic flight/train
+    } else { // Same-country flight/train
       flightCostPerPerson = style === "budget" ? 4000 : style === "mid" ? 7500 : 16000;
     }
   } else {
