@@ -1,0 +1,8 @@
+TripBalancing line-item currency consistency fix
+
+- Keeps the now-correct grand-total FX conversion unchanged.
+- Normalizes every paid day/activity cost through the reconciled sightseeing budget.
+- Raw AI/fallback amounts are used only as relative weighting, never as display-currency amounts.
+- Prevents the previous bug where the same line displayed as AED 150 and INR 150.
+- Free/included activities remain Free.
+- Mirrored in src/utils/budgetCalculator.ts and src/services/budgetEngine.ts to avoid divergence.

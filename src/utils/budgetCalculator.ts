@@ -526,6 +526,51 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
   // The deterministic calculator is authoritative for every monetary display.
   // AI may suggest names/descriptions, but it must not control currency or raw price scale.
   const fmtMoney = (value: number) => `${currencySym}${Math.max(0, Math.round(value)).toLocaleString()}`;
+
+  // Day activity line items MUST use the same reconciled trip currency as the
+  // grand total.  AI/fallback activity strings can contain INR-looking values
+  // (for example "₹150 - ₹500").  Merely replacing the symbol caused the same
+  // numeric value to appear as AED 150 and INR 150.  Instead, use the original
+  // numbers only as RELATIVE WEIGHTS and allocate the authoritative sightseeing
+  // pool across the paid activities.  This keeps every displayed line item
+  // economically identical when the user switches currency.
+  if (Array.isArray(itinerary.days) && itinerary.days.length > 0) {
+    const activityRows: Array<{ activity: any; weight: number }> = [];
+    const firstMoneyNumber = (value: any): number => {
+      if (typeof value === "number") return Number.isFinite(value) ? Math.max(0, value) : 0;
+      const text = String(value ?? "").replace(/,/g, "");
+      if (/\bfree\b|included/i.test(text)) return 0;
+      const match = text.match(/[0-9]+(?:\.[0-9]+)?/);
+      if (!match) return 0;
+      const n = Number(match[0]);
+      return Number.isFinite(n) ? Math.max(0, n) : 0;
+    };
+
+    itinerary.days.forEach((day: any) => {
+      const activities = Array.isArray(day?.activities) ? day.activities : [];
+      activities.forEach((activity: any) => {
+        const raw = String(activity?.cost ?? "");
+        if (/\bfree\b|included/i.test(raw) || firstMoneyNumber(raw) <= 0) {
+          if (!raw.trim() || /\bfree\b|included/i.test(raw)) activity.cost = "Free";
+          return;
+        }
+        activityRows.push({ activity, weight: firstMoneyNumber(raw) });
+      });
+    });
+
+    if (activityRows.length > 0) {
+      const totalWeight = activityRows.reduce((sum, row) => sum + row.weight, 0) || activityRows.length;
+      let allocated = 0;
+      activityRows.forEach((row, index) => {
+        const isLast = index === activityRows.length - 1;
+        const amount = isLast
+          ? Math.max(0, Math.round(calculated.sightseeing - allocated))
+          : Math.max(0, Math.round(calculated.sightseeing * row.weight / totalWeight));
+        allocated += amount;
+        row.activity.cost = amount > 0 ? fmtMoney(amount) : "Free / Included";
+      });
+    }
+  }
   const dayCountForRates = Math.max(1, days);
   const nightsForRates = Math.max(1, days - 1);
   const roomsForRates = Math.max(1, Math.ceil(travelers / 2));
