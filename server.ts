@@ -18,7 +18,7 @@ import {
   generateSupportTicketEmail,
   generateBuddyInviteEmail
 } from "./src/services/emailService";
-import { reconcileItineraryBudget } from "./src/utils/budgetCalculator";
+import { reconcileItineraryBudget, setLiveUsdRates } from "./src/utils/budgetCalculator";
 
 dotenv.config();
 
@@ -238,6 +238,26 @@ const TRAVEL_TIPS_TTL = 6 * 60 * 60 * 1000; // Cache travel advisories/tips for 
 const WEATHER_TTL = 3 * 60 * 60 * 1000; // Cache weather forecast for 3 hours
 const OPEN_WEATHER_TTL = 30 * 60 * 1000; // Cache open weather forecast for 30 minutes
 const RATES_TTL = 30 * 60 * 1000; // Cache exchange rates for 30 minutes
+
+async function ensureBudgetFxRates(): Promise<void> {
+  try {
+    if (RATES_CACHE.data?.rates && (Date.now() - RATES_CACHE.timestamp < RATES_TTL)) {
+      setLiveUsdRates(RATES_CACHE.data.rates);
+      return;
+    }
+    const response = await fetch("https://open.er-api.com/v6/latest/USD");
+    if (!response.ok) return;
+    const data: any = await response.json();
+    if (data?.result === "success" && data?.rates) {
+      RATES_CACHE.data = data;
+      RATES_CACHE.timestamp = Date.now();
+      setLiveUsdRates(data.rates);
+    }
+  } catch (error) {
+    if (RATES_CACHE.data?.rates) setLiveUsdRates(RATES_CACHE.data.rates);
+    console.warn("Budget FX refresh failed; using last available rates.");
+  }
+}
 
 // Lazy-initialize Gemini client
 let aiClient: GoogleGenAI | null = null;
@@ -1488,6 +1508,9 @@ app.post("/api/generate-itinerary", async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;
   let diffDays = 3;
   try {
+    // Currency selection must only convert the same economic trip cost.
+    // Load the exact live FX table used by the Currency Converter before any budget reconciliation.
+    await ensureBudgetFxRates();
     const { destination, origin, startDate, endDate, tripDays, budgetAmount, travelers, travelerType, travelStyle, budgetMode, tripPurpose, preferredWeather, interests, visitedDestinations, revisitPreference, planningMode, plan, freeTripsUsed, paidTripsBalance, isAiBudgetPlanner } = req.body;
 
     if (!destination || !startDate || !endDate || !travelers || !travelStyle || (travelStyle !== "Smart Luxury" && !budgetAmount)) {
@@ -2492,6 +2515,7 @@ app.get("/api/exchange-rates", async (req, res) => {
 
     RATES_CACHE.data = data;
     RATES_CACHE.timestamp = Date.now();
+    setLiveUsdRates(data.rates);
 
     return res.json(data);
   } catch (error: any) {

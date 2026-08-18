@@ -54,13 +54,27 @@ export interface BudgetFeasibilityResult {
 // Conversion happens only after the INR amount has been calculated.
 export type TripCurrencyCode = "INR" | "USD" | "EUR" | "GBP" | "AED" | "JPY";
 
-const INR_PER_CURRENCY_UNIT: Record<TripCurrencyCode, number> = {
-  INR: 1,
-  USD: 85,
-  EUR: 100,
-  GBP: 116,
-  AED: 23.15,
-  JPY: 0.58,
+// Fallback USD-based FX rates. These are used only until the app/server loads
+// the same live rates that power /api/exchange-rates and CurrencyConverter.
+let LIVE_USD_RATES: Record<string, number> = {
+  USD: 1, INR: 85, EUR: 0.92, GBP: 0.78, AED: 3.67, JPY: 161.2,
+};
+
+export const setLiveUsdRates = (rates?: Record<string, unknown> | null): void => {
+  if (!rates) return;
+  const cleaned: Record<string, number> = {};
+  for (const [code, raw] of Object.entries(rates)) {
+    const value = Number(raw);
+    if (Number.isFinite(value) && value > 0) cleaned[code.toUpperCase()] = value;
+  }
+  if (cleaned.USD && cleaned.INR) LIVE_USD_RATES = { ...LIVE_USD_RATES, ...cleaned };
+};
+
+export const getLiveCrossRate = (from: string, to: string): number => {
+  const fromRate = LIVE_USD_RATES[from.toUpperCase()];
+  const toRate = LIVE_USD_RATES[to.toUpperCase()];
+  if (!fromRate || !toRate) return 1;
+  return toRate / fromRate;
 };
 
 const CURRENCY_SYMBOLS: Record<TripCurrencyCode, string> = {
@@ -85,7 +99,7 @@ export const detectCurrencyCode = (str?: string | number, destination?: string):
 
 export const currencySymbolFor = (code: TripCurrencyCode): string => CURRENCY_SYMBOLS[code];
 export const convertInrToTripCurrency = (amountInr: number, code: TripCurrencyCode): number =>
-  amountInr / INR_PER_CURRENCY_UNIT[code];
+  amountInr * getLiveCrossRate("INR", code);
 export const formatTripCurrency = (amount: number, code: TripCurrencyCode): string =>
   `${currencySymbolFor(code)}${Math.round(amount).toLocaleString()}`;
 

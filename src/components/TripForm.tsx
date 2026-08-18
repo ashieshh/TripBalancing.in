@@ -20,7 +20,7 @@ import {
   TravelStyle,
   TripInput,
 } from "../types";
-import { BudgetFeasibilityResult, evaluateBudgetFeasibility } from "../utils/budgetCalculator";
+import { BudgetFeasibilityResult, evaluateBudgetFeasibility, setLiveUsdRates } from "../utils/budgetCalculator";
 import LocationAutocomplete, { LocationSuggestion } from "./LocationAutocomplete";
 
 interface TripFormProps {
@@ -68,6 +68,16 @@ const TRAVEL_STYLES: Array<{ name: TravelStyle; icon: string; description: strin
 const INTERESTS = ["Beach", "Mountains", "Food", "Culture", "Nature", "Shopping", "Nightlife", "Adventure", "Wildlife", "Relaxation"];
 
 export default function TripForm({ onSubmit, loading }: TripFormProps) {
+  // Keep form-side budget estimates on the exact same live FX table as the
+  // Currency Converter. The server uses this endpoint too.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/exchange-rates")
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("FX unavailable")))
+      .then(data => { if (!cancelled && data?.rates) setLiveUsdRates(data.rates); })
+      .catch(() => { /* calculator retains its safe fallback until live FX is available */ });
+    return () => { cancelled = true; };
+  }, []);
   const [planningMode, setPlanningMode] = useState<PlanningMode>("known_destination");
   const [destination, setDestination] = useState("");
   const [origin, setOrigin] = useState("");
