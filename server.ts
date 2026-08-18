@@ -2013,7 +2013,7 @@ Return the response in strict JSON format.`;
   } catch (error: any) {
     console.warn("AI Itinerary Generation Error, providing high-quality custom fallback:", error);
 
-    const { destination, startDate, endDate, tripDays, budgetAmount, travelers, travelStyle, isAiBudgetPlanner } = req.body;
+    const { destination, origin, startDate, endDate, tripDays, budgetAmount, travelers, travelStyle, isAiBudgetPlanner } = req.body;
 
     let diffDays = Number.parseInt(String(tripDays ?? ""), 10);
     if (!Number.isFinite(diffDays) || diffDays <= 0) {
