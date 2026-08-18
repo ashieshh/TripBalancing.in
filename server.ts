@@ -1538,6 +1538,28 @@ Return strict JSON only.`;
 });
 
 // AI Itinerary Generator Endpoint
+function enforceExactTripDays(itinerary: any, exactDays: number) {
+  if (!itinerary || !Number.isFinite(exactDays) || exactDays < 1) return itinerary;
+  const sourceDays = Array.isArray(itinerary.days) ? itinerary.days : [];
+  // Never render/save more days than the user selected. If AI returned fewer
+  // days, repeat the last valid day's structure with a neutral continuation
+  // label so downstream UI/PDF still has exactly the requested count.
+  const days = sourceDays.slice(0, exactDays).map((day: any, index: number) => ({
+    ...day,
+    dayNumber: index + 1,
+  }));
+  while (days.length < exactDays) {
+    const previous = days[days.length - 1] || sourceDays[sourceDays.length - 1] || { activities: [] };
+    days.push({
+      ...previous,
+      dayNumber: days.length + 1,
+      theme: days.length === exactDays - 1 ? "Final Day & Departure" : (previous.theme || `Day ${days.length + 1}`),
+      activities: Array.isArray(previous.activities) ? previous.activities.map((a: any) => ({ ...a })) : [],
+    });
+  }
+  return { ...itinerary, days, tripDays: exactDays };
+}
+
 app.post("/api/generate-itinerary", async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;
   let diffDays = 3;
@@ -1590,7 +1612,7 @@ app.post("/api/generate-itinerary", async (req, res) => {
     const cached = ITINERARY_CACHE.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < ITINERARY_TTL)) {
       console.log(`[Cache Hit] Returning cached itinerary for destination: ${destination} from origin: ${origin || "any"}`);
-      const cachedItinerary = reconcileItineraryBudget({
+      const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays({
         ...cached.data,
         // The request budget is authoritative. Never let cached/AI content switch
         // the trip currency (for example AED planned budget -> USD estimate).
@@ -1607,7 +1629,7 @@ app.post("/api/generate-itinerary", async (req, res) => {
               Math.sin(((geoCoords.longitude - validatedOrigin.longitude) * Math.PI / 180) / 2) ** 2
             )))
           : undefined
-      });
+      }, diffDays));
       return res.json({ itinerary: cachedItinerary });
     }
 
@@ -2001,7 +2023,7 @@ Return the response in strict JSON format.`;
     }
     
     // Store in cache for future identical requests
-    const reconciledItinerary = reconcileItineraryBudget(parsedItinerary);
+    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(parsedItinerary, diffDays));
 
     ITINERARY_CACHE.set(cacheKey, {
       data: reconciledItinerary,
@@ -2298,7 +2320,7 @@ Return the response in strict JSON format.`;
     // Store in cache
     const fallbackCacheKey = `${(destination || "").toLowerCase().trim()}_${origin ? origin.toLowerCase().trim() : ""}_${startDate}_${endDate}_${budgetAmount}_${travelers}_${String(travelStyle || "").toLowerCase().trim()}_${isAiBudgetPlanner ? "ai" : "manual"}`;
     fallbackItinerary.budgetAmount = budgetAmount;
-    const reconciledFallback = reconcileItineraryBudget({ ...fallbackItinerary, plannedBudget: budgetAmount });
+    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays({ ...fallbackItinerary, plannedBudget: budgetAmount }, diffDays));
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,
