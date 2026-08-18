@@ -1,0 +1,14 @@
+TRIPBALANCING — ITINERARY QUALITY & REALISM PHASE
+
+Implemented globally without changing the frozen pricing/currency engine:
+- Geographic day grouping instruction to reduce cross-city backtracking.
+- No repeated major attraction across multiple days.
+- Realistic visit/transfer/buffer timing and no overlapping schedule instruction.
+- Lighter arrival/departure-day planning where appropriate.
+- Opening-hours safety: no fabricated exact live hours; daytime scheduling + verify-live-hours guidance.
+- Hotel/restaurant integrity: no claims of guaranteed live availability/current exact rating/current exact price.
+- Weather integrity: itinerary generation must not fabricate exact future forecasts; dedicated weather service remains source for forecast data.
+- Deterministic post-generation duplicate activity removal across the full trip.
+- If AI returns fewer days than requested, missing days are now safe flexible discovery/departure days instead of duplicated copies of the previous day.
+
+Pricing/currency calculations were intentionally left unchanged.

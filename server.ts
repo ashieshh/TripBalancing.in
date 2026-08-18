@@ -1541,23 +1541,46 @@ Return strict JSON only.`;
 function enforceExactTripDays(itinerary: any, exactDays: number) {
   if (!itinerary || !Number.isFinite(exactDays) || exactDays < 1) return itinerary;
   const sourceDays = Array.isArray(itinerary.days) ? itinerary.days : [];
-  // Never render/save more days than the user selected. If AI returned fewer
-  // days, repeat the last valid day's structure with a neutral continuation
-  // label so downstream UI/PDF still has exactly the requested count.
+  // Never render/save more days than the user selected. If AI unexpectedly
+  // returns fewer days, add a safe flexible day instead of cloning the previous
+  // day's attractions (which created duplicate/illogical itineraries).
   const days = sourceDays.slice(0, exactDays).map((day: any, index: number) => ({
     ...day,
     dayNumber: index + 1,
   }));
   while (days.length < exactDays) {
-    const previous = days[days.length - 1] || sourceDays[sourceDays.length - 1] || { activities: [] };
+    const dayNumber = days.length + 1;
     days.push({
-      ...previous,
-      dayNumber: days.length + 1,
-      theme: days.length === exactDays - 1 ? "Final Day & Departure" : (previous.theme || `Day ${days.length + 1}`),
-      activities: Array.isArray(previous.activities) ? previous.activities.map((a: any) => ({ ...a })) : [],
+      dayNumber,
+      theme: dayNumber === exactDays ? "Flexible Exploration & Departure" : "Flexible Local Discovery",
+      activities: [
+        { time: "09:30 AM / Morning", title: "Flexible neighborhood exploration", description: "Keep this period flexible for a nearby market, park, cafe, or attraction that fits current opening hours and energy levels.", location: itinerary?.destination || "City center", cost: "Free", latitude: itinerary?.latitude, longitude: itinerary?.longitude },
+        { time: "02:00 PM / Afternoon", title: "Local food and free-time block", description: "Use this block for a relaxed local meal and nearby independent exploration without repeating earlier major sights.", location: itinerary?.destination || "City center", cost: "Free", latitude: itinerary?.latitude, longitude: itinerary?.longitude },
+        { time: "06:00 PM / Evening", title: dayNumber === exactDays ? "Departure preparation" : "Relaxed evening walk", description: dayNumber === exactDays ? "Allow enough buffer for packing, checkout and onward transfer." : "Choose a safe nearby promenade or public area and keep the evening light.", location: itinerary?.destination || "City center", cost: "Free", latitude: itinerary?.latitude, longitude: itinerary?.longitude }
+      ],
+      foodRecommendations: ["Choose a well-reviewed nearby local restaurant that matches dietary preferences."],
+      transportationSuggestions: ["Keep travel local and allow buffer time; verify live opening hours and traffic before leaving."],
+      dailyBudget: "Calculated by TripBalancing pricing engine"
     });
   }
   return { ...itinerary, days, tripDays: exactDays };
+}
+
+function improveItineraryQuality(itinerary: any) {
+  if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+  const seen = new Set<string>();
+  const days = itinerary.days.map((day: any) => {
+    const activities = Array.isArray(day.activities) ? day.activities : [];
+    const uniqueActivities = activities.filter((activity: any) => {
+      const key = `${String(activity?.title || "").trim().toLowerCase()}|${String(activity?.location || "").trim().toLowerCase()}`;
+      if (!key || key === "|") return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return { ...day, activities: uniqueActivities };
+  });
+  return { ...itinerary, days };
 }
 
 app.post("/api/generate-itinerary", async (req, res) => {
@@ -1694,6 +1717,11 @@ ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
 CRITICAL MANDATES FOR "AI BUDGET PLANNER ✨" MODE:
 1. The user's selected duration is authoritative: generate EXACTLY ${diffDays} itinerary days. Never add or remove days based on currency or budget display.
 2. Build the itinerary from destination, origin, dates, traveler count and travel style only. The user's display currency MUST NOT influence attractions, hotels, restaurants, daily activities, route, transit choices, or trip pacing.
+2A. ITINERARY REALISM: group each day geographically so consecutive stops are practical; avoid unnecessary cross-city backtracking. Never repeat the same major attraction on multiple days.
+2B. TIME REALISM: schedules must include realistic visit duration plus transfer/buffer time. Do not schedule overlapping activities. Keep arrival/departure days lighter when relevant.
+2C. OPENING-HOURS SAFETY: do not claim exact opening hours unless reliable current data is available. Schedule museums/paid attractions during normal daytime operating windows and label users to verify live hours where hours may vary.
+2D. RECOMMENDATION INTEGRITY: hotels/restaurants must be plausible for the selected destination and style. Do not invent claims such as exact live availability, exact live rating, or guaranteed current price. Prices are estimates.
+2E. WEATHER INTEGRITY: do not invent a future exact weather forecast inside itinerary generation. Use season-appropriate planning language; the app's dedicated weather service supplies live/forecast weather.
 3. Set endDate to ${endDate}. Do not recalculate it from a budget.
 4. Set the field 'isAiBudgetPlanner' to true.
 5. Provide a short 'aiBudgetSummary' explaining that the backend will calculate the recommended ideal budget for this exact ${diffDays}-day trip. Do not choose a different trip because of currency.
@@ -1742,6 +1770,11 @@ ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
 Please tailor the recommendations explicitly:
 1. Since the app serves travelers from India and around the world, provide helpful insights for local Indian travelers (e.g. food options like vegetarian food, flight/train connectivity, visa requirements if international) as well as global details. If a Starting/Origin City (${origin || ""}) is provided, explicitly include customized transit, flight, or train suggestions from ${origin} to ${destination} inside your transit suggestions and daily descriptions.
 2. The day-by-day itinerary must span exactly the duration of the trip (from ${startDate} to ${endDate}). Create specific day schedules with time tags (e.g., morning, afternoon, evening activities).
+2A. ITINERARY REALISM: group each day geographically so consecutive stops are practical; avoid unnecessary cross-city backtracking and never repeat the same major attraction on multiple days.
+2B. TIME REALISM: include realistic visit duration plus transfer/buffer time, avoid overlapping activities, and keep arrival/departure days lighter when appropriate.
+2C. OPENING-HOURS SAFETY: schedule museums and paid attractions during normal daytime operating windows. Do not assert exact current opening hours unless verified; users should verify live hours for date-sensitive venues.
+2D. RECOMMENDATION INTEGRITY: hotels and restaurants must be plausible for the destination/style. Never claim exact live availability, exact live rating, or guaranteed current price; all prices are estimates.
+2E. WEATHER INTEGRITY: do not fabricate exact future weather in itinerary generation. Use season-aware planning only; the dedicated weather service supplies live/forecast conditions.
 3. Every single day in the itinerary MUST contain:
    - Morning, Afternoon, and Evening activities in the 'activities' array (labeled clearly in the 'time' field, e.g. '09:00 AM / Morning', '02:00 PM / Afternoon', '07:00 PM / Evening').
    - Specific local dining/food recommendations for that day ('foodRecommendations' field).
@@ -2052,7 +2085,7 @@ Return the response in strict JSON format.`;
     }
     
     // Store in cache for future identical requests
-    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(parsedItinerary, diffDays));
+    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(improveItineraryQuality(parsedItinerary), diffDays));
 
     ITINERARY_CACHE.set(cacheKey, {
       data: reconciledItinerary,
@@ -2360,7 +2393,7 @@ Return the response in strict JSON format.`;
     ].join("|");
     const fallbackCacheKey = crypto.createHash("sha256").update(fallbackIdentity).digest("hex");
     fallbackItinerary.budgetAmount = budgetAmount;
-    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays({ ...fallbackItinerary, plannedBudget: budgetAmount }, diffDays));
+    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(improveItineraryQuality({ ...fallbackItinerary, plannedBudget: budgetAmount }), diffDays));
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,
