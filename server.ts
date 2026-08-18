@@ -477,13 +477,19 @@ async function searchLocationSuggestions(query: string): Promise<LocationSuggest
 
   type RankedSuggestion = LocationSuggestionResult & { score: number };
   const ranked: RankedSuggestion[] = [];
-  const seen = new Set<string>();
   const q = raw.toLowerCase();
 
+  // Normalize provider output before de-duplication. Nominatim and Open-Meteo
+  // often return the same city with slightly different admin labels/coordinates
+  // (for example "Dubai, Dubai Emirate, UAE" and "Dubai, UAE").
+  const normalizeKeyPart = (value?: string) => String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
   const add = (item: LocationSuggestionResult, score: number) => {
-    const key = `${item.canonicalName.toLowerCase()}|${item.latitude.toFixed(3)}|${item.longitude.toFixed(3)}`;
-    if (seen.has(key)) return;
-    seen.add(key);
     ranked.push({ ...item, score });
   };
 
@@ -545,7 +551,25 @@ async function searchLocationSuggestions(query: string): Promise<LocationSuggest
     console.warn("Open-Meteo location suggestions failed:", error);
   }
 
-  return ranked.sort((a, b) => b.score - a.score).slice(0, 6).map(({ score, ...item }) => item);
+  // Sort first, then collapse duplicates across providers by semantic place identity.
+  // Keep only the highest-ranked version of a city/name within the same country.
+  // This removes duplicated Dubai/Dubai Emirate rows without hiding legitimate
+  // same-name places in different countries.
+  const sorted = ranked.sort((a, b) => b.score - a.score);
+  const unique: RankedSuggestion[] = [];
+  const seenSemantic = new Set<string>();
+  for (const item of sorted) {
+    const nameKey = normalizeKeyPart(item.name);
+    const countryKey = normalizeKeyPart(item.country);
+    if (!nameKey) continue;
+    const semanticKey = `${nameKey}|${countryKey}`;
+    if (seenSemantic.has(semanticKey)) continue;
+    seenSemantic.add(semanticKey);
+    unique.push(item);
+    if (unique.length >= 6) break;
+  }
+
+  return unique.map(({ score, ...item }) => item);
 }
 
 app.get("/api/location-suggestions", async (req, res) => {
@@ -1519,8 +1543,11 @@ app.post("/api/generate-itinerary", async (req, res) => {
   let diffDays = 3;
   try {
     // Currency selection must only convert the same economic trip cost.
-    // Load the exact live FX table used by the Currency Converter before any budget reconciliation.
-    await ensureBudgetFxRates();
+    // IMPORTANT: itinerary generation must NEVER make a live FX network request.
+    // The Currency Converter / TripForm already refreshes /api/exchange-rates and
+    // populates RATES_CACHE. Reuse that cache here so a slow FX provider can never
+    // cause the main trip endpoint to time out or return a host-level HTML 502/504.
+    if (RATES_CACHE.data?.rates) setLiveUsdRates(RATES_CACHE.data.rates);
     const { destination, origin, startDate, endDate, tripDays, budgetAmount, travelers, travelerType, travelStyle, budgetMode, tripPurpose, preferredWeather, interests, visitedDestinations, revisitPreference, planningMode, plan, freeTripsUsed, paidTripsBalance, isAiBudgetPlanner } = req.body;
 
     if (!destination || !startDate || !endDate || !travelers || !travelStyle || (travelStyle !== "Smart Luxury" && !budgetAmount)) {
