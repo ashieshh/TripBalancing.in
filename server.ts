@@ -245,7 +245,17 @@ async function ensureBudgetFxRates(): Promise<void> {
       setLiveUsdRates(RATES_CACHE.data.rates);
       return;
     }
-    const response = await fetch("https://open.er-api.com/v6/latest/USD");
+    // FX refresh must never hold up itinerary generation. On hosts such as
+    // Render an upstream FX outage can otherwise keep this request open until
+    // the platform returns an HTML 502/504 page to the browser.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    let response: Response;
+    try {
+      response = await fetch("https://open.er-api.com/v6/latest/USD", { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!response.ok) return;
     const data: any = await response.json();
     if (data?.result === "success" && data?.rates) {
