@@ -18,7 +18,7 @@ import {
   generateSupportTicketEmail,
   generateBuddyInviteEmail
 } from "./src/services/emailService";
-import { reconcileItineraryBudget, setLiveUsdRates } from "./src/utils/budgetCalculator";
+import { reconcileItineraryBudget, setLiveUsdRates, getLiveCrossRate, detectCurrencyCode, parseNumericValue } from "./src/utils/budgetCalculator";
 
 dotenv.config();
 
@@ -1578,6 +1578,18 @@ app.post("/api/generate-itinerary", async (req, res) => {
 
     const effectiveBudgetAmount = budgetAmount || "INR AI Recommended";
 
+    // Currency is a DISPLAY choice, never an itinerary/content choice.
+    // Normalize any fixed budget to canonical INR for cache/prompt identity so
+    // economically equivalent AED/INR/USD/etc. requests reuse the same trip.
+    const requestCurrency = detectCurrencyCode(effectiveBudgetAmount, destination);
+    const requestBudgetNumeric = parseNumericValue(effectiveBudgetAmount);
+    const canonicalBudgetInr = isAiBudgetPlanner
+      ? 0
+      : Math.round(requestBudgetNumeric * getLiveCrossRate(requestCurrency, "INR"));
+    const canonicalBudgetForAi = isAiBudgetPlanner
+      ? "AI Recommended Budget (currency-neutral; pricing is reconciled by the backend)"
+      : `INR ${canonicalBudgetInr.toLocaleString()} (canonical economic budget)`;
+
     // The explicit Trip Duration field is authoritative. Dates are only a
     // secondary fallback for older clients. This prevents a selected 5-day
     // trip from becoming 4 days because of date math/timezones/AI output.
@@ -1608,7 +1620,23 @@ app.post("/api/generate-itinerary", async (req, res) => {
     geoCoords = { latitude: validatedDestination.latitude!, longitude: validatedDestination.longitude! };
 
     // 1. Check Itinerary Cache first to prevent redundant generations and reduce response time
-    const cacheKey = `${destination.toLowerCase().trim()}_${origin ? origin.toLowerCase().trim() : ""}_${startDate}_${endDate}_${diffDays}d_${effectiveBudgetAmount}_${travelers}_${String(travelStyle).toLowerCase().trim()}_${isAiBudgetPlanner ? "ai" : "manual"}`;
+    const contentIdentity = [
+      destination.toLowerCase().trim(),
+      origin ? origin.toLowerCase().trim() : "",
+      startDate, endDate, `${diffDays}d`,
+      isAiBudgetPlanner ? "ai-recommended" : `fixed-inr-${canonicalBudgetInr}`,
+      String(travelers),
+      String(travelerType || "").toLowerCase().trim(),
+      String(travelStyle || "").toLowerCase().trim(),
+      String(budgetMode || "").toLowerCase().trim(),
+      String(tripPurpose || "").toLowerCase().trim(),
+      String(preferredWeather || "").toLowerCase().trim(),
+      Array.isArray(interests) ? [...interests].map(String).map(v => v.toLowerCase().trim()).sort().join(",") : "",
+      String(planningMode || "").toLowerCase().trim(),
+      Array.isArray(visitedDestinations) ? [...visitedDestinations].map(String).map(v => v.toLowerCase().trim()).sort().join(",") : "",
+      String(revisitPreference || "").toLowerCase().trim(),
+    ].join("|");
+    const cacheKey = crypto.createHash("sha256").update(contentIdentity).digest("hex");
     const cached = ITINERARY_CACHE.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < ITINERARY_TTL)) {
       console.log(`[Cache Hit] Returning cached itinerary for destination: ${destination} from origin: ${origin || "any"}`);
@@ -1658,18 +1686,18 @@ app.post("/api/generate-itinerary", async (req, res) => {
 Target Details:
 - Destination: ${destination}
 ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
-- Budget Level/Amount: ${effectiveBudgetAmount}
+- Canonical Economic Budget: ${canonicalBudgetForAi}
 - Travelers: ${travelers} people
 - Travel Style: Budget (Optimized by AI Budget Planner)
 - Start Date: ${startDate}
 
 CRITICAL MANDATES FOR "AI BUDGET PLANNER ✨" MODE:
-1. Automatically calculate the maximum number of travel days that can comfortably fit within the total budget of ${budgetAmount} for ${travelers} people, given typical budget expenses (economy hotels/hostels, cheap street food, public transport, free/low-cost sights) at ${destination}. If an Origin/Starting City is provided, factor in estimated travel costs from ${origin} to ${destination} (such as trains or flights) inside your overall budget estimation.
-2. Generate a complete day-by-day itinerary spanning exactly this calculated maximum number of days starting from ${startDate}. Create specific day schedules with morning, afternoon, and evening activities. Keep daily descriptions concise but complete.
-3. Determine the end date of the trip and set it as the 'endDate' field (format: YYYY-MM-DD), matching ${startDate} plus the calculated number of days minus 1.
+1. The user's selected duration is authoritative: generate EXACTLY ${diffDays} itinerary days. Never add or remove days based on currency or budget display.
+2. Build the itinerary from destination, origin, dates, traveler count and travel style only. The user's display currency MUST NOT influence attractions, hotels, restaurants, daily activities, route, transit choices, or trip pacing.
+3. Set endDate to ${endDate}. Do not recalculate it from a budget.
 4. Set the field 'isAiBudgetPlanner' to true.
-5. Provide a personalized summary message explaining the budget fit, and save it in the field 'aiBudgetSummary'. Example: "With your budget of ${budgetAmount}, you can comfortably travel for 5 days and 4 nights." Localize this explicitly.
-6. Provide the calculated maximum number of days in the field 'maxDaysComfortable'.
+5. Provide a short 'aiBudgetSummary' explaining that the backend will calculate the recommended ideal budget for this exact ${diffDays}-day trip. Do not choose a different trip because of currency.
+6. Set 'maxDaysComfortable' to ${diffDays}.
 7. Savor regional budget specialties, street food, and economy dining, explicitly labeling veg/non-veg.
 8. Savor highly realistic budget cost ranges for 6 categories (Accommodation, Food, Local Transport, Sights, Misc, and originToDestinationTravel which estimates realistic flight/train transit costs from ${origin || "starting city"} to ${destination} for ${travelers} travelers, set to 'N/A' if no starting city is provided) in 'estimatedBudgetBreakdown', and ensure they represent economy class choices. The 'total' field in 'estimatedBudgetBreakdown' must be the sum of all 6 categories including originToDestinationTravel!
 9. Under 'hotelRecommendations', recommend 3 Budget, 3 Mid-range, and 3 Luxury Hotels.
@@ -1699,7 +1727,7 @@ Target Details:
 - Destination: ${destination}
 ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
 - Duration: From ${startDate} to ${endDate} (${diffDays} days)
-- Budget Level/Amount: ${effectiveBudgetAmount}
+- Canonical Economic Budget: ${canonicalBudgetForAi}
 - Travelers: ${travelers} people
 - Traveler Type: ${travelerType || "Not specified"}
 - Travel Style: ${travelStyle}
@@ -1709,6 +1737,7 @@ ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
 - Interests: ${Array.isArray(interests) ? interests.join(", ") : "General"}
 - Planning Mode: ${planningMode || "known_destination"}
 - Style Planning Rules: ${selectedStyleGuidance}
+- IMPORTANT: Display currency is intentionally excluded from trip-content generation. The same economic trip must have the same hotels, attractions, meals, activities and route regardless of whether the user later views INR, AED, USD, EUR, GBP or JPY.
 
 Please tailor the recommendations explicitly:
 1. Since the app serves travelers from India and around the world, provide helpful insights for local Indian travelers (e.g. food options like vegetarian food, flight/train connectivity, visa requirements if international) as well as global details. If a Starting/Origin City (${origin || ""}) is provided, explicitly include customized transit, flight, or train suggestions from ${origin} to ${destination} inside your transit suggestions and daily descriptions.
@@ -1730,7 +1759,7 @@ Please tailor the recommendations explicitly:
      * Miscellaneous expenses (shopping, souvenirs, emergency funds, local SIM cards)
      * originToDestinationTravel (realistic round-trip flight/train transit costs from ${origin || "starting city"} to ${destination} for ${travelers} travelers, set to 'N/A' if no starting city is provided)
    - The "total" budget must also be a range representing the sum of all 6 categories, explicitly including the originToDestinationTravel cost if an origin is provided!
-   - CURRENCY CONSISTENCY IS MANDATORY: use the SAME currency as the user's Budget Level/Amount (${effectiveBudgetAmount}) for every monetary value in the response. Respect the explicit currency code in the Budget Level/Amount (INR, USD, AED, EUR, GBP or JPY) for every monetary value. Never change only a currency symbol, never mix currencies, and never replace the selected trip currency with the destination-local currency.
+   - CURRENCY-INDEPENDENT CONTENT IS MANDATORY: the user's display currency must not affect any recommendation. For schema-required monetary strings, use canonical INR placeholders only. The backend will replace/reconcile every displayed price into the user's selected currency after generation.
 7. List essential packing items suitable for the destination's climate during those dates.
 8. Provide essential transportation suggestions for getting around.
 9. List very practical travel tips, safety hacks, and cultural etiquettes.
@@ -1739,7 +1768,7 @@ Please tailor the recommendations explicitly:
 9C. For Smart Luxury, set budgetAmount to the Recommended Smart Luxury total and explain Minimum Luxury, Recommended Smart Luxury and Premium Luxury in aiBudgetSummary.
 
 10. CURATED COST BREAKDOWN AND RECOMMENDATIONS (MANDATORY):
-   - Under 'hotelRecommendations', recommend 3 Budget, 3 Mid-range, and 3 Luxury Hotels. Each hotel must have a name, pricePerNight in the SAME currency as the user's Budget Level/Amount, rating (1.0 to 5.0), distanceFromCenter, and bookingLink (a placeholder searching booking.com for that hotel name).
+   - Under 'hotelRecommendations', recommend 3 Budget, 3 Mid-range, and 3 Luxury Hotels. Each hotel must have a name, pricePerNight as a canonical INR placeholder; the backend will convert it for display, rating (1.0 to 5.0), distanceFromCenter, and bookingLink (a placeholder searching booking.com for that hotel name).
    - Under 'detailedTransportationCosts', estimate realistic fares for: taxiStart, taxiPerKm, autoRickshaw (where available, otherwise N/A), busFare, metroFare (where available, otherwise N/A), trainFare (where available, otherwise N/A), scooterRental (per day), carRental (per day), and airportTransfer.
    - Under 'foodBudgetDaily', estimate daily costs for: budget, midRange, and luxury travelers.
    - Under 'attractionCosts', estimate entry fees for each landmark in 'placesToVisit' as a list of { name, fee }.
@@ -2318,7 +2347,18 @@ Return the response in strict JSON format.`;
     };
 
     // Store in cache
-    const fallbackCacheKey = `${(destination || "").toLowerCase().trim()}_${origin ? origin.toLowerCase().trim() : ""}_${startDate}_${endDate}_${budgetAmount}_${travelers}_${String(travelStyle || "").toLowerCase().trim()}_${isAiBudgetPlanner ? "ai" : "manual"}`;
+    const fallbackCurrency = detectCurrencyCode(budgetAmount || "INR", destination);
+    const fallbackBudgetNum = parseNumericValue(budgetAmount);
+    const fallbackCanonicalBudgetInr = isAiBudgetPlanner ? 0 : Math.round(fallbackBudgetNum * getLiveCrossRate(fallbackCurrency, "INR"));
+    const fallbackIdentity = [
+      (destination || "").toLowerCase().trim(),
+      origin ? origin.toLowerCase().trim() : "",
+      startDate, endDate, `${diffDays}d`,
+      isAiBudgetPlanner ? "ai-recommended" : `fixed-inr-${fallbackCanonicalBudgetInr}`,
+      String(travelers),
+      String(travelStyle || "").toLowerCase().trim(),
+    ].join("|");
+    const fallbackCacheKey = crypto.createHash("sha256").update(fallbackIdentity).digest("hex");
     fallbackItinerary.budgetAmount = budgetAmount;
     const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays({ ...fallbackItinerary, plannedBudget: budgetAmount }, diffDays));
 
