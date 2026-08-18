@@ -232,7 +232,9 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   // 6. Visa & Travel Insurance per traveler (One-time)
   let visaInsurancePerPerson = 0;
   if (isInternational) {
-    visaInsurancePerPerson = tier === 1 ? 16500 : 6500;
+    // Do not guess passport/nationality-specific visa fees. Keep only a modest
+    // generic travel-protection/admin allowance so the estimate is not dominated by documents.
+    visaInsurancePerPerson = 1200;
   } else {
     visaInsurancePerPerson = 600; // Basic trip insurance/pass
   }
@@ -431,9 +433,9 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     grandTotal: calculated.formatted.grandTotal
   };
 
-  // Reconcile day-by-day budgets using the same allocation rules as the PDF.
-  // Shared costs are spread across days, activity costs follow the actual day,
-  // and long-distance travel + visa/insurance are assigned to Day 1.
+  // Reconcile day-by-day ON-TRIP spend. Long-distance travel and travel
+  // protection are trip-level costs and stay in the trip summary; they must not
+  // make Day 1 look artificially expensive.
   if (Array.isArray(itinerary.days) && itinerary.days.length > 0) {
     const dayCount = itinerary.days.length;
     const parseMoney = (value: any): number => {
@@ -447,6 +449,7 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       return activities.reduce((sum: number, activity: any) => sum + parseMoney(activity.cost), 0);
     });
     const allActivitySubtotal = activitySubtotals.reduce((sum: number, value: number) => sum + value, 0);
+    const destinationSpendTotal = calculated.hotel + calculated.food + calculated.localTransport + calculated.sightseeing + calculated.miscellaneous;
     const sharedDaily = (calculated.hotel + calculated.food + calculated.localTransport + calculated.miscellaneous) / dayCount;
     let allocatedSoFar = 0;
 
@@ -454,11 +457,10 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       const allocatedActivities = allActivitySubtotal > 0
         ? calculated.sightseeing * activitySubtotals[idx] / allActivitySubtotal
         : calculated.sightseeing / dayCount;
-      const tripLevelCosts = idx === 0 ? calculated.flight + calculated.visaAndInsurance : 0;
-      const rawDayTotal = sharedDaily + allocatedActivities + tripLevelCosts;
+      const rawDayTotal = sharedDaily + allocatedActivities;
       const isLastDay = idx === dayCount - 1;
       const dayAlloc = isLastDay
-        ? Math.max(0, Math.round(grandTotalNum - allocatedSoFar))
+        ? Math.max(0, Math.round(destinationSpendTotal - allocatedSoFar))
         : Math.max(0, Math.round(rawDayTotal));
       allocatedSoFar += dayAlloc;
       const formattedDay = `${currencySym}${dayAlloc.toLocaleString()}`;

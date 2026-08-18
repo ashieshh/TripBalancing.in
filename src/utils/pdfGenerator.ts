@@ -858,7 +858,7 @@ const estimateFoodPriceRange = (
       : style.includes("budget")
         ? 1800
         : 5000;
-  const baseMeal = Math.max(150, perPersonDaily / 3);
+  const baseMeal = Math.max(1, perPersonDaily / 3);
 
   const text = `${food?.name || ""} ${food?.description || ""} ${food?.mustTryAt || ""}`.toLowerCase();
   let lowFactor = 0.55;
@@ -877,7 +877,7 @@ const estimateFoodPriceRange = (
 
   const variation = 1 + ((itemIndex % 3) - 1) * 0.08;
   const roundNice = (value: number) => {
-    const step = value >= 5000 ? 500 : value >= 1000 ? 100 : 50;
+    const step = value >= 5000 ? 500 : value >= 1000 ? 100 : value >= 200 ? 10 : value >= 50 ? 5 : 1;
     return Math.max(step, Math.round(value / step) * step);
   };
 
@@ -1001,13 +1001,14 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
   const daysData = itinerary.days || [];
   const totalDays = daysData.length || 1;
 
-  // Build genuine day-specific costs instead of dividing the grand total evenly.
-  // Shared trip costs are spread across days; activity costs follow each day's actual itinerary.
+  // Build genuine day-specific destination spend. Flight/intercity travel and
+  // travel protection remain trip-level summary costs instead of being dumped into Day 1.
   const activitySubtotals = daysData.map((day: any) => {
     const activities = Array.isArray(day.activities) ? day.activities : [];
     return activities.reduce((sum: number, act: any) => sum + parseVal(act.cost), 0);
   });
   const allActivitySubtotal = activitySubtotals.reduce((sum: number, value: number) => sum + value, 0);
+  const destinationSpendTotal = acc + food + localTransport + activitiesBudget + miscellaneous;
   const sharedDaily = totalDays > 0 ? (acc + food + localTransport + miscellaneous) / totalDays : 0;
   let allocatedSoFar = 0;
 
@@ -1025,12 +1026,10 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
     const allocatedActivities = allActivitySubtotal > 0
       ? (activitiesBudget * activitySubtotal / allActivitySubtotal)
       : (totalDays > 0 ? activitiesBudget / totalDays : 0);
-    // Long-distance travel and visa/insurance are trip-level costs, shown on Day 1.
-    const tripLevelCosts = dayIndex === 0 ? flight + visaInsurance : 0;
-    const rawDayTotal = sharedDaily + allocatedActivities + tripLevelCosts;
+    const rawDayTotal = sharedDaily + allocatedActivities;
     const isLastDay = dayIndex === daysData.length - 1;
-    const allocatedDayTotal = calculatedTotal > 0
-      ? (isLastDay ? Math.max(0, calculatedTotal - allocatedSoFar) : Math.round(rawDayTotal))
+    const allocatedDayTotal = destinationSpendTotal > 0
+      ? (isLastDay ? Math.max(0, destinationSpendTotal - allocatedSoFar) : Math.round(rawDayTotal))
       : Math.round(rawDayTotal || activitySubtotal);
 
     allocatedSoFar += allocatedDayTotal;
@@ -2292,7 +2291,7 @@ export const exportPremiumTravelPDF = async (
       doc.setFont("helvetica", "bold");
       doc.setFontSize(6);
       doc.setTextColor(100, 116, 139);
-      doc.text(`Daily total includes accommodation, meals, transport, activities and allocated trip overhead.`, marginX + 8, y + 21);
+      doc.text(`Daily total covers destination spend: accommodation, meals, local transport and activities. Flights and trip-level protection are shown separately.`, marginX + 8, y + 21);
 
       y += 28;
     });
