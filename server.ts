@@ -1616,44 +1616,86 @@ function applySmartRouteAndTransport(itinerary: any) {
     const h=Math.sin(dLat/2)**2 + Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2;
     return 6371*2*Math.asin(Math.sqrt(h));
   };
-  const routeMode = (km: number | null) => {
-    if (km == null) return { mode: 'Local transit', minutes: 25 };
-    if (km <= 0.8) return { mode: 'Walk', minutes: Math.max(5, Math.round(km/4.5*60)) };
-    if (km <= 3) return { mode: 'Walk / short taxi', minutes: Math.max(10, Math.round(km/18*60)+6) };
-    if (km <= 12) return { mode: 'Metro / bus / taxi', minutes: Math.max(15, Math.round(km/24*60)+10) };
-    if (km <= 40) return { mode: 'Taxi / rideshare / public transit', minutes: Math.max(30, Math.round(km/32*60)+15) };
-    return { mode: 'Private transfer / tour vehicle', minutes: Math.max(60, Math.round(km/50*60)+20) };
+  const parseTimeMinutes = (value: any, fallbackIndex: number) => {
+    const text=String(value||'').trim().toUpperCase();
+    const m=text.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);
+    if (!m) return 9*60 + fallbackIndex*150;
+    let h=Number(m[1])%12; const min=Number(m[2]||0); if(m[3]==='PM') h+=12;
+    return h*60+min;
   };
-  const fmt = (m: number) => m >= 60 ? `${Math.floor(m/60)}h ${m%60 ? `${m%60}m` : ''}`.trim() : `${m} min`;
-  const visitDuration = (activity: any) => {
-    const t=`${activity?.title||''} ${activity?.description||''}`.toLowerCase();
-    if (/museum|gallery|palace|fort|temple|mosque|church|centre|center/.test(t)) return '1.5–2 hours';
+  const textOf=(a:any)=>`${a?.title||''} ${a?.location||''} ${a?.description||''}`.toLowerCase();
+  const isRemote=(a:any)=>/(airport|gobustan|mud volcano|ateshgah|yanar dag|national park|peninsula|day trip|excursion|safari|countryside|outside the city)/.test(textOf(a));
+  const isOldCity=(a:any)=>/(old city|icherisheher|maiden tower|shirvanshah)/.test(textOf(a));
+  const routeMode = (prev:any, cur:any, km: number | null) => {
+    if (isOldCity(prev) && isOldCity(cur)) return { mode:'Walk', minutes: km==null?8:Math.max(5,Math.round(km/4.5*60)) };
+    if (isRemote(prev) || isRemote(cur)) {
+      if (km!=null && km<=2) return { mode:'Walk / short taxi', minutes:Math.max(8,Math.round(km/18*60)+5) };
+      return { mode:'Taxi / rideshare / tour transfer', minutes: km==null?35:Math.max(25,Math.round(km/38*60)+10) };
+    }
+    if (km == null) return { mode:'Walk / taxi / public transit', minutes:20 };
+    if (km <= 0.9) return { mode:'Walk', minutes:Math.max(5,Math.round(km/4.5*60)) };
+    if (km <= 3) return { mode:'Walk / short taxi', minutes:Math.max(10,Math.round(km/18*60)+6) };
+    if (km <= 12) return { mode:'Taxi / public transit', minutes:Math.max(15,Math.round(km/25*60)+8) };
+    if (km <= 40) return { mode:'Taxi / rideshare', minutes:Math.max(25,Math.round(km/34*60)+10) };
+    return { mode:'Private transfer / tour vehicle', minutes:Math.max(50,Math.round(km/50*60)+20) };
+  };
+  const fmt=(m:number)=>m>=60?`${Math.floor(m/60)}h ${m%60?`${m%60}m`:''}`.trim():`${m} min`;
+  const visitDuration=(a:any)=>{
+    const t=textOf(a);
+    if (/museum|gallery|palace|fort|temple|mosque|church|centre|center|tower/.test(t)) return '1–2 hours';
     if (/hike|trek|excursion|day trip|national park|gobustan|safari/.test(t)) return '2–4 hours';
-    if (/market|bazaar|shopping|boulevard|promenade|walk|stroll|square/.test(t)) return '1–1.5 hours';
-    if (/lunch|dinner|breakfast|restaurant|cafe|food/.test(t)) return '1–1.5 hours';
+    if (/market|bazaar|shopping|boulevard|promenade|walk|stroll|square/.test(t)) return '45–90 min';
+    if (/lunch|dinner|breakfast|restaurant|cafe|food|tea/.test(t)) return '60–90 min';
     return '1–2 hours';
   };
   const days=itinerary.days.map((day:any)=>{
     const source=Array.isArray(day.activities)?day.activities:[];
-    if (!source.length) return day;
-    // Keep the first stop chosen by the planner, then greedily choose the nearest remaining stop.
-    const ordered=[source[0]], remaining=source.slice(1);
-    while (remaining.length) {
-      const prev=ordered[ordered.length-1];
-      let best=0, bestD=Infinity;
-      remaining.forEach((x:any,i:number)=>{ const d=distanceKm(prev,x); if(d!=null && d<bestD){bestD=d;best=i;} });
-      ordered.push(remaining.splice(best,1)[0]);
-    }
+    if(!source.length) return day;
+    // Time is authoritative for the visible schedule. Never geographically reorder
+    // activities without also rebuilding their times; that caused 14:30 before 12:00.
+    const ordered=source.map((a:any,i:number)=>({...a,__order:i,__mins:parseTimeMinutes(a?.time,i)}))
+      .sort((a:any,b:any)=>a.__mins-b.__mins || a.__order-b.__order)
+      .map(({__order,__mins,...a}:any)=>a);
     const activities=ordered.map((a:any,i:number)=>{
-      if(i===0) return {...a, visitDuration: a.visitDuration || visitDuration(a), transportFromPrevious: 'Start of day', travelTimeFromPrevious: '—'};
-      const km=distanceKm(ordered[i-1],a); const r=routeMode(km);
-      return {...a, visitDuration: a.visitDuration || visitDuration(a), transportFromPrevious:r.mode, travelTimeFromPrevious:fmt(r.minutes), distanceFromPreviousKm: km==null?undefined:Math.round(km*10)/10};
+      if(i===0) return {...a,visitDuration:a.visitDuration||visitDuration(a),transportFromPrevious:'Start of day',travelTimeFromPrevious:'—',distanceFromPreviousKm:undefined};
+      const km=distanceKm(ordered[i-1],a); const r=routeMode(ordered[i-1],a,km);
+      return {...a,visitDuration:a.visitDuration||visitDuration(a),transportFromPrevious:r.mode,travelTimeFromPrevious:fmt(r.minutes),distanceFromPreviousKm:km==null?undefined:Math.round(km*10)/10};
     });
     const tips=activities.slice(1).map((a:any)=>`${a.transportFromPrevious}: about ${a.travelTimeFromPrevious} from the previous stop${a.distanceFromPreviousKm!=null?` (${a.distanceFromPreviousKm} km)`:''}.`);
-    return {...day, activities, transportationSuggestions: tips.length?tips:day.transportationSuggestions};
+    return {...day,activities,transportationSuggestions:tips.length?tips:day.transportationSuggestions};
   });
-  return {...itinerary, days};
+  return {...itinerary,days};
 }
+
+// Resolve a user-facing city/place name to a Travelpayouts IATA city/airport code.
+// The official autocomplete endpoint is intentionally proxied server-side so the
+// React app does not depend on third-party CORS behavior.
+const TP_LOCATION_CACHE = new Map<string, { code: string; name: string; expires: number }>();
+app.get('/api/travelpayouts/resolve-location', async (req, res) => {
+  try {
+    const term=String(req.query.term||'').trim();
+    if(!term) return res.status(400).json({error:'Missing term'});
+    const key=term.toLowerCase(); const cached=TP_LOCATION_CACHE.get(key);
+    if(cached && cached.expires>Date.now()) return res.json({code:cached.code,name:cached.name,cached:true});
+    const cityTerm=term.split(',')[0].trim();
+    const url=`https://autocomplete.travelpayouts.com/places2?locale=en&types%5B%5D=city&types%5B%5D=airport&term=${encodeURIComponent(cityTerm)}`;
+    const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),3500);
+    const r=await fetch(url,{signal:controller.signal,headers:{'Accept':'application/json'}}); clearTimeout(timer);
+    if(!r.ok) throw new Error(`Travelpayouts autocomplete HTTP ${r.status}`);
+    const rows:any[]=await r.json();
+    const city=rows.find((x:any)=>x?.type==='city' && x?.code);
+    const airport=rows.find((x:any)=>x?.type==='airport' && (x?.city_code||x?.code));
+    const hit=city||airport;
+    const code=String(hit?.code||hit?.city_code||'').toUpperCase();
+    if(!code) return res.status(404).json({error:'No flight location code found'});
+    const payload={code,name:String(hit?.city_name||hit?.name||cityTerm),expires:Date.now()+24*60*60*1000};
+    TP_LOCATION_CACHE.set(key,payload);
+    return res.json({code:payload.code,name:payload.name,cached:false});
+  } catch(err:any) {
+    console.warn('[Travelpayouts location resolver]',err?.message||err);
+    return res.status(502).json({error:'Unable to resolve flight location right now'});
+  }
+});
 
 app.post("/api/generate-itinerary", async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;

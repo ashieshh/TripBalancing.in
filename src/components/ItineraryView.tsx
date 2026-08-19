@@ -1980,9 +1980,6 @@ export default function ItineraryView({
               </div>
             </div>
 
-            {/* Live affiliate flight search. This is intentionally separate from the estimated budget. */}
-            <LiveFlightSearch itinerary={itinerary} />
-
             {/* Travel & Safety Tips */}
             <div className="space-y-4 border-t border-slate-100 dark:border-slate-900 pt-6">
               <div className="flex items-center gap-2">
@@ -2024,11 +2021,14 @@ export default function ItineraryView({
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Loading Budget Breakdown Chart...</span>
             </div>
           }>
-            <BudgetBreakdownChart 
-              breakdown={itinerary.estimatedBudgetBreakdown} 
-              loggedExpenses={itinerary.loggedExpenses || []}
-              itinerary={itinerary}
-            />
+            <div className="space-y-6">
+              <BudgetBreakdownChart 
+                breakdown={itinerary.estimatedBudgetBreakdown} 
+                loggedExpenses={itinerary.loggedExpenses || []}
+                itinerary={itinerary}
+              />
+              <LiveFlightSearch itinerary={itinerary} />
+            </div>
           </Suspense>
         )}
 

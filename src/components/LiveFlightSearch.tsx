@@ -1,85 +1,25 @@
-import React, { useEffect, useMemo, useRef } from "react";
-import { PlaneTakeoff, ExternalLink } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { PlaneTakeoff, ExternalLink, RefreshCw, AlertCircle } from "lucide-react";
 import { Itinerary } from "../types";
 
-const currencyFromBudget = (value?: string) => {
-  const text = String(value || "").toUpperCase();
-  if (text.includes("AED")) return "aed";
-  if (text.includes("EUR") || text.includes("€")) return "eur";
-  if (text.includes("GBP") || text.includes("£")) return "gbp";
-  if (text.includes("JPY") || text.includes("¥")) return "jpy";
-  if (text.includes("USD") || text.includes("$")) return "usd";
-  return "inr";
-};
+const currencyFromBudget=(value?:string)=>{const t=String(value||"").toUpperCase();if(t.includes("AED"))return"aed";if(t.includes("EUR")||t.includes("€"))return"eur";if(t.includes("GBP")||t.includes("£"))return"gbp";if(t.includes("JPY")||t.includes("¥"))return"jpy";if(t.includes("USD")||t.includes("$"))return"usd";return"inr";};
+const prettyDate=(v?:string)=>{if(!v)return"";const d=new Date(`${v}T00:00:00`);return Number.isNaN(d.getTime())?v:d.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"});};
+const resolveCode=async(term:string)=>{const r=await fetch(`/api/travelpayouts/resolve-location?term=${encodeURIComponent(term)}`);if(!r.ok)throw new Error("Could not resolve airport/city");const j=await r.json();return String(j.code||"").toUpperCase();};
 
-// Travelpayouts accepts city/airport names in from_name/to_name. Keep the user's
-// real trip locations rather than maintaining a fragile hard-coded airport list.
-const widgetLocation = (value?: string) => String(value || "").trim();
-
-export default function LiveFlightSearch({ itinerary }: { itinerary: Itinerary }) {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const origin = widgetLocation(itinerary.origin);
-  const destination = widgetLocation(itinerary.destination);
-  const currency = currencyFromBudget(itinerary.budgetAmount || itinerary.estimatedBudgetBreakdown?.total);
-
-  const src = useMemo(() => {
-    if (!origin || !destination || !itinerary.startDate || !itinerary.endDate) return "";
-    const params = new URLSearchParams({
-      currency,
-      trs: "563908",
-      shmarker: "766498",
-      powered_by: "true",
-      locale: "en",
-      from_name: origin,
-      to_name: destination,
-      departure: itinerary.startDate,
-      return: itinerary.endDate,
-      show_header: "true",
-      limit: "3",
-      primary_color: "00AE98",
-      results_background_color: "FFFFFF",
-      form_background_color: "FFFFFF",
-      campaign_id: "111",
-      promo_id: "4478",
-    });
-    return `https://tpemd.com/content?${params.toString()}`;
-  }, [origin, destination, itinerary.startDate, itinerary.endDate, currency]);
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host || !src) return;
-    host.innerHTML = "";
-    const script = document.createElement("script");
-    script.async = true;
-    script.src = src;
-    script.charset = "utf-8";
-    script.setAttribute("data-tripbalancing-flight-widget", "true");
-    host.appendChild(script);
-    return () => { host.innerHTML = ""; };
-  }, [src]);
-
-  if (!src) return null;
-
-  return (
-    <section className="space-y-4 border-t border-slate-100 dark:border-slate-900 pt-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <PlaneTakeoff className="w-5 h-5 text-teal-500" />
-            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200">Check Live Flights</h3>
-          </div>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            {origin} → {destination} · {itinerary.startDate} to {itinerary.endDate} · {itinerary.travelers || 1} traveler{(itinerary.travelers || 1) === 1 ? "" : "s"}
-          </p>
-        </div>
-        <ExternalLink className="w-4 h-4 text-slate-400" />
-      </div>
-      <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white min-h-[260px]">
-        <div ref={hostRef} className="w-full" />
-      </div>
-      <p className="text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
-        Live search results are provided by Kiwi.com through Travelpayouts. Prices and availability can change at booking. The planned budget above remains TripBalancing's estimate until a live fare is selected.
-      </p>
-    </section>
-  );
+export default function LiveFlightSearch({itinerary}:{itinerary:Itinerary}){
+  const hostRef=useRef<HTMLDivElement>(null); const [fromCode,setFromCode]=useState(""); const [toCode,setToCode]=useState(""); const [status,setStatus]=useState<"loading"|"ready"|"error">("loading"); const [widgetLoaded,setWidgetLoaded]=useState(false);
+  const origin=String(itinerary.origin||"").trim(), destination=String(itinerary.destination||"").trim();
+  const currency=currencyFromBudget(itinerary.budgetAmount||itinerary.estimatedBudgetBreakdown?.total);
+  useEffect(()=>{let cancelled=false;setStatus("loading");setWidgetLoaded(false);Promise.all([resolveCode(origin),resolveCode(destination)]).then(([a,b])=>{if(cancelled)return;setFromCode(a);setToCode(b);setStatus(a&&b?"ready":"error");}).catch(()=>!cancelled&&setStatus("error"));return()=>{cancelled=true};},[origin,destination]);
+  const src=useMemo(()=>{if(status!=="ready"||!fromCode||!toCode||!itinerary.startDate||!itinerary.endDate)return"";const p=new URLSearchParams({currency,trs:"563908",shmarker:"766498",powered_by:"true",locale:"en",from_name:fromCode,to_name:toCode,departure:itinerary.startDate,return:itinerary.endDate,show_header:"true",adults:String(Math.max(1,itinerary.travelers||1)),children:"0",limit:"3",primary_color:"00AE98",results_background_color:"FFFFFF",form_background_color:"FFFFFF",campaign_id:"111",promo_id:"4478"});return`https://tpemd.com/content?${p.toString()}`;},[status,fromCode,toCode,itinerary.startDate,itinerary.endDate,currency]);
+  const affiliateHref=useMemo(()=>{if(!fromCode||!toCode)return"";const kiwi=`https://www.kiwi.com/deep?from=${encodeURIComponent(fromCode)}&to=${encodeURIComponent(toCode)}&departure=${encodeURIComponent(itinerary.startDate)}&return=${encodeURIComponent(itinerary.endDate)}`;return`https://c111.travelpayouts.com/click?shmarker=766498.flight_live&promo_id=3791&source_type=customlink&type=click&custom_url=${encodeURIComponent(kiwi)}`;},[fromCode,toCode,itinerary.startDate,itinerary.endDate]);
+  useEffect(()=>{const host=hostRef.current;if(!host||!src)return;host.innerHTML="";const script=document.createElement("script");script.async=true;script.src=src;script.charset="utf-8";script.setAttribute("data-tripbalancing-flight-widget","true");script.onload=()=>setWidgetLoaded(true);script.onerror=()=>setWidgetLoaded(false);host.appendChild(script);const timeout=window.setTimeout(()=>setWidgetLoaded(true),5000);return()=>{window.clearTimeout(timeout);host.innerHTML="";};},[src]);
+  if(!origin||!destination||!itinerary.startDate||!itinerary.endDate)return null;
+  return <section id="live-flights" className="space-y-4 rounded-3xl border border-teal-200/70 dark:border-teal-900/60 bg-teal-50/30 dark:bg-teal-950/10 p-5">
+    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3"><div><div className="flex items-center gap-2"><PlaneTakeoff className="w-5 h-5 text-teal-500"/><h3 className="text-lg font-bold text-slate-800 dark:text-slate-200">Live Flight Search</h3></div><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{origin} → {destination} · {prettyDate(itinerary.startDate)} – {prettyDate(itinerary.endDate)} · {itinerary.travelers||1} traveler{(itinerary.travelers||1)===1?"":"s"}</p>{fromCode&&toCode&&<p className="mt-1 text-[10px] font-bold text-teal-600 dark:text-teal-400">Flight route: {fromCode} → {toCode}</p>}</div>{affiliateHref&&<a href={affiliateHref} target="_blank" rel="sponsored noopener noreferrer" className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-black">Open Live Results <ExternalLink className="w-3.5 h-3.5"/></a>}</div>
+    {status==="loading"&&<div className="min-h-[160px] flex items-center justify-center gap-2 text-xs font-bold text-slate-500"><RefreshCw className="w-4 h-4 animate-spin"/>Finding the correct airports for this trip…</div>}
+    {status==="error"&&<div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 text-xs text-amber-800 dark:text-amber-300 flex gap-2"><AlertCircle className="w-4 h-4 shrink-0"/>Live flight widget could not resolve this route. Your TripBalancing budget estimate is still available.</div>}
+    {src&&<div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white min-h-[300px]"><div ref={hostRef} className="w-full"/>{!widgetLoaded&&<div className="p-3 text-center text-[11px] text-slate-400">Loading current flight search…</div>}</div>}
+    <p className="text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">Live search is provided by Kiwi.com through Travelpayouts. Prices and availability can change at booking. The TripBalancing flight amount remains an estimate until the traveler checks a live offer.</p>
+  </section>;
 }
