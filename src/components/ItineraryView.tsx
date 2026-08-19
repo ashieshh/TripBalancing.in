@@ -11,6 +11,7 @@ import DestinationWeather from "./DestinationWeather";
 import CameraCapture from "./CameraCapture";
 import BudgetBreakdownChart from "./BudgetBreakdownChart";
 import ItineraryMap from "./ItineraryMap";
+import LiveFlightSearch from "./LiveFlightSearch";
 
 interface ItineraryViewProps {
   itinerary: Itinerary;
@@ -1978,6 +1979,9 @@ export default function ItineraryView({
                 ))}
               </div>
             </div>
+
+            {/* Live affiliate flight search. This is intentionally separate from the estimated budget. */}
+            <LiveFlightSearch itinerary={itinerary} />
 
             {/* Travel & Safety Tips */}
             <div className="space-y-4 border-t border-slate-100 dark:border-slate-900 pt-6">
