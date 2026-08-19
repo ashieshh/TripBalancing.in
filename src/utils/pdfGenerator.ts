@@ -2383,7 +2383,7 @@ export const exportPremiumTravelPDF = async (
 
       // Badges (spacious & mathematically centered layout using full 130mm available width)
       // Price badge (using auto-scaling font size, width 48)
-      drawPriceBadge(doc, contentX, y + 14.5, 48, 5, `${hotel.pricePerNight} / night`);
+      drawPriceBadge(doc, contentX, y + 14.5, 48, 5, /\/\s*night\b/i.test(String(hotel.pricePerNight)) ? String(hotel.pricePerNight) : `${hotel.pricePerNight} / night`);
 
       // Distance badge (width 34, centered map pin icon + distance text)
       drawCenteredBadge(doc, contentX + 52, y + 14.5, 34, 5, `${hotel.distanceFromCenter} to Ctr`, undefined, [238, 242, 255], [79, 70, 229], "map");

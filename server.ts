@@ -1568,14 +1568,37 @@ function enforceExactTripDays(itinerary: any, exactDays: number) {
 
 function improveItineraryQuality(itinerary: any) {
   if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
-  const seen = new Set<string>();
+
+  // Build a semantic place key rather than comparing the complete activity title.
+  // This catches repeats such as "Baku Boulevard & Little Venice stroll" and
+  // "Relax at Baku Boulevard Park" while preserving genuinely different sights.
+  const placeKey = (activity: any) => {
+    const raw = `${String(activity?.title || "")} ${String(activity?.location || "")}`
+      .toLowerCase()
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/[^a-z0-9\s-]/g, " ")
+      .replace(/\b(explore|visit|relax|stroll|walk|tour|ride|experience|adventure|sensation|sunset|morning|afternoon|evening|the|at|a|an|local|park)\b/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const tokens = raw.split(" ").filter((t: string) => t.length > 2);
+    return Array.from(new Set(tokens)).sort().join(" ");
+  };
+
+  const seenKeys: string[] = [];
   const days = itinerary.days.map((day: any) => {
     const activities = Array.isArray(day.activities) ? day.activities : [];
     const uniqueActivities = activities.filter((activity: any) => {
-      const key = `${String(activity?.title || "").trim().toLowerCase()}|${String(activity?.location || "").trim().toLowerCase()}`;
-      if (!key || key === "|") return true;
-      if (seen.has(key)) return false;
-      seen.add(key);
+      const key = placeKey(activity);
+      if (!key) return true;
+      const keyTokens = new Set(key.split(" "));
+      const duplicate = seenKeys.some((previous) => {
+        const prevTokens = new Set(previous.split(" "));
+        const shared = [...keyTokens].filter((token) => prevTokens.has(token)).length;
+        const smaller = Math.min(keyTokens.size, prevTokens.size);
+        return smaller >= 2 && shared / smaller >= 0.75;
+      });
+      if (duplicate) return false;
+      seenKeys.push(key);
       return true;
     });
     return { ...day, activities: uniqueActivities };
