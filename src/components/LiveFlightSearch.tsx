@@ -4,7 +4,20 @@ import { Itinerary } from "../types";
 
 const currencyFromBudget=(value?:string)=>{const t=String(value||"").toUpperCase();if(t.includes("AED"))return"aed";if(t.includes("EUR")||t.includes("€"))return"eur";if(t.includes("GBP")||t.includes("£"))return"gbp";if(t.includes("JPY")||t.includes("¥"))return"jpy";if(t.includes("USD")||t.includes("$"))return"usd";return"inr";};
 const prettyDate=(v?:string)=>{if(!v)return"";const d=new Date(`${v}T00:00:00`);return Number.isNaN(d.getTime())?v:d.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"});};
-const resolveCode=async(term:string)=>{const r=await fetch(`/api/travelpayouts/resolve-location?term=${encodeURIComponent(term)}`);if(!r.ok)throw new Error("Could not resolve airport/city");const j=await r.json();return String(j.code||"").toUpperCase();};
+const normalizePlace=(term:string)=>String(term||"").trim().toLowerCase().replace(/\s+/g," ");
+const KNOWN_FLIGHT_LOCATIONS:Record<string,string>={
+  "dubai":"DXB","dubai emirate":"DXB","dubai emirate, united arab emirates":"DXB","dubai, united arab emirates":"DXB","united arab emirates":"DXB",
+  "baku":"baku_az","baku, azerbaijan":"baku_az",
+  "mumbai":"BOM","mumbai, india":"BOM","new delhi":"DEL","new delhi, india":"DEL","delhi":"DEL","delhi, india":"DEL",
+  "london":"LON","london, united kingdom":"LON","paris":"PAR","paris, france":"PAR","singapore":"SIN","bangkok":"BKK","tokyo":"TYO"
+};
+const localFlightCode=(term:string)=>{const key=normalizePlace(term);return KNOWN_FLIGHT_LOCATIONS[key]||KNOWN_FLIGHT_LOCATIONS[key.split(",")[0].trim()]||"";};
+const resolveCode=async(term:string)=>{
+  const local=localFlightCode(term); if(local)return local;
+  const r=await fetch(`/api/travelpayouts/resolve-location?term=${encodeURIComponent(term)}`);
+  if(!r.ok)throw new Error("Could not resolve airport/city");
+  const j=await r.json(); return String(j.widgetValue||j.code||"");
+};
 
 export default function LiveFlightSearch({itinerary}:{itinerary:Itinerary}){
   const hostRef=useRef<HTMLDivElement>(null); const [fromCode,setFromCode]=useState(""); const [toCode,setToCode]=useState(""); const [status,setStatus]=useState<"loading"|"ready"|"error">("loading"); const [widgetLoaded,setWidgetLoaded]=useState(false);

@@ -1670,13 +1670,32 @@ function applySmartRouteAndTransport(itinerary: any) {
 // Resolve a user-facing city/place name to a Travelpayouts IATA city/airport code.
 // The official autocomplete endpoint is intentionally proxied server-side so the
 // React app does not depend on third-party CORS behavior.
+const TP_KNOWN_LOCATIONS: Record<string, { code: string; widgetValue: string; name: string }> = {
+  'dubai': { code: 'DXB', widgetValue: 'DXB', name: 'Dubai' },
+  'dubai emirate': { code: 'DXB', widgetValue: 'DXB', name: 'Dubai' },
+  'dubai emirate, united arab emirates': { code: 'DXB', widgetValue: 'DXB', name: 'Dubai' },
+  'dubai, united arab emirates': { code: 'DXB', widgetValue: 'DXB', name: 'Dubai' },
+  'baku': { code: 'GYD', widgetValue: 'baku_az', name: 'Baku' },
+  'baku, azerbaijan': { code: 'GYD', widgetValue: 'baku_az', name: 'Baku' },
+  'mumbai': { code: 'BOM', widgetValue: 'BOM', name: 'Mumbai' },
+  'new delhi': { code: 'DEL', widgetValue: 'DEL', name: 'New Delhi' },
+  'delhi': { code: 'DEL', widgetValue: 'DEL', name: 'Delhi' },
+  'london': { code: 'LON', widgetValue: 'LON', name: 'London' },
+  'paris': { code: 'PAR', widgetValue: 'PAR', name: 'Paris' },
+  'singapore': { code: 'SIN', widgetValue: 'SIN', name: 'Singapore' },
+  'bangkok': { code: 'BKK', widgetValue: 'BKK', name: 'Bangkok' },
+  'tokyo': { code: 'TYO', widgetValue: 'TYO', name: 'Tokyo' },
+};
 const TP_LOCATION_CACHE = new Map<string, { code: string; name: string; expires: number }>();
 app.get('/api/travelpayouts/resolve-location', async (req, res) => {
   try {
     const term=String(req.query.term||'').trim();
     if(!term) return res.status(400).json({error:'Missing term'});
-    const key=term.toLowerCase(); const cached=TP_LOCATION_CACHE.get(key);
-    if(cached && cached.expires>Date.now()) return res.json({code:cached.code,name:cached.name,cached:true});
+    const key=term.toLowerCase().replace(/\s+/g,' '); const cityKey=key.split(',')[0].trim();
+    const known=TP_KNOWN_LOCATIONS[key]||TP_KNOWN_LOCATIONS[cityKey];
+    if(known) return res.json({...known,cached:true,source:'known'});
+    const cached=TP_LOCATION_CACHE.get(key);
+    if(cached && cached.expires>Date.now()) return res.json({code:cached.code,widgetValue:cached.code,name:cached.name,cached:true,source:'cache'});
     const cityTerm=term.split(',')[0].trim();
     const url=`https://autocomplete.travelpayouts.com/places2?locale=en&types%5B%5D=city&types%5B%5D=airport&term=${encodeURIComponent(cityTerm)}`;
     const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),3500);
@@ -1690,7 +1709,7 @@ app.get('/api/travelpayouts/resolve-location', async (req, res) => {
     if(!code) return res.status(404).json({error:'No flight location code found'});
     const payload={code,name:String(hit?.city_name||hit?.name||cityTerm),expires:Date.now()+24*60*60*1000};
     TP_LOCATION_CACHE.set(key,payload);
-    return res.json({code:payload.code,name:payload.name,cached:false});
+    return res.json({code:payload.code,widgetValue:payload.code,name:payload.name,cached:false,source:'travelpayouts'});
   } catch(err:any) {
     console.warn('[Travelpayouts location resolver]',err?.message||err);
     return res.status(502).json({error:'Unable to resolve flight location right now'});
