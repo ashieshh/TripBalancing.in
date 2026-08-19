@@ -49,6 +49,10 @@ export interface Activity {
   cost?: string;
   latitude?: number;
   longitude?: number;
+  visitDuration?: string;
+  transportFromPrevious?: string;
+  travelTimeFromPrevious?: string;
+  distanceFromPreviousKm?: number;
 }
 
 export interface DayItinerary {

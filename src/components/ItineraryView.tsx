@@ -1419,6 +1419,12 @@ export default function ItineraryView({
                                     {highlightText(activity.location, searchQuery)}
                                   </span>
                                 )}
+                                {activity.visitDuration && (
+                                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 dark:text-slate-400">⏱ {activity.visitDuration}</span>
+                                )}
+                                {activity.transportFromPrevious && activity.transportFromPrevious !== "Start of day" && (
+                                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-sky-600 dark:text-sky-400">↳ {activity.transportFromPrevious} • {activity.travelTimeFromPrevious}</span>
+                                )}
                                 {activity.cost && (
                                   <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 px-2.5 py-0.5 rounded-full">
                                     <Tag className="w-3 h-3" />
@@ -2519,6 +2525,8 @@ export default function ItineraryView({
                             📍 Location / Meeting Point: {activity.location}
                           </span>
                         )}
+                        {activity.visitDuration && <span className="text-slate-500 font-bold block text-[10px]">⏱ Visit duration: {activity.visitDuration}</span>}
+                        {activity.transportFromPrevious && activity.transportFromPrevious !== "Start of day" && <span className="text-slate-500 font-bold block text-[10px]">🚕 From previous stop: {activity.transportFromPrevious} • {activity.travelTimeFromPrevious}</span>}
                       </div>
                     </div>
                   ))}

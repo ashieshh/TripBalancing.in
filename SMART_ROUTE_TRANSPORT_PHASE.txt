@@ -1,0 +1,8 @@
+TripBalancing Smart Route & Transport Logic
+- Global route post-processing using activity coordinates
+- Nearby-stop ordering to reduce backtracking
+- Distance-aware transport mode and transfer-time estimates
+- Remote excursions use transfer/tour vehicle rather than unrealistic walking/metro
+- Sensible visit-duration ranges by activity type
+- Route details shown on website and PDF
+- Existing pricing/currency engine left unchanged

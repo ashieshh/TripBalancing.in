@@ -1606,6 +1606,55 @@ function improveItineraryQuality(itinerary: any) {
   return { ...itinerary, days };
 }
 
+function applySmartRouteAndTransport(itinerary: any) {
+  if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+  const rad = (n: number) => n * Math.PI / 180;
+  const distanceKm = (a: any, b: any) => {
+    const lat1=Number(a?.latitude), lon1=Number(a?.longitude), lat2=Number(b?.latitude), lon2=Number(b?.longitude);
+    if (![lat1,lon1,lat2,lon2].every(Number.isFinite)) return null;
+    const dLat=rad(lat2-lat1), dLon=rad(lon2-lon1);
+    const h=Math.sin(dLat/2)**2 + Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2;
+    return 6371*2*Math.asin(Math.sqrt(h));
+  };
+  const routeMode = (km: number | null) => {
+    if (km == null) return { mode: 'Local transit', minutes: 25 };
+    if (km <= 0.8) return { mode: 'Walk', minutes: Math.max(5, Math.round(km/4.5*60)) };
+    if (km <= 3) return { mode: 'Walk / short taxi', minutes: Math.max(10, Math.round(km/18*60)+6) };
+    if (km <= 12) return { mode: 'Metro / bus / taxi', minutes: Math.max(15, Math.round(km/24*60)+10) };
+    if (km <= 40) return { mode: 'Taxi / rideshare / public transit', minutes: Math.max(30, Math.round(km/32*60)+15) };
+    return { mode: 'Private transfer / tour vehicle', minutes: Math.max(60, Math.round(km/50*60)+20) };
+  };
+  const fmt = (m: number) => m >= 60 ? `${Math.floor(m/60)}h ${m%60 ? `${m%60}m` : ''}`.trim() : `${m} min`;
+  const visitDuration = (activity: any) => {
+    const t=`${activity?.title||''} ${activity?.description||''}`.toLowerCase();
+    if (/museum|gallery|palace|fort|temple|mosque|church|centre|center/.test(t)) return '1.5–2 hours';
+    if (/hike|trek|excursion|day trip|national park|gobustan|safari/.test(t)) return '2–4 hours';
+    if (/market|bazaar|shopping|boulevard|promenade|walk|stroll|square/.test(t)) return '1–1.5 hours';
+    if (/lunch|dinner|breakfast|restaurant|cafe|food/.test(t)) return '1–1.5 hours';
+    return '1–2 hours';
+  };
+  const days=itinerary.days.map((day:any)=>{
+    const source=Array.isArray(day.activities)?day.activities:[];
+    if (!source.length) return day;
+    // Keep the first stop chosen by the planner, then greedily choose the nearest remaining stop.
+    const ordered=[source[0]], remaining=source.slice(1);
+    while (remaining.length) {
+      const prev=ordered[ordered.length-1];
+      let best=0, bestD=Infinity;
+      remaining.forEach((x:any,i:number)=>{ const d=distanceKm(prev,x); if(d!=null && d<bestD){bestD=d;best=i;} });
+      ordered.push(remaining.splice(best,1)[0]);
+    }
+    const activities=ordered.map((a:any,i:number)=>{
+      if(i===0) return {...a, visitDuration: a.visitDuration || visitDuration(a), transportFromPrevious: 'Start of day', travelTimeFromPrevious: '—'};
+      const km=distanceKm(ordered[i-1],a); const r=routeMode(km);
+      return {...a, visitDuration: a.visitDuration || visitDuration(a), transportFromPrevious:r.mode, travelTimeFromPrevious:fmt(r.minutes), distanceFromPreviousKm: km==null?undefined:Math.round(km*10)/10};
+    });
+    const tips=activities.slice(1).map((a:any)=>`${a.transportFromPrevious}: about ${a.travelTimeFromPrevious} from the previous stop${a.distanceFromPreviousKm!=null?` (${a.distanceFromPreviousKm} km)`:''}.`);
+    return {...day, activities, transportationSuggestions: tips.length?tips:day.transportationSuggestions};
+  });
+  return {...itinerary, days};
+}
+
 app.post("/api/generate-itinerary", async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;
   let diffDays = 3;
@@ -1686,7 +1735,7 @@ app.post("/api/generate-itinerary", async (req, res) => {
     const cached = ITINERARY_CACHE.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < ITINERARY_TTL)) {
       console.log(`[Cache Hit] Returning cached itinerary for destination: ${destination} from origin: ${origin || "any"}`);
-      const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays({
+      const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality({
         ...cached.data,
         // The request budget is authoritative. Never let cached/AI content switch
         // the trip currency (for example AED planned budget -> USD estimate).
@@ -1703,7 +1752,7 @@ app.post("/api/generate-itinerary", async (req, res) => {
               Math.sin(((geoCoords.longitude - validatedOrigin.longitude) * Math.PI / 180) / 2) ** 2
             )))
           : undefined
-      }, diffDays));
+      })), diffDays));
       return res.json({ itinerary: cachedItinerary });
     }
 
@@ -1741,7 +1790,7 @@ CRITICAL MANDATES FOR "AI BUDGET PLANNER ✨" MODE:
 1. The user's selected duration is authoritative: generate EXACTLY ${diffDays} itinerary days. Never add or remove days based on currency or budget display.
 2. Build the itinerary from destination, origin, dates, traveler count and travel style only. The user's display currency MUST NOT influence attractions, hotels, restaurants, daily activities, route, transit choices, or trip pacing.
 2A. ITINERARY REALISM: group each day geographically so consecutive stops are practical; avoid unnecessary cross-city backtracking. Never repeat the same major attraction on multiple days.
-2B. TIME REALISM: schedules must include realistic visit duration plus transfer/buffer time. Do not schedule overlapping activities. Keep arrival/departure days lighter when relevant.
+2B. TIME REALISM: schedules must include realistic visit duration plus transfer/buffer time. Do not schedule overlapping activities. Keep arrival/departure days lighter when relevant. For each activity provide visitDuration, transportFromPrevious and travelTimeFromPrevious. Never suggest walking/metro for a remote excursion simply to save money; choose transport appropriate to geographic distance.
 2C. OPENING-HOURS SAFETY: do not claim exact opening hours unless reliable current data is available. Schedule museums/paid attractions during normal daytime operating windows and label users to verify live hours where hours may vary.
 2D. RECOMMENDATION INTEGRITY: hotels/restaurants must be plausible for the selected destination and style. Do not invent claims such as exact live availability, exact live rating, or guaranteed current price. Prices are estimates.
 2E. WEATHER INTEGRITY: do not invent a future exact weather forecast inside itinerary generation. Use season-appropriate planning language; the app's dedicated weather service supplies live/forecast weather.
@@ -1794,7 +1843,7 @@ Please tailor the recommendations explicitly:
 1. Since the app serves travelers from India and around the world, provide helpful insights for local Indian travelers (e.g. food options like vegetarian food, flight/train connectivity, visa requirements if international) as well as global details. If a Starting/Origin City (${origin || ""}) is provided, explicitly include customized transit, flight, or train suggestions from ${origin} to ${destination} inside your transit suggestions and daily descriptions.
 2. The day-by-day itinerary must span exactly the duration of the trip (from ${startDate} to ${endDate}). Create specific day schedules with time tags (e.g., morning, afternoon, evening activities).
 2A. ITINERARY REALISM: group each day geographically so consecutive stops are practical; avoid unnecessary cross-city backtracking and never repeat the same major attraction on multiple days.
-2B. TIME REALISM: include realistic visit duration plus transfer/buffer time, avoid overlapping activities, and keep arrival/departure days lighter when appropriate.
+2B. TIME REALISM: include realistic visit duration plus transfer/buffer time, avoid overlapping activities, and keep arrival/departure days lighter when appropriate. For every activity provide visitDuration, transportFromPrevious and travelTimeFromPrevious. Never use walking/metro for geographically remote excursions when taxi, transfer, rail, bus or tour vehicle is the practical choice.
 2C. OPENING-HOURS SAFETY: schedule museums and paid attractions during normal daytime operating windows. Do not assert exact current opening hours unless verified; users should verify live hours for date-sensitive venues.
 2D. RECOMMENDATION INTEGRITY: hotels and restaurants must be plausible for the destination/style. Never claim exact live availability, exact live rating, or guaranteed current price; all prices are estimates.
 2E. WEATHER INTEGRITY: do not fabricate exact future weather in itinerary generation. Use season-aware planning only; the dedicated weather service supplies live/forecast conditions.
@@ -1871,7 +1920,10 @@ Return the response in strict JSON format.`;
                         location: { type: Type.STRING, description: "Specific place name" },
                         cost: { type: Type.STRING, description: "Estimated cost or Free" },
                         latitude: { type: Type.NUMBER, description: "Estimated latitude coordinate for this specific activity location" },
-                        longitude: { type: Type.NUMBER, description: "Estimated longitude coordinate for this specific activity location" }
+                        longitude: { type: Type.NUMBER, description: "Estimated longitude coordinate for this specific activity location" },
+                        visitDuration: { type: Type.STRING, description: "Realistic time spent at this activity, e.g. 1–1.5 hours" },
+                        transportFromPrevious: { type: Type.STRING, description: "Practical transport mode from the previous stop" },
+                        travelTimeFromPrevious: { type: Type.STRING, description: "Estimated transfer time from previous stop" }
                       },
                       required: ["time", "title", "description", "location", "latitude", "longitude"]
                     }
@@ -2108,7 +2160,7 @@ Return the response in strict JSON format.`;
     }
     
     // Store in cache for future identical requests
-    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(improveItineraryQuality(parsedItinerary), diffDays));
+    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality(parsedItinerary)), diffDays));
 
     ITINERARY_CACHE.set(cacheKey, {
       data: reconciledItinerary,
@@ -2416,7 +2468,7 @@ Return the response in strict JSON format.`;
     ].join("|");
     const fallbackCacheKey = crypto.createHash("sha256").update(fallbackIdentity).digest("hex");
     fallbackItinerary.budgetAmount = budgetAmount;
-    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(improveItineraryQuality({ ...fallbackItinerary, plannedBudget: budgetAmount }), diffDays));
+    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality({ ...fallbackItinerary, plannedBudget: budgetAmount })), diffDays));
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,
