@@ -1723,15 +1723,103 @@ type FlightEstimate = {
   totalInr: number;
   perTravelerInr: number;
   source: 'travelpayouts-aviasales-cache';
+  method: 'exact-dates' | 'week-nearby' | 'grouped-duration';
   originCode: string;
   destinationCode: string;
   airline?: string;
   departureAt?: string;
   returnAt?: string;
   foundAt?: string;
+  dateDistanceDays?: number;
+};
+
+type NormalizedFare = {
+  price: number;
+  airline?: string;
+  departureAt: string;
+  returnAt: string;
+  foundAt?: string;
 };
 
 const FLIGHT_ESTIMATE_CACHE = new Map<string, { value: FlightEstimate; expires: number }>();
+
+const ymd = (value: string) => String(value || '').slice(0, 10);
+const dateMs = (value: string) => {
+  const d = Date.parse(`${ymd(value)}T00:00:00Z`);
+  return Number.isFinite(d) ? d : NaN;
+};
+const dayDistance = (a: string, b: string) => {
+  const am = dateMs(a), bm = dateMs(b);
+  return Number.isFinite(am) && Number.isFinite(bm) ? Math.abs(am - bm) / 86400000 : 999;
+};
+
+async function tpJson(url: string, token: string, timeoutMs = 3600): Promise<any | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'X-Access-Token': token,
+        Accept: 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+      },
+    });
+    if (!r.ok) throw new Error(`Travelpayouts HTTP ${r.status}`);
+    const payload: any = await r.json();
+    if (payload?.success === false) throw new Error(`Travelpayouts API: ${payload?.error || 'unsuccessful response'}`);
+    return payload;
+  } catch (err: any) {
+    console.warn('[Travelpayouts airfare request]', err?.message || err, url.replace(/token=[^&]+/i, 'token=***'));
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function normalizeV3Rows(payload: any): NormalizedFare[] {
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  return rows.map((x: any) => ({
+    price: Number(x?.price),
+    airline: x?.airline ? String(x.airline) : undefined,
+    departureAt: String(x?.departure_at || ''),
+    returnAt: String(x?.return_at || ''),
+    foundAt: x?.found_at ? String(x.found_at) : undefined,
+  })).filter((x: NormalizedFare) => Number.isFinite(x.price) && x.price > 0 && x.departureAt && x.returnAt);
+}
+
+function normalizeMatrixRows(payload: any): NormalizedFare[] {
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  return rows.map((x: any) => ({
+    price: Number(x?.value ?? x?.price),
+    airline: x?.airline ? String(x.airline) : undefined,
+    departureAt: String(x?.depart_date || x?.departure_at || ''),
+    returnAt: String(x?.return_date || x?.return_at || ''),
+    foundAt: x?.found_at ? String(x.found_at) : undefined,
+  })).filter((x: NormalizedFare) => Number.isFinite(x.price) && x.price > 0 && x.departureAt && x.returnAt);
+}
+
+function normalizeGroupedRows(payload: any): NormalizedFare[] {
+  const data = payload?.data;
+  const rows = data && typeof data === 'object' && !Array.isArray(data) ? Object.values(data) : [];
+  return rows.map((x: any) => ({
+    price: Number(x?.price ?? x?.value),
+    airline: x?.airline ? String(x.airline) : undefined,
+    departureAt: String(x?.departure_at || x?.depart_date || ''),
+    returnAt: String(x?.return_at || x?.return_date || ''),
+    foundAt: x?.found_at ? String(x.found_at) : undefined,
+  })).filter((x: NormalizedFare) => Number.isFinite(x.price) && x.price > 0 && x.departureAt && x.returnAt);
+}
+
+function chooseClosestFare(rows: NormalizedFare[], departure: string, returnDate: string, maxDistance = 14): { fare: NormalizedFare; dateDistanceDays: number } | null {
+  const ranked = rows.map(fare => {
+    const dd = dayDistance(fare.departureAt, departure) + dayDistance(fare.returnAt, returnDate);
+    return { fare, dateDistanceDays: dd };
+  }).filter(x => Number.isFinite(x.dateDistanceDays) && x.dateDistanceDays <= maxDistance)
+    .sort((a, b) => a.dateDistanceDays - b.dateDistanceDays || a.fare.price - b.fare.price);
+  return ranked[0] || null;
+}
+
 async function getMarketFlightEstimate(origin: string, destination: string, departure: string, returnDate: string, travelersRaw: number): Promise<FlightEstimate | null> {
   const token = process.env.TRAVELPAYOUTS_API_TOKEN;
   const travelers = Math.max(1, Number(travelersRaw) || 1);
@@ -1747,75 +1835,112 @@ async function getMarketFlightEstimate(origin: string, destination: string, depa
   const cached = FLIGHT_ESTIMATE_CACHE.get(cacheKey);
   if (cached && cached.expires > Date.now()) return cached.value;
 
-  const params = new URLSearchParams({
+  const tripDurationDays = Math.max(1, Math.round((dateMs(returnDate) - dateMs(departure)) / 86400000));
+  const common = {
     origin: originCode,
     destination: destinationCode,
+    currency: 'inr',
+  };
+
+  let picked: { fare: NormalizedFare; dateDistanceDays: number } | null = null;
+  let method: FlightEstimate['method'] = 'exact-dates';
+
+  // 1) Exact dates: official v3 endpoint, recent Aviasales searches from the last 48h.
+  const exactParams = new URLSearchParams({
+    ...common,
     departure_at: departure,
     return_at: returnDate,
     one_way: 'false',
     direct: 'false',
     sorting: 'price',
-    currency: 'inr',
-    limit: '10',
+    unique: 'false',
+    limit: '100',
     page: '1',
   });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2800);
-  try {
-    const r = await fetch(`https://api.travelpayouts.com/aviasales/v3/prices_for_dates?${params.toString()}`, {
-      signal: controller.signal,
-      headers: {
-        'X-Access-Token': token,
-        Accept: 'application/json',
-        'Accept-Encoding': 'gzip, deflate',
-      },
-    });
-    if (!r.ok) throw new Error(`Aviasales Data API HTTP ${r.status}`);
-    const payload: any = await r.json();
-    const rows = Array.isArray(payload?.data) ? payload.data : [];
-    const valid = rows
-      .filter((x: any) => Number.isFinite(Number(x?.price)) && Number(x.price) > 0)
-      .sort((a: any, b: any) => Number(a.price) - Number(b.price));
-    if (!valid.length) return null;
+  const exactPayload = await tpJson(`https://api.travelpayouts.com/aviasales/v3/prices_for_dates?${exactParams.toString()}`, token, 3600);
+  const exactRows = normalizeV3Rows(exactPayload);
+  if (exactRows.length) picked = chooseClosestFare(exactRows, departure, returnDate, 0.1);
 
-    // Data API values are cached market fares for one traveler. Use the cheapest
-    // recent exact-date fare plus an 8% booking-variability buffer for budgeting.
-    const best = valid[0];
-    const perTravelerInr = Math.round(Number(best.price) * 1.08);
-    const value: FlightEstimate = {
-      totalInr: Math.round(perTravelerInr * travelers),
-      perTravelerInr,
-      source: 'travelpayouts-aviasales-cache',
-      originCode,
-      destinationCode,
-      airline: best.airline ? String(best.airline) : undefined,
-      departureAt: best.departure_at ? String(best.departure_at) : undefined,
-      returnAt: best.return_at ? String(best.return_at) : undefined,
-      foundAt: best.found_at ? String(best.found_at) : undefined,
-    };
-    FLIGHT_ESTIMATE_CACHE.set(cacheKey, { value, expires: Date.now() + 30 * 60 * 1000 });
-    return value;
-  } catch (err: any) {
-    console.warn('[Flight estimate fallback]', err?.message || err);
-    return null;
-  } finally {
-    clearTimeout(timer);
+  // 2) If exact cached data is empty, Travelpayouts' week matrix is specifically
+  // designed to return fares around the target departure/return dates (about ±3/4 days).
+  if (!picked) {
+    method = 'week-nearby';
+    const weekParams = new URLSearchParams({
+      ...common,
+      show_to_affiliates: 'true',
+      depart_date: departure,
+      return_date: returnDate,
+    });
+    const weekPayload = await tpJson(`https://api.travelpayouts.com/v2/prices/week-matrix?${weekParams.toString()}`, token, 3800);
+    picked = chooseClosestFare(normalizeMatrixRows(weekPayload), departure, returnDate, 8);
   }
+
+  // 3) Broader cache fallback: same route, same departure month and trip duration.
+  // This stays route/date-aware but is intentionally labelled as a recent cached estimate,
+  // not a live bookable fare.
+  if (!picked) {
+    method = 'grouped-duration';
+    const month = ymd(departure).slice(0, 7);
+    const groupedParams = new URLSearchParams({
+      ...common,
+      group_by: 'departure_at',
+      departure_at: month,
+      direct: 'false',
+      min_trip_duration: String(tripDurationDays),
+      max_trip_duration: String(tripDurationDays),
+    });
+    const groupedPayload = await tpJson(`https://api.travelpayouts.com/aviasales/v3/grouped_prices?${groupedParams.toString()}`, token, 3800);
+    picked = chooseClosestFare(normalizeGroupedRows(groupedPayload), departure, returnDate, 31);
+  }
+
+  if (!picked) {
+    console.warn(`[Flight estimate] No Aviasales cached fare for ${originCode} -> ${destinationCode}, ${departure} -> ${returnDate}; using route-model fallback.`);
+    return null;
+  }
+
+  // Data API prices are cached market fares for ONE traveler in the requested currency.
+  // Add a modest 8% booking-variation reserve, then multiply exactly once by party size.
+  const perTravelerInr = Math.max(1, Math.round(picked.fare.price * 1.08));
+  const value: FlightEstimate = {
+    totalInr: Math.round(perTravelerInr * travelers),
+    perTravelerInr,
+    source: 'travelpayouts-aviasales-cache',
+    method,
+    originCode,
+    destinationCode,
+    airline: picked.fare.airline,
+    departureAt: picked.fare.departureAt,
+    returnAt: picked.fare.returnAt,
+    foundAt: picked.fare.foundAt,
+    dateDistanceDays: picked.dateDistanceDays,
+  };
+  FLIGHT_ESTIMATE_CACHE.set(cacheKey, { value, expires: Date.now() + 30 * 60 * 1000 });
+  console.log(`[Flight estimate] ${originCode}->${destinationCode} ${departure}/${returnDate}: INR ${value.totalInr} total (${method}, ${travelers} pax, source dates ${ymd(value.departureAt || '')}/${ymd(value.returnAt || '')}).`);
+  return value;
 }
 
 async function attachMarketFlightEstimate(itinerary: any, origin: string, destination: string, startDate: string, endDate: string, travelers: number): Promise<any> {
   const estimate = await getMarketFlightEstimate(origin, destination, startDate, endDate, travelers);
   if (!estimate) {
     delete itinerary.flightEstimateInr;
+    delete itinerary.flightEstimatePerTravelerInr;
+    delete itinerary.flightEstimateMethod;
+    delete itinerary.flightEstimateRoute;
+    delete itinerary.flightEstimateAirline;
+    delete itinerary.flightEstimateObservedAt;
+    delete itinerary.flightEstimateSourceDates;
     itinerary.flightEstimateSource = 'route-model-fallback';
     return itinerary;
   }
   itinerary.flightEstimateInr = estimate.totalInr;
   itinerary.flightEstimatePerTravelerInr = estimate.perTravelerInr;
   itinerary.flightEstimateSource = estimate.source;
+  itinerary.flightEstimateMethod = estimate.method;
   itinerary.flightEstimateRoute = `${estimate.originCode} → ${estimate.destinationCode}`;
   itinerary.flightEstimateAirline = estimate.airline;
   itinerary.flightEstimateObservedAt = estimate.foundAt;
+  itinerary.flightEstimateSourceDates = `${ymd(estimate.departureAt || '')} → ${ymd(estimate.returnAt || '')}`;
+  itinerary.flightEstimateDateDistanceDays = estimate.dateDistanceDays;
   return itinerary;
 }
 app.get('/api/flight-estimate', async (req, res) => {

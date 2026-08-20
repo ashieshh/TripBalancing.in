@@ -1,0 +1,14 @@
+TripBalancing robust airfare lookup fix (2026-08-20)
+
+Flight estimate lookup order:
+1. Aviasales Data API v3 prices_for_dates for exact departure + return dates.
+2. If empty, Travelpayouts v2 week-matrix for nearby dates around the requested trip.
+3. If empty, Aviasales v3 grouped_prices for the same route, departure month and exact trip duration.
+4. Only then use TripBalancing's route-model fallback.
+
+Notes:
+- API token remains server-side in TRAVELPAYOUTS_API_TOKEN.
+- Prices are requested in INR and treated as cached per-traveler round-trip fares.
+- 8% booking-variation reserve is added, then multiplied once by traveler count.
+- The itinerary exposes the estimate method/source dates so the Budget UI makes fallback behavior visible.
+- Affiliate widgets/links are not reintroduced in this phase.
