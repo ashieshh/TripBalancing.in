@@ -1799,7 +1799,7 @@ function normalizeV3Rows(payload: any): NormalizedFare[] {
 }
 
 function normalizeMatrixRows(payload: any): NormalizedFare[] {
-  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  const rows = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload?.prices) ? payload.prices : []);
   return rows.map((x: any) => ({
     price: Number(x?.value ?? x?.price),
     airline: x?.airline ? String(x.airline) : undefined,
@@ -1822,7 +1822,9 @@ function normalizeGroupedRows(payload: any): NormalizedFare[] {
 }
 
 function normalizeLatestRows(payload: any): NormalizedFare[] {
-  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  // Travelpayouts has returned both {data:[...]} and {prices:[...]} shapes for
+  // period-price endpoints over time. Accept both instead of treating valid fares as empty.
+  const rows = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload?.prices) ? payload.prices : []);
   return rows.map((x: any) => ({
     price: Number(x?.value ?? x?.price),
     airline: x?.airline ? String(x.airline) : undefined,
@@ -1861,6 +1863,10 @@ async function getMarketFlightEstimate(origin: string, destination: string, depa
     origin: originCode,
     destination: destinationCode,
     currency: 'inr',
+    // Most TripBalancing users currently search from India. Explicitly selecting the
+    // India market avoids falling back to Travelpayouts' default RU cache when market
+    // inference is sparse.
+    market: 'in',
   };
 
   let picked: { fare: NormalizedFare; dateDistanceDays: number } | null = null;
@@ -1909,7 +1915,7 @@ async function getMarketFlightEstimate(origin: string, destination: string, depa
     method = 'week-nearby';
     const weekParams = new URLSearchParams({
       ...common,
-      show_to_affiliates: 'true',
+      show_to_affiliates: 'false',
       depart_date: departure,
       return_date: returnDate,
     });
@@ -1948,7 +1954,7 @@ async function getMarketFlightEstimate(origin: string, destination: string, depa
       one_way: 'false',
       sorting: 'price',
       trip_duration: String(tripDurationDays),
-      show_to_affiliates: 'true',
+      show_to_affiliates: 'false',
       page: '1',
     });
     const latestPayload = await tpJson(`https://api.travelpayouts.com/aviasales/v3/get_latest_prices?${latestParams.toString()}`, token, 4200);

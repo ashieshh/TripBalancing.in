@@ -1261,7 +1261,7 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
                   <div className="text-[10px] text-violet-500/80 font-semibold">Recent Aviasales airfare estimate{itinerary?.flightEstimateRoute ? ` · ${itinerary.flightEstimateRoute}` : ""}{itinerary?.flightEstimateMethod ? ` · ${itinerary.flightEstimateMethod === "exact-dates" ? "exact dates" : itinerary.flightEstimateMethod === "month-broad" ? "same-month cached fare" : itinerary.flightEstimateMethod === "week-nearby" ? "nearby dates" : itinerary.flightEstimateMethod === "latest-period" ? "recent monthly cache" : "same-duration cached fare"}` : ""}{itinerary?.flightEstimateSourceDates ? ` · source ${itinerary.flightEstimateSourceDates}` : ""} · total for {itinerary.travelers || 1} traveler{(itinerary.travelers || 1) === 1 ? "" : "s"}. Cached airfare, not a guaranteed live booking price.</div>
                 )}
                 {itinerary?.flightEstimateSource === "route-model-fallback" && (
-                  <div className="text-[10px] text-slate-400 font-semibold">Route-based fallback estimate used because recent airfare data was unavailable.</div>
+                  <div className="text-[10px] text-slate-400 font-semibold">Travelpayouts/Aviasales cache had no usable recent fare for these dates, so TripBalancing used a route-based estimate.</div>
                 )}
               </div>
             )}
