@@ -1602,7 +1602,7 @@ export const exportPremiumTravelPDF = async (
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(71, 85, 105);
-  const hotelSummaryText = `For your stay in ${itinerary.destination || "destination"}, we have compiled a premium index of options. Our recommended prime choices range from highly rated Budget selections up to ultra-luxury resort villas. For booking links and detailed price metrics, consult Section 04 of this guide.`;
+  const hotelSummaryText = `For your stay in ${itinerary.destination || "destination"}, we have compiled a premium index of options. Our recommended prime choices range from highly rated Budget selections up to ultra-luxury resort villas. For booking links and estimated nightly rate guidance, consult Section 04 of this guide. Rates are planning estimates, not live availability or guaranteed booking prices.`;
   doc.text(doc.splitTextToSize(hotelSummaryText, 170), marginX + 5, y + 11.5);
   y += 34;
 

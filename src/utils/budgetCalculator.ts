@@ -8,6 +8,7 @@ export interface BudgetFactorsInput {
   travelStyle: string; // Budget, Mid-range, Premium, Luxury, Family, Solo, Adventure
   userBudgetInput?: string | number; // User entered budget string or number
   flightEstimateInr?: number; // Optional market-based round-trip total for ALL travelers
+  startDate?: string; // Used only for accommodation seasonality
 }
 
 export interface CalculatedCategoryBreakdown {
@@ -296,15 +297,41 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
     flightCostPerPerson = style === "budget" ? 1500 : style === "mid" ? 3000 : 8000;
   }
 
-  // 2. Hotel / Accommodation Cost per night per room
-  let hotelNightRate = 0;
-  if (style === "budget") {
-    hotelNightRate = tier === 1 ? 7500 : tier === 2 ? 3500 : 1800;
-  } else if (style === "mid") {
-    hotelNightRate = tier === 1 ? 22000 : tier === 2 ? 9500 : 4800;
-  } else { // Luxury
-    hotelNightRate = tier === 1 ? 75000 : tier === 2 ? 38000 : 22000;
+  // 2. Hotel / Accommodation Cost per night per room.
+  // These are destination-market estimates, not live bookable hotel prices.
+  // City profiles stop inexpensive international destinations (for example Baku)
+  // from falling into the generic Tier-3/India-like baseline.
+  const hotelProfiles: Array<{ tokens: string[]; budget: number; mid: number; luxury: number; peakMonths?: number[]; peakFactor?: number; shoulderFactor?: number }> = [
+    { tokens: ["baku", "azerbaijan"], budget: 3200, mid: 6200, luxury: 14500, peakMonths: [5,6,7,8,9], peakFactor: 1.12, shoulderFactor: 0.96 },
+    { tokens: ["dubai", "united arab emirates", "uae"], budget: 6500, mid: 13500, luxury: 36000, peakMonths: [11,12,1,2,3], peakFactor: 1.25, shoulderFactor: 0.90 },
+    { tokens: ["paris", "france"], budget: 9000, mid: 19000, luxury: 52000, peakMonths: [5,6,7,8,9], peakFactor: 1.18, shoulderFactor: 0.94 },
+    { tokens: ["london", "united kingdom", "england"], budget: 9500, mid: 20000, luxury: 55000, peakMonths: [5,6,7,8,9,12], peakFactor: 1.18, shoulderFactor: 0.95 },
+    { tokens: ["bangkok", "thailand"], budget: 2800, mid: 6000, luxury: 15000, peakMonths: [11,12,1,2], peakFactor: 1.18, shoulderFactor: 0.94 },
+    { tokens: ["bali", "indonesia"], budget: 3000, mid: 7000, luxury: 18000, peakMonths: [6,7,8,12], peakFactor: 1.20, shoulderFactor: 0.94 },
+    { tokens: ["singapore"], budget: 6500, mid: 14000, luxury: 34000, peakMonths: [6,7,12], peakFactor: 1.15, shoulderFactor: 0.97 },
+    { tokens: ["tokyo", "japan"], budget: 6000, mid: 12500, luxury: 32000, peakMonths: [3,4,10,11], peakFactor: 1.18, shoulderFactor: 0.96 },
+    { tokens: ["mumbai"], budget: 3000, mid: 6500, luxury: 16000, peakMonths: [11,12,1,2], peakFactor: 1.15, shoulderFactor: 0.95 },
+    { tokens: ["goa"], budget: 2800, mid: 6500, luxury: 18000, peakMonths: [11,12,1,2], peakFactor: 1.30, shoulderFactor: 0.88 },
+  ];
+  const normalizedDestination = normalizePlaceName(input.destination);
+  const hotelProfile = hotelProfiles.find(profile => profile.tokens.some(token => normalizedDestination.includes(token)));
+  let hotelNightRate = hotelProfile
+    ? hotelProfile[style]
+    : style === "budget"
+      ? (tier === 1 ? 7500 : tier === 2 ? 3500 : 2200)
+      : style === "mid"
+        ? (tier === 1 ? 22000 : tier === 2 ? 9500 : 5200)
+        : (tier === 1 ? 75000 : tier === 2 ? 38000 : 22000);
+
+  // Mild seasonality only: enough to reflect high/shoulder season without pretending
+  // to know a live hotel quote. Unknown/invalid dates stay at the destination baseline.
+  const parsedStart = input.startDate ? new Date(`${input.startDate}T12:00:00Z`) : null;
+  if (hotelProfile && parsedStart && !Number.isNaN(parsedStart.getTime())) {
+    const month = parsedStart.getUTCMonth() + 1;
+    const isPeak = hotelProfile.peakMonths?.includes(month);
+    hotelNightRate *= isPeak ? (hotelProfile.peakFactor || 1.12) : (hotelProfile.shoulderFactor || 0.96);
   }
+  hotelNightRate = Math.round(hotelNightRate / 100) * 100;
 
   // 3. Daily Food Cost per traveler per day
   let dailyFoodRate = 0;
@@ -480,7 +507,8 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     days,
     travelStyle,
     userBudgetInput,
-    flightEstimateInr: Number(itinerary.flightEstimateInr) || undefined
+    flightEstimateInr: Number(itinerary.flightEstimateInr) || undefined,
+    startDate: itinerary.startDate
   });
 
   const currencySym = calculated.currencySymbol;
@@ -649,7 +677,11 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       : 0;
     const setHotelTier = (list: any[] | undefined, factor: number) => {
       if (!Array.isArray(list)) return;
-      list.forEach((h: any) => { h.pricePerNight = `${fmtMoney(baseNight * factor)}/night`; });
+      const variation = [0.92, 1.00, 1.08];
+      list.forEach((h: any, index: number) => {
+        const variedRate = baseNight * factor * variation[index % variation.length];
+        h.pricePerNight = `${fmtMoney(variedRate)}/night estimated`;
+      });
     };
     setHotelTier(itinerary.hotelRecommendations.budget, 0.75);
     setHotelTier(itinerary.hotelRecommendations.midRange, 1.35);
