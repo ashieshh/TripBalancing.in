@@ -181,7 +181,7 @@ export interface Itinerary {
   flightEstimateRoute?: string;
   flightEstimateAirline?: string;
   flightEstimateObservedAt?: string;
-  flightEstimateMethod?: "exact-dates" | "week-nearby" | "grouped-duration";
+  flightEstimateMethod?: "exact-dates" | "week-nearby" | "grouped-duration" | "latest-period";
   flightEstimateSourceDates?: string;
   flightEstimateDateDistanceDays?: number;
   rating?: number;

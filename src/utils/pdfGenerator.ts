@@ -2312,7 +2312,7 @@ export const exportPremiumTravelPDF = async (
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9.5);
   doc.setTextColor(51, 65, 85);
-  const lodgingIntro = `Finding the ideal sanctuary is essential for restoring your energy between active travel days. This catalog presents three distinct comfort profiles: Budget, Mid-Range, and Ultra-Luxury Retreats. Each recommendation includes actual pricing metrics, real distance estimates to the city center, stars ratings, and booking hyperlinks.`;
+  const lodgingIntro = `Finding the ideal sanctuary is essential for restoring your energy between active travel days. This catalog presents three distinct comfort profiles: Budget, Mid-Range, and Ultra-Luxury Retreats. Each recommendation includes estimated pricing guidance, distance estimates to the city center, star ratings, and booking hyperlinks.`;
   doc.text(doc.splitTextToSize(lodgingIntro, 180), marginX, y);
   y += 24;
 
@@ -2478,32 +2478,27 @@ export const exportPremiumTravelPDF = async (
     const transitVal = parseVal(b.originToDestinationTravel || "0");
     const visaInsuranceVal = parseVal((b as any).visaAndInsurance || "0");
 
-    // Group local transport, origin transit, visa/insurance and contingency under
-    // Transit & Tours so the four dashboard cards represent the full estimate.
-    const transVal = localTransVal + transitVal + visaInsuranceVal + miscVal;
-    const totalVal = accommVal + foodVal + actVal + transVal || 1;
+    // Keep flights separate from local transport so a large airfare does not make
+    // the PDF misleadingly report most of the budget as "Transit & Tours".
+    const localOtherVal = localTransVal + visaInsuranceVal + miscVal;
+    const flightVal = transitVal;
+    const totalVal = accommVal + foodVal + actVal + localOtherVal + flightVal || 1;
 
-    // Calculate percentage allocations for the 4 stat cards
+    // Calculate percentage allocations for the 5 stat cards.
     const rawPcts = [
       (accommVal / totalVal) * 100,
       (foodVal / totalVal) * 100,
       (actVal / totalVal) * 100,
-      (transVal / totalVal) * 100
+      (localOtherVal / totalVal) * 100,
+      (flightVal / totalVal) * 100
     ];
 
-    let r1 = Math.round(rawPcts[0]);
-    let r2 = Math.round(rawPcts[1]);
-    let r3 = Math.round(rawPcts[2]);
-    let r4 = Math.round(rawPcts[3]);
-    const pctSum = r1 + r2 + r3 + r4;
+    const percentages = rawPcts.map(v => Math.round(v));
+    const pctSum = percentages.reduce((a, b) => a + b, 0);
     if (pctSum !== 100 && pctSum > 0) {
-      const maxPct = Math.max(r1, r2, r3, r4);
-      if (maxPct === r1) r1 += (100 - pctSum);
-      else if (maxPct === r2) r2 += (100 - pctSum);
-      else if (maxPct === r3) r3 += (100 - pctSum);
-      else r4 += (100 - pctSum);
+      const maxIdx = percentages.indexOf(Math.max(...percentages));
+      percentages[maxIdx] += (100 - pctSum);
     }
-    const percentages = [r1, r2, r3, r4];
 
     // Left Column: Donut Chart (Enlarged)
     const cx = 52;
@@ -2516,7 +2511,8 @@ export const exportPremiumTravelPDF = async (
       [13, 148, 136], // Accommodation - Teal
       [217, 119, 6],  // Food - Amber
       [79, 70, 229],  // Activities - Indigo
-      [2, 132, 199]   // Transport - Sky Blue
+      [2, 132, 199],  // Local transport & other - Sky Blue
+      [124, 58, 237]  // Flights - Violet
     ];
 
     percentages.forEach((pct, idx) => {
@@ -2554,7 +2550,8 @@ export const exportPremiumTravelPDF = async (
       { name: "Accommodation", color: [13, 148, 136], pct: percentages[0] },
       { name: "Meals & Food", color: [217, 119, 6], pct: percentages[1] },
       { name: "Activities", color: [79, 70, 229], pct: percentages[2] },
-      { name: "Transit & Tours", color: [2, 132, 199], pct: percentages[3] }
+      { name: "Local Transport & Other", color: [2, 132, 199], pct: percentages[3] },
+      { name: "Flights", color: [124, 58, 237], pct: percentages[4] }
     ];
 
     legendItems.forEach((item, idx) => {
@@ -2574,7 +2571,8 @@ export const exportPremiumTravelPDF = async (
       { name: "ACCOMMODATION", val: b.accommodation, pct: percentages[0], color: [13, 148, 136], icon: "hotel" },
       { name: "MEALS & FOOD", val: b.food, pct: percentages[1], color: [217, 119, 6], icon: "clock" },
       { name: "ACTIVITIES", val: b.activities, pct: percentages[2], color: [79, 70, 229], icon: "calendar" },
-      { name: "TRANSIT & TOURS", val: currencySym + transVal.toLocaleString(), pct: percentages[3], color: [2, 132, 199], icon: "mapPin" }
+      { name: "LOCAL & OTHER", val: currencySym + localOtherVal.toLocaleString(), pct: percentages[3], color: [2, 132, 199], icon: "mapPin" },
+      { name: "FLIGHTS", val: currencySym + flightVal.toLocaleString(), pct: percentages[4], color: [124, 58, 237], icon: "mapPin" }
     ];
 
     statCards.forEach((sc) => {

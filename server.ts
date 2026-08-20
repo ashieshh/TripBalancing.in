@@ -1723,7 +1723,7 @@ type FlightEstimate = {
   totalInr: number;
   perTravelerInr: number;
   source: 'travelpayouts-aviasales-cache';
-  method: 'exact-dates' | 'week-nearby' | 'grouped-duration';
+  method: 'exact-dates' | 'week-nearby' | 'grouped-duration' | 'latest-period';
   originCode: string;
   destinationCode: string;
   airline?: string;
@@ -1811,6 +1811,17 @@ function normalizeGroupedRows(payload: any): NormalizedFare[] {
   })).filter((x: NormalizedFare) => Number.isFinite(x.price) && x.price > 0 && x.departureAt && x.returnAt);
 }
 
+function normalizeLatestRows(payload: any): NormalizedFare[] {
+  const rows = Array.isArray(payload?.data) ? payload.data : [];
+  return rows.map((x: any) => ({
+    price: Number(x?.value ?? x?.price),
+    airline: x?.airline ? String(x.airline) : undefined,
+    departureAt: String(x?.depart_date || x?.departure_at || ''),
+    returnAt: String(x?.return_date || x?.return_at || ''),
+    foundAt: x?.found_at ? String(x.found_at) : undefined,
+  })).filter((x: NormalizedFare) => Number.isFinite(x.price) && x.price > 0 && x.departureAt && x.returnAt);
+}
+
 function chooseClosestFare(rows: NormalizedFare[], departure: string, returnDate: string, maxDistance = 14): { fare: NormalizedFare; dateDistanceDays: number } | null {
   const ranked = rows.map(fare => {
     const dd = dayDistance(fare.departureAt, departure) + dayDistance(fare.returnAt, returnDate);
@@ -1891,6 +1902,26 @@ async function getMarketFlightEstimate(origin: string, destination: string, depa
     });
     const groupedPayload = await tpJson(`https://api.travelpayouts.com/aviasales/v3/grouped_prices?${groupedParams.toString()}`, token, 3800);
     picked = chooseClosestFare(normalizeGroupedRows(groupedPayload), departure, returnDate, 31);
+  }
+
+  // 4) Final Aviasales cache sweep. get_latest_prices searches the requested month
+  // and lets us constrain the stay duration, which catches routes that have recent
+  // cached fares but no record in the exact/week/grouped endpoints above.
+  if (!picked) {
+    method = 'latest-period';
+    const latestParams = new URLSearchParams({
+      ...common,
+      beginning_of_period: `${ymd(departure).slice(0, 7)}-01`,
+      period_type: 'month',
+      group_by: 'dates',
+      one_way: 'false',
+      sorting: 'price',
+      trip_duration: String(tripDurationDays),
+      show_to_affiliates: 'true',
+      page: '1',
+    });
+    const latestPayload = await tpJson(`https://api.travelpayouts.com/aviasales/v3/get_latest_prices?${latestParams.toString()}`, token, 4200);
+    picked = chooseClosestFare(normalizeLatestRows(latestPayload), departure, returnDate, 45);
   }
 
   if (!picked) {
