@@ -1685,6 +1685,16 @@ const TP_KNOWN_LOCATIONS: Record<string, { code: string; widgetValue: string; na
   'singapore': { code: 'SIN', widgetValue: 'SIN', name: 'Singapore' },
   'bangkok': { code: 'BKK', widgetValue: 'BKK', name: 'Bangkok' },
   'tokyo': { code: 'TYO', widgetValue: 'TYO', name: 'Tokyo' },
+  'varanasi': { code: 'VNS', widgetValue: 'VNS', name: 'Varanasi' },
+  'varanasi, uttar pradesh, india': { code: 'VNS', widgetValue: 'VNS', name: 'Varanasi' },
+  'ahmedabad': { code: 'AMD', widgetValue: 'AMD', name: 'Ahmedabad' },
+  'bengaluru': { code: 'BLR', widgetValue: 'BLR', name: 'Bengaluru' },
+  'bangalore': { code: 'BLR', widgetValue: 'BLR', name: 'Bengaluru' },
+  'hyderabad': { code: 'HYD', widgetValue: 'HYD', name: 'Hyderabad' },
+  'chennai': { code: 'MAA', widgetValue: 'MAA', name: 'Chennai' },
+  'kolkata': { code: 'CCU', widgetValue: 'CCU', name: 'Kolkata' },
+  'goa': { code: 'GOI', widgetValue: 'GOI', name: 'Goa' },
+  'jaipur': { code: 'JAI', widgetValue: 'JAI', name: 'Jaipur' },
 };
 const TP_LOCATION_CACHE = new Map<string, { code: string; name: string; expires: number }>();
 
@@ -1723,7 +1733,7 @@ type FlightEstimate = {
   totalInr: number;
   perTravelerInr: number;
   source: 'travelpayouts-aviasales-cache';
-  method: 'exact-dates' | 'week-nearby' | 'grouped-duration' | 'latest-period';
+  method: 'exact-dates' | 'month-broad' | 'week-nearby' | 'grouped-duration' | 'latest-period';
   originCode: string;
   destinationCode: string;
   airline?: string;
@@ -1872,7 +1882,28 @@ async function getMarketFlightEstimate(origin: string, destination: string, depa
   const exactRows = normalizeV3Rows(exactPayload);
   if (exactRows.length) picked = chooseClosestFare(exactRows, departure, returnDate, 0.1);
 
-  // 2) If exact cached data is empty, Travelpayouts' week matrix is specifically
+  // 2) Broad same-month lookup using the same official v3 endpoint.
+  // Exact dates often have no cached search even when the route has recent market data.
+  // Requesting YYYY-MM for departure/return returns the month's cached round-trip fares;
+  // we then choose the closest dates to the user's trip instead of dropping to a formula.
+  if (!picked) {
+    method = 'month-broad';
+    const monthParams = new URLSearchParams({
+      ...common,
+      departure_at: ymd(departure).slice(0, 7),
+      return_at: ymd(returnDate).slice(0, 7),
+      one_way: 'false',
+      direct: 'false',
+      sorting: 'price',
+      unique: 'false',
+      limit: '1000',
+      page: '1',
+    });
+    const monthPayload = await tpJson(`https://api.travelpayouts.com/aviasales/v3/prices_for_dates?${monthParams.toString()}`, token, 4200);
+    picked = chooseClosestFare(normalizeV3Rows(monthPayload), departure, returnDate, 45);
+  }
+
+  // 3) If exact/month cached data is empty, Travelpayouts' week matrix is specifically
   // designed to return fares around the target departure/return dates (about ±3/4 days).
   if (!picked) {
     method = 'week-nearby';
@@ -1886,7 +1917,7 @@ async function getMarketFlightEstimate(origin: string, destination: string, depa
     picked = chooseClosestFare(normalizeMatrixRows(weekPayload), departure, returnDate, 8);
   }
 
-  // 3) Broader cache fallback: same route, same departure month and trip duration.
+  // 4) Broader cache fallback: same route, same departure month and trip duration.
   // This stays route/date-aware but is intentionally labelled as a recent cached estimate,
   // not a live bookable fare.
   if (!picked) {
@@ -1904,7 +1935,7 @@ async function getMarketFlightEstimate(origin: string, destination: string, depa
     picked = chooseClosestFare(normalizeGroupedRows(groupedPayload), departure, returnDate, 31);
   }
 
-  // 4) Final Aviasales cache sweep. get_latest_prices searches the requested month
+  // 5) Final Aviasales cache sweep. get_latest_prices searches the requested month
   // and lets us constrain the stay duration, which catches routes that have recent
   // cached fares but no record in the exact/week/grouped endpoints above.
   if (!picked) {
