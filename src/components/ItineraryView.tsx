@@ -11,7 +11,6 @@ import DestinationWeather from "./DestinationWeather";
 import CameraCapture from "./CameraCapture";
 import BudgetBreakdownChart from "./BudgetBreakdownChart";
 import ItineraryMap from "./ItineraryMap";
-import LiveFlightSearch from "./LiveFlightSearch";
 
 interface ItineraryViewProps {
   itinerary: Itinerary;
@@ -2027,7 +2026,6 @@ export default function ItineraryView({
                 loggedExpenses={itinerary.loggedExpenses || []}
                 itinerary={itinerary}
               />
-              <LiveFlightSearch itinerary={itinerary} />
             </div>
           </Suspense>
         )}

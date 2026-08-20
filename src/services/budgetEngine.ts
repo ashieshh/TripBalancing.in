@@ -7,6 +7,7 @@ export interface BudgetFactorsInput {
   days: number;
   travelStyle: string; // Budget, Mid-range, Premium, Luxury, Family, Solo, Adventure
   userBudgetInput?: string | number; // User entered budget string or number
+  flightEstimateInr?: number; // Optional market-based round-trip total for ALL travelers
 }
 
 export interface CalculatedCategoryBreakdown {
@@ -173,8 +174,14 @@ export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedC
   const fromInr = (amountInr: number) => convertInrToTripCurrency(amountInr, currencyCode);
 
   // 1. Flight / Transit Cost per traveler (Roundtrip)
-  let flightCostPerPerson = 0;
-  if (hasOrigin || isInternational) {
+  // When the backend has a recent market airfare estimate from Travelpayouts/Aviasales,
+  // that total is authoritative for the whole party. The route-band model remains the fallback.
+  const marketFlightTotalInr = Number(input.flightEstimateInr);
+  const hasMarketFlightEstimate = Number.isFinite(marketFlightTotalInr) && marketFlightTotalInr > 0;
+  let flightCostPerPerson = hasMarketFlightEstimate ? marketFlightTotalInr / travelers : 0;
+  if (hasMarketFlightEstimate) {
+    // Keep the recent market-derived round-trip estimate.
+  } else if (hasOrigin || isInternational) {
     if (isInternational) {
       if (routeTier === 1) { // Long-haul / high-cost international route
         flightCostPerPerson = style === "budget" ? 55000 : style === "mid" ? 85000 : 220000;
@@ -370,7 +377,8 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     travelers,
     days,
     travelStyle,
-    userBudgetInput
+    userBudgetInput,
+    flightEstimateInr: Number(itinerary.flightEstimateInr) || undefined
   });
 
   const currencySym = calculated.currencySymbol;

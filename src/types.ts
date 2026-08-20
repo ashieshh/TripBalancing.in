@@ -174,6 +174,13 @@ export interface Itinerary {
   originLatitude?: number;
   originLongitude?: number;
   originToDestinationDistanceKm?: number;
+  /** Recent cached airfare estimate injected by the backend when available. */
+  flightEstimateInr?: number;
+  flightEstimatePerTravelerInr?: number;
+  flightEstimateSource?: "travelpayouts-aviasales-cache" | "route-model-fallback";
+  flightEstimateRoute?: string;
+  flightEstimateAirline?: string;
+  flightEstimateObservedAt?: string;
   rating?: number;
   privateNote?: string;
   reviewText?: string;

@@ -1687,6 +1687,158 @@ const TP_KNOWN_LOCATIONS: Record<string, { code: string; widgetValue: string; na
   'tokyo': { code: 'TYO', widgetValue: 'TYO', name: 'Tokyo' },
 };
 const TP_LOCATION_CACHE = new Map<string, { code: string; name: string; expires: number }>();
+
+async function resolveFlightLocationCode(termRaw: string): Promise<string> {
+  const term = String(termRaw || '').trim();
+  if (!term) return '';
+  const key = term.toLowerCase().replace(/\s+/g, ' ');
+  const cityKey = key.split(',')[0].trim();
+  const known = TP_KNOWN_LOCATIONS[key] || TP_KNOWN_LOCATIONS[cityKey];
+  if (known?.code) return known.code;
+  const cached = TP_LOCATION_CACHE.get(key);
+  if (cached && cached.expires > Date.now()) return cached.code;
+
+  const cityTerm = term.split(',')[0].trim();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2200);
+  try {
+    const url = `https://autocomplete.travelpayouts.com/places2?locale=en&types%5B%5D=city&types%5B%5D=airport&term=${encodeURIComponent(cityTerm)}`;
+    const r = await fetch(url, { signal: controller.signal, headers: { Accept: 'application/json' } });
+    if (!r.ok) return '';
+    const rows: any[] = await r.json();
+    const city = rows.find((x: any) => x?.type === 'city' && x?.code);
+    const airport = rows.find((x: any) => x?.type === 'airport' && (x?.city_code || x?.code));
+    const hit = city || airport;
+    const code = String(hit?.code || hit?.city_code || '').toUpperCase();
+    if (code) TP_LOCATION_CACHE.set(key, { code, name: String(hit?.city_name || hit?.name || cityTerm), expires: Date.now() + 24 * 60 * 60 * 1000 });
+    return code;
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+type FlightEstimate = {
+  totalInr: number;
+  perTravelerInr: number;
+  source: 'travelpayouts-aviasales-cache';
+  originCode: string;
+  destinationCode: string;
+  airline?: string;
+  departureAt?: string;
+  returnAt?: string;
+  foundAt?: string;
+};
+
+const FLIGHT_ESTIMATE_CACHE = new Map<string, { value: FlightEstimate; expires: number }>();
+async function getMarketFlightEstimate(origin: string, destination: string, departure: string, returnDate: string, travelersRaw: number): Promise<FlightEstimate | null> {
+  const token = process.env.TRAVELPAYOUTS_API_TOKEN;
+  const travelers = Math.max(1, Number(travelersRaw) || 1);
+  if (!token || !origin || !destination || !departure || !returnDate) return null;
+
+  const [originCode, destinationCode] = await Promise.all([
+    resolveFlightLocationCode(origin),
+    resolveFlightLocationCode(destination),
+  ]);
+  if (!originCode || !destinationCode || originCode === destinationCode) return null;
+
+  const cacheKey = `${originCode}|${destinationCode}|${departure}|${returnDate}|${travelers}`;
+  const cached = FLIGHT_ESTIMATE_CACHE.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.value;
+
+  const params = new URLSearchParams({
+    origin: originCode,
+    destination: destinationCode,
+    departure_at: departure,
+    return_at: returnDate,
+    one_way: 'false',
+    direct: 'false',
+    sorting: 'price',
+    currency: 'inr',
+    limit: '10',
+    page: '1',
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2800);
+  try {
+    const r = await fetch(`https://api.travelpayouts.com/aviasales/v3/prices_for_dates?${params.toString()}`, {
+      signal: controller.signal,
+      headers: {
+        'X-Access-Token': token,
+        Accept: 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+      },
+    });
+    if (!r.ok) throw new Error(`Aviasales Data API HTTP ${r.status}`);
+    const payload: any = await r.json();
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+    const valid = rows
+      .filter((x: any) => Number.isFinite(Number(x?.price)) && Number(x.price) > 0)
+      .sort((a: any, b: any) => Number(a.price) - Number(b.price));
+    if (!valid.length) return null;
+
+    // Data API values are cached market fares for one traveler. Use the cheapest
+    // recent exact-date fare plus an 8% booking-variability buffer for budgeting.
+    const best = valid[0];
+    const perTravelerInr = Math.round(Number(best.price) * 1.08);
+    const value: FlightEstimate = {
+      totalInr: Math.round(perTravelerInr * travelers),
+      perTravelerInr,
+      source: 'travelpayouts-aviasales-cache',
+      originCode,
+      destinationCode,
+      airline: best.airline ? String(best.airline) : undefined,
+      departureAt: best.departure_at ? String(best.departure_at) : undefined,
+      returnAt: best.return_at ? String(best.return_at) : undefined,
+      foundAt: best.found_at ? String(best.found_at) : undefined,
+    };
+    FLIGHT_ESTIMATE_CACHE.set(cacheKey, { value, expires: Date.now() + 30 * 60 * 1000 });
+    return value;
+  } catch (err: any) {
+    console.warn('[Flight estimate fallback]', err?.message || err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function attachMarketFlightEstimate(itinerary: any, origin: string, destination: string, startDate: string, endDate: string, travelers: number): Promise<any> {
+  const estimate = await getMarketFlightEstimate(origin, destination, startDate, endDate, travelers);
+  if (!estimate) {
+    delete itinerary.flightEstimateInr;
+    itinerary.flightEstimateSource = 'route-model-fallback';
+    return itinerary;
+  }
+  itinerary.flightEstimateInr = estimate.totalInr;
+  itinerary.flightEstimatePerTravelerInr = estimate.perTravelerInr;
+  itinerary.flightEstimateSource = estimate.source;
+  itinerary.flightEstimateRoute = `${estimate.originCode} → ${estimate.destinationCode}`;
+  itinerary.flightEstimateAirline = estimate.airline;
+  itinerary.flightEstimateObservedAt = estimate.foundAt;
+  return itinerary;
+}
+app.get('/api/flight-estimate', async (req, res) => {
+  try {
+    const origin = String(req.query.origin || '').trim();
+    const destination = String(req.query.destination || '').trim();
+    const departure = String(req.query.departure || '').trim();
+    const returnDate = String(req.query.return || '').trim();
+    const travelers = Math.max(1, Number(req.query.travelers) || 1);
+    if (!origin || !destination || !departure || !returnDate) {
+      return res.status(400).json({ error: 'origin, destination, departure and return are required' });
+    }
+    const estimate = await getMarketFlightEstimate(origin, destination, departure, returnDate, travelers);
+    if (!estimate) {
+      return res.status(404).json({ available: false, source: 'route-model-fallback' });
+    }
+    return res.json({ available: true, ...estimate });
+  } catch (err: any) {
+    console.warn('[Flight estimate endpoint]', err?.message || err);
+    return res.status(500).json({ error: 'Unable to estimate flight cost' });
+  }
+});
+
 app.get('/api/travelpayouts/resolve-location', async (req, res) => {
   try {
     const term=String(req.query.term||'').trim();
@@ -1796,7 +1948,7 @@ app.post("/api/generate-itinerary", async (req, res) => {
     const cached = ITINERARY_CACHE.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < ITINERARY_TTL)) {
       console.log(`[Cache Hit] Returning cached itinerary for destination: ${destination} from origin: ${origin || "any"}`);
-      const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality({
+      const cachedPrepared = await attachMarketFlightEstimate({
         ...cached.data,
         // The request budget is authoritative. Never let cached/AI content switch
         // the trip currency (for example AED planned budget -> USD estimate).
@@ -1813,7 +1965,8 @@ app.post("/api/generate-itinerary", async (req, res) => {
               Math.sin(((geoCoords.longitude - validatedOrigin.longitude) * Math.PI / 180) / 2) ** 2
             )))
           : undefined
-      })), diffDays));
+      }, origin || "", destination, startDate, endDate, travelers);
+      const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality(cachedPrepared)), diffDays));
       return res.json({ itinerary: cachedItinerary });
     }
 
@@ -2220,8 +2373,12 @@ Return the response in strict JSON format.`;
       parsedItinerary.originToDestinationDistanceKm = Math.round(6371 * 2 * Math.asin(Math.sqrt(a)));
     }
     
+    // Prefer recent cached market airfare data for the exact route/dates. If unavailable,
+    // the existing route-band calculator remains the non-blocking fallback.
+    const pricedItinerary = await attachMarketFlightEstimate(parsedItinerary, origin || "", destination, startDate, endDate, travelers);
+
     // Store in cache for future identical requests
-    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality(parsedItinerary)), diffDays));
+    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality(pricedItinerary)), diffDays));
 
     ITINERARY_CACHE.set(cacheKey, {
       data: reconciledItinerary,
@@ -2529,7 +2686,8 @@ Return the response in strict JSON format.`;
     ].join("|");
     const fallbackCacheKey = crypto.createHash("sha256").update(fallbackIdentity).digest("hex");
     fallbackItinerary.budgetAmount = budgetAmount;
-    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality({ ...fallbackItinerary, plannedBudget: budgetAmount })), diffDays));
+    const pricedFallback = await attachMarketFlightEstimate({ ...fallbackItinerary, plannedBudget: budgetAmount }, origin || "", destination, startDate, endDate, travelers);
+    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality(pricedFallback)), diffDays));
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,

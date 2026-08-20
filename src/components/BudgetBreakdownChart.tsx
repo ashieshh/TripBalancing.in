@@ -1252,9 +1252,17 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
               </div>
             )}
             {itinerary?.origin && detailedBudgetSummary.originToDestinationCost && detailedBudgetSummary.originToDestinationCost !== "N/A" && (
-              <div className="flex justify-between items-center text-slate-650 dark:text-slate-350 font-bold bg-violet-500/5 p-2 rounded-xl border border-violet-500/10">
-                <span className="text-violet-600 dark:text-violet-400 flex items-center gap-1">✈️ Travel from {itinerary.origin}</span>
-                <span className="text-violet-600 dark:text-violet-400">{detailedBudgetSummary.originToDestinationCost}</span>
+              <div className="space-y-1 bg-violet-500/5 p-2 rounded-xl border border-violet-500/10">
+                <div className="flex justify-between items-center text-slate-650 dark:text-slate-350 font-bold">
+                  <span className="text-violet-600 dark:text-violet-400 flex items-center gap-1">✈️ Round-trip travel from {itinerary.origin}</span>
+                  <span className="text-violet-600 dark:text-violet-400">{detailedBudgetSummary.originToDestinationCost}</span>
+                </div>
+                {itinerary?.flightEstimateSource === "travelpayouts-aviasales-cache" && (
+                  <div className="text-[10px] text-violet-500/80 font-semibold">Recent airfare-market estimate{itinerary?.flightEstimateRoute ? ` · ${itinerary.flightEstimateRoute}` : ""} · total for {itinerary.travelers || 1} traveler{(itinerary.travelers || 1) === 1 ? "" : "s"}. Live booking prices may change.</div>
+                )}
+                {itinerary?.flightEstimateSource === "route-model-fallback" && (
+                  <div className="text-[10px] text-slate-400 font-semibold">Route-based fallback estimate used because recent airfare data was unavailable.</div>
+                )}
               </div>
             )}
 

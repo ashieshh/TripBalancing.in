@@ -1,0 +1,11 @@
+TripBalancing flight estimate phase (2026-08-20)
+
+- Kiwi/Travelpayouts live flight widget removed from the trip Budget tab for now.
+- Affiliate/booking integration is intentionally deferred until the pricing engine is stable.
+- Backend now attempts a recent airfare estimate from Travelpayouts/Aviasales Data API using TRAVELPAYOUTS_API_TOKEN.
+- Exact route + departure + return dates are requested server-side.
+- Recent cached fare is treated as a one-traveler round-trip market signal, given an 8% booking-variability buffer, then multiplied by the trip traveler count.
+- If market airfare data is unavailable, slow, or errors, the existing route-based airfare model is used automatically.
+- The final itinerary is reconciled after airfare injection, so flight cost, grand total, budget shortfall/remaining budget, UI and PDF continue to use one mathematical total.
+- Budget UI labels whether a recent airfare-market estimate or route-model fallback was used.
+- Debug endpoint: /api/flight-estimate?origin=Dubai&destination=Baku&departure=2026-08-31&return=2026-09-03&travelers=2
