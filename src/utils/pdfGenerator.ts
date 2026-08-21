@@ -910,6 +910,11 @@ const sanitizeItineraryText = (obj: any): any => {
   if (typeof obj === "string") {
     let cleaned = obj.replace(/₹/g, "Rs. ");
     cleaned = cleaned.replace(/Rs\.\s*Rs\./g, "Rs. ");
+    // jsPDF's built-in Helvetica is not a full Unicode font. Transliterate
+    // characters it cannot reliably encode so PDF text never becomes mojibake.
+    const specialMap: Record<string, string> = { "ə": "e", "Ə": "E", "ı": "i", "İ": "I", "ş": "s", "Ş": "S", "ğ": "g", "Ğ": "G" };
+    cleaned = cleaned.replace(/[əƏıİşŞğĞ]/g, (ch) => specialMap[ch] || ch);
+    cleaned = cleaned.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
     return cleaned;
   }
   if (Array.isArray(obj)) {
@@ -1551,7 +1556,7 @@ export const exportPremiumTravelPDF = async (
   startSectionPage("01", "TRIP SUMMARY & LOGISTICS ATLAS", "A comprehensive high-level dashboard and logistics atlas of your upcoming travel.");
 
   const glanceCards = [
-    { label: "PLANNED", value: (itinerary as any).plannedBudget || itinerary.budgetAmount || "N/A", bg: [240, 253, 250], txt: [13, 148, 136] },
+    { label: (itinerary as any).isAiBudgetPlanner ? "AI RECOMMENDED" : "PLANNED", value: (itinerary as any).plannedBudget || itinerary.budgetAmount || "N/A", bg: [240, 253, 250], txt: [13, 148, 136] },
     { label: "EST. COST", value: (itinerary as any).realisticEstimatedCost || itinerary.estimatedBudgetBreakdown?.total || "N/A", bg: [240, 249, 255], txt: [2, 132, 199] },
     { label: "DURATION", value: `${itinerary.days?.length || 0} Days`, bg: [240, 249, 255], txt: [2, 132, 199] },
     ...(itinerary.origin && itinerary.originToDestinationDuration && itinerary.originToDestinationDuration !== "N/A"
@@ -1998,7 +2003,7 @@ export const exportPremiumTravelPDF = async (
       const routeMinutes = (day.activities || []).reduce((sum: number, a: any) => {
         const txt=String(a.travelTimeFromPrevious||''); const h=Number((txt.match(/(\d+)h/)||[])[1]||0); const m=Number((txt.match(/(\d+)m/)||[])[1]||0); const min=Number((txt.match(/(\d+) min/)||[])[1]||0); return sum+h*60+m+min;
       }, 0);
-      const dist = (walkingDistance || Math.min(routeDistance, 0)).toFixed(1);
+      const dist = routeDistance > 0 ? routeDistance.toFixed(1) : "N/A";
       const travTime = routeMinutes > 0 ? `${Math.floor(routeMinutes/60)}h ${routeMinutes%60}m` : "Route based";
 
       let weatherLabel = "Sunny, 24°C";
@@ -2013,8 +2018,8 @@ export const exportPremiumTravelPDF = async (
       const dStats = [
         { label: "EST. DAILY REQUIREMENT", value: displayBudget, bg: [236, 253, 245], border: [13, 148, 136], txt: [13, 148, 136], icon: "budget" },
         { label: "WEATHER FORECAST", value: weatherLabel, bg: [240, 249, 255], border: [2, 132, 199], txt: [2, 132, 199], icon: "weather" },
-        { label: "WALKING DISTANCE", value: `${dist} km`, bg: [255, 241, 242], border: [225, 29, 72], txt: [225, 29, 72], icon: "distance" },
-        { label: "TRAVEL TIME", value: travTime, bg: [238, 242, 255], border: [79, 70, 229], txt: [79, 70, 229], icon: "time" }
+        { label: "ROUTE DISTANCE", value: dist === "N/A" ? "N/A" : `${dist} km`, bg: [255, 241, 242], border: [225, 29, 72], txt: [225, 29, 72], icon: "distance" },
+        { label: "TRANSIT TIME", value: travTime, bg: [238, 242, 255], border: [79, 70, 229], txt: [79, 70, 229], icon: "time" }
       ];
 
       const sw = 42;
@@ -2444,7 +2449,9 @@ export const exportPremiumTravelPDF = async (
     const plannedBudgetText = (itinerary as any).plannedBudget || itinerary.budgetAmount || "Not specified";
     const estimatedCostText = (itinerary as any).realisticEstimatedCost || b.total || "Calculating";
     const shortfallText = (itinerary as any).budgetShortfall || "0";
-    const budgetIntro = `This financial blueprint separates your planned budget (${plannedBudgetText}) from the realistic estimated trip cost (${estimatedCostText}). The category values below are reconciled to the calculated estimate, not forced into the planned amount. Estimated shortfall: ${shortfallText}. Prices remain estimates and may vary with dates, availability, exchange rates, and booking time.`;
+    const budgetIntro = (itinerary as any).isAiBudgetPlanner
+      ? `This financial blueprint separates the AI recommended safe budget (${plannedBudgetText}) from the realistic estimated trip cost (${estimatedCostText}). The difference is a recommended safety buffer for normal price variation, not unused or leftover money. Category values below reconcile to the realistic estimate. Prices remain estimates and may vary with dates, availability, exchange rates, and booking time.`
+      : `This financial blueprint separates your planned budget (${plannedBudgetText}) from the realistic estimated trip cost (${estimatedCostText}). The category values below are reconciled to the calculated estimate, not forced into the planned amount. Estimated shortfall: ${shortfallText}. Prices remain estimates and may vary with dates, availability, exchange rates, and booking time.`;
     doc.text(doc.splitTextToSize(budgetIntro, 180), marginX, y);
     y += 24;
 

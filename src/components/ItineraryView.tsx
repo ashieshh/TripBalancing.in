@@ -1126,9 +1126,9 @@ export default function ItineraryView({
                 <p className="text-base font-black text-slate-850 dark:text-slate-100 leading-snug">
                   {itinerary.aiBudgetSummary}
                 </p>
-                {itinerary.remainingBudget && (
+                {itinerary.remainingBudget && itinerary.remainingBudget !== "N/A" && (
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Remaining Budget Leftover: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{itinerary.remainingBudget}</strong>
+                    {itinerary.isAiBudgetPlanner ? "Recommended Safety Buffer" : "Remaining Budget"}: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{itinerary.remainingBudget}</strong>
                   </p>
                 )}
               </div>

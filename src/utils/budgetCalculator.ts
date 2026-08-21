@@ -630,13 +630,25 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       const activityDay = allocatedActivities;
       const transparentTotal = accommodationDay + foodDay + transportDay + miscDay + activityDay;
       const scale = transparentTotal > 0 ? dayAlloc / transparentTotal : 1;
-      const fmtDayPart = (value: number) => `${currencySym}${Math.max(0, Math.round(value)).toLocaleString()}`;
+      // Round components as integers, then assign the rounding remainder to misc.
+      // This guarantees the five visible line items add EXACTLY to dailyBudget.
+      const parts = [accommodationDay, foodDay, transportDay, activityDay, miscDay].map(v => Math.max(0, Math.round(v * scale)));
+      const roundedPartsTotal = parts.reduce((sum, v) => sum + v, 0);
+      parts[4] = Math.max(0, parts[4] + (dayAlloc - roundedPartsTotal));
+      // Extremely defensive fallback if a negative remainder ever exceeds misc.
+      let correction = dayAlloc - parts.reduce((sum, v) => sum + v, 0);
+      for (let i = parts.length - 1; correction !== 0 && i >= 0; i--) {
+        const next = parts[i] + correction;
+        if (next >= 0) { parts[i] = next; correction = 0; }
+        else { correction = next; parts[i] = 0; }
+      }
+      const fmtDayPart = (value: number) => `${currencySym}${Math.max(0, value).toLocaleString()}`;
       day.dailyCostBreakdown = {
-        accommodation: fmtDayPart(accommodationDay * scale),
-        food: fmtDayPart(foodDay * scale),
-        localTransport: fmtDayPart(transportDay * scale),
-        activities: fmtDayPart(activityDay * scale),
-        miscellaneous: fmtDayPart(miscDay * scale)
+        accommodation: fmtDayPart(parts[0]),
+        food: fmtDayPart(parts[1]),
+        localTransport: fmtDayPart(parts[2]),
+        activities: fmtDayPart(parts[3]),
+        miscellaneous: fmtDayPart(parts[4])
       };
     });
   }
