@@ -470,41 +470,64 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
   };
 
   // Reconcile day-by-day ON-TRIP spend. Long-distance travel and travel
-  // protection are trip-level costs and stay in the trip summary; they must not
-  // make Day 1 look artificially expensive.
+  // protection are trip-level costs and stay in the trip summary. Accommodation
+  // is charged only on actual hotel nights (days - 1).
   if (Array.isArray(itinerary.days) && itinerary.days.length > 0) {
     const dayCount = itinerary.days.length;
     const parseMoney = (value: any): number => {
       if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-      const cleaned = String(value ?? "").replace(/[^0-9.-]/g, "");
-      const parsed = Number(cleaned);
-      return Number.isFinite(parsed) ? parsed : 0;
+      const text = String(value ?? "").replace(/,/g, "");
+      if (/\bfree\b|included/i.test(text)) return 0;
+      const match = text.match(/[0-9]+(?:\.[0-9]+)?/);
+      if (!match) return 0;
+      const parsed = Number(match[0]);
+      return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
     };
-    const activitySubtotals = itinerary.days.map((day: any) => {
+    const distributeExact = (total: number, weights: number[]): number[] => {
+      const target = Math.max(0, Math.round(total));
+      if (!weights.length) return [];
+      const safe = weights.map(w => Number.isFinite(w) && w > 0 ? w : 0);
+      const sum = safe.reduce((a, b) => a + b, 0);
+      const effective = sum > 0 ? safe : weights.map(() => 1);
+      const effectiveSum = effective.reduce((a, b) => a + b, 0) || 1;
+      const raw = effective.map(w => target * w / effectiveSum);
+      const base = raw.map(v => Math.floor(v));
+      let remainder = target - base.reduce((a, b) => a + b, 0);
+      const order = raw.map((v, i) => ({ i, frac: v - Math.floor(v) }))
+        .sort((a, b) => b.frac - a.frac || a.i - b.i);
+      for (let k = 0; k < remainder; k++) base[order[k % order.length].i] += 1;
+      return base;
+    };
+
+    const stayNights = Math.max(0, dayCount - 1);
+    const hotelWeights = itinerary.days.map((_: any, idx: number) => idx < stayNights ? 1 : 0);
+    const evenWeights = itinerary.days.map(() => 1);
+    const activityWeights = itinerary.days.map((day: any) => {
       const activities = Array.isArray(day.activities) ? day.activities : [];
-      return activities.reduce((sum: number, activity: any) => sum + parseMoney(activity.cost), 0);
+      return activities.reduce((sum: number, activity: any) => sum + parseMoney(activity?.cost), 0);
     });
-    const allActivitySubtotal = activitySubtotals.reduce((sum: number, value: number) => sum + value, 0);
-    const destinationSpendTotal = calculated.hotel + calculated.food + calculated.localTransport + calculated.sightseeing + calculated.miscellaneous;
-    const sharedDaily = (calculated.hotel + calculated.food + calculated.localTransport + calculated.miscellaneous) / dayCount;
-    let allocatedSoFar = 0;
+
+    const hotelByDay = distributeExact(calculated.hotel, hotelWeights);
+    const foodByDay = distributeExact(calculated.food, evenWeights);
+    const transportByDay = distributeExact(calculated.localTransport, evenWeights);
+    const miscByDay = distributeExact(calculated.miscellaneous, evenWeights);
+    const activitiesByDay = distributeExact(calculated.sightseeing, activityWeights);
+    const fmtDay = (value: number) => `${currencySym}${Math.max(0, Math.round(value)).toLocaleString()}`;
 
     itinerary.days.forEach((day: any, idx: number) => {
-      const allocatedActivities = allActivitySubtotal > 0
-        ? calculated.sightseeing * activitySubtotals[idx] / allActivitySubtotal
-        : calculated.sightseeing / dayCount;
-      const rawDayTotal = sharedDaily + allocatedActivities;
-      const isLastDay = idx === dayCount - 1;
-      const dayAlloc = isLastDay
-        ? Math.max(0, Math.round(destinationSpendTotal - allocatedSoFar))
-        : Math.max(0, Math.round(rawDayTotal));
-      allocatedSoFar += dayAlloc;
-      const formattedDay = `${currencySym}${dayAlloc.toLocaleString()}`;
-      day.dailyBudget = formattedDay;
-      day.estimatedTotalSpend = formattedDay;
+      const parts = [hotelByDay[idx] || 0, foodByDay[idx] || 0, transportByDay[idx] || 0, activitiesByDay[idx] || 0, miscByDay[idx] || 0];
+      const total = parts.reduce((a, b) => a + b, 0);
+      day.dailyBudget = fmtDay(total);
+      day.estimatedTotalSpend = fmtDay(total);
+      day.dailyCostBreakdown = {
+        accommodation: fmtDay(parts[0]),
+        food: fmtDay(parts[1]),
+        localTransport: fmtDay(parts[2]),
+        activities: fmtDay(parts[3]),
+        miscellaneous: fmtDay(parts[4])
+      };
     });
   }
-
 
 
   // GLOBAL CURRENCY NORMALIZATION

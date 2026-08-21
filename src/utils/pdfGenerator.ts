@@ -1028,14 +1028,26 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
     });
 
     const activitySubtotal = activitySubtotals[dayIndex];
-    const allocatedActivities = allActivitySubtotal > 0
-      ? (activitiesBudget * activitySubtotal / allActivitySubtotal)
-      : (totalDays > 0 ? activitiesBudget / totalDays : 0);
-    const rawDayTotal = sharedDaily + allocatedActivities;
-    const isLastDay = dayIndex === daysData.length - 1;
-    const allocatedDayTotal = destinationSpendTotal > 0
-      ? (isLastDay ? Math.max(0, destinationSpendTotal - allocatedSoFar) : Math.round(rawDayTotal))
-      : Math.round(rawDayTotal || activitySubtotal);
+    const parts = (day as any).dailyCostBreakdown;
+    const exactBreakdownTotal = parts
+      ? parseVal(parts.accommodation) + parseVal(parts.food) + parseVal(parts.localTransport) + parseVal(parts.activities) + parseVal(parts.miscellaneous)
+      : 0;
+
+    let allocatedDayTotal: number;
+    if (parts && exactBreakdownTotal >= 0) {
+      // The visible five-part daily breakdown is authoritative. The displayed
+      // daily total MUST be exactly the sum of those five visible rows.
+      allocatedDayTotal = Math.round(exactBreakdownTotal);
+    } else {
+      const allocatedActivities = allActivitySubtotal > 0
+        ? (activitiesBudget * activitySubtotal / allActivitySubtotal)
+        : (totalDays > 0 ? activitiesBudget / totalDays : 0);
+      const rawDayTotal = sharedDaily + allocatedActivities;
+      const isLastDay = dayIndex === daysData.length - 1;
+      allocatedDayTotal = destinationSpendTotal > 0
+        ? (isLastDay ? Math.max(0, destinationSpendTotal - allocatedSoFar) : Math.round(rawDayTotal))
+        : Math.round(rawDayTotal || activitySubtotal);
+    }
 
     allocatedSoFar += allocatedDayTotal;
     day.dailyBudget = currencySym + allocatedDayTotal.toLocaleString();
@@ -2650,6 +2662,11 @@ export const exportPremiumTravelPDF = async (
     const hasMiscCost = invoiceData.miscellaneousExpenses && invoiceData.miscellaneousExpenses !== "N/A" && parseVal(invoiceData.miscellaneousExpenses) > 0;
     const hasVisaInsurance = (invoiceData as any).visaAndInsurance && (invoiceData as any).visaAndInsurance !== "N/A" && parseVal((invoiceData as any).visaAndInsurance) > 0;
 
+    const aiSafetyBufferValue = (itinerary as any).isAiBudgetPlanner
+      ? Math.max(0, parseVal((itinerary as any).plannedBudget || itinerary.budgetAmount) - parseVal(invoiceData.grandTotal || b.total))
+      : 0;
+    const aiSafetyBufferText = aiSafetyBufferValue > 0 ? `${currencySym}${Math.round(aiSafetyBufferValue).toLocaleString()}` : "N/A";
+
     const categories = [
       { label: "Accommodations Cumulative Ratios", val: invoiceData.accommodationTotal },
       { label: "Food & Dining Allowances", val: invoiceData.foodTotal },
@@ -2657,7 +2674,8 @@ export const exportPremiumTravelPDF = async (
       { label: "Attraction Entry Portals", val: invoiceData.attractionTotal },
       ...(hasTransitCost ? [{ label: `Travel Transit from ${itinerary.origin}`, val: invoiceData.originToDestinationCost }] : []),
       ...(hasVisaInsurance ? [{ label: "Visa & Travel Insurance", val: (invoiceData as any).visaAndInsurance }] : []),
-      ...(hasMiscCost ? [{ label: "Miscellaneous & Contingency", val: invoiceData.miscellaneousExpenses }] : [])
+      ...(hasMiscCost ? [{ label: "Miscellaneous & Contingency", val: invoiceData.miscellaneousExpenses }] : []),
+      ...(aiSafetyBufferValue > 0 ? [{ label: "Recommended Safety Buffer", val: aiSafetyBufferText }] : [])
     ];
 
     const tableHeight = 12 + (categories.length * 4.8);
@@ -2696,12 +2714,15 @@ export const exportPremiumTravelPDF = async (
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
     doc.setTextColor(13, 148, 136);
-    doc.text("ESTIMATED GRAND INVESTMENT TOTAL", marginX + 11, y + 6);
+    doc.text((itinerary as any).isAiBudgetPlanner ? "AI RECOMMENDED SAFE BUDGET" : "ESTIMATED GRAND INVESTMENT TOTAL", marginX + 11, y + 6);
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
     doc.setTextColor(15, 23, 42);
-    doc.text(String(invoiceData.grandTotal || b.total), 190, y + 9.5, { align: "right" });
+    const invoiceGrandDisplay = (itinerary as any).isAiBudgetPlanner
+      ? ((itinerary as any).plannedBudget || itinerary.budgetAmount || invoiceData.grandTotal || b.total)
+      : (invoiceData.grandTotal || b.total);
+    doc.text(String(invoiceGrandDisplay), 190, y + 9.5, { align: "right" });
 
     y += 21;
   }

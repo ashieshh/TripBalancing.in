@@ -1266,14 +1266,27 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
               </div>
             )}
 
+            {itinerary?.isAiBudgetPlanner && itinerary?.remainingBudget && itinerary.remainingBudget !== "N/A" && (
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400 font-medium border-t border-dashed border-teal-500/10 pt-3">
+                <span>Recommended Safety Buffer</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400">{itinerary.remainingBudget}</span>
+              </div>
+            )}
+
             {/* Receipt dotted line */}
             <div className="border-t border-dashed border-teal-500/15 pt-5 flex justify-between items-center">
               <div className="space-y-0.5">
-                <span className="text-xs font-extrabold uppercase text-teal-650 dark:text-teal-400 tracking-wider">Grand Total Budget</span>
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold block">Estimated market average</span>
+                <span className="text-xs font-extrabold uppercase text-teal-650 dark:text-teal-400 tracking-wider">
+                  {itinerary?.isAiBudgetPlanner ? "AI Recommended Safe Budget" : "Grand Total Budget"}
+                </span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold block">
+                  {itinerary?.isAiBudgetPlanner ? `Expected trip cost: ${detailedBudgetSummary.grandTotal}` : "Estimated market average"}
+                </span>
               </div>
               <span className="text-2xl font-black text-teal-600 dark:text-teal-400">
-                {detailedBudgetSummary.grandTotal}
+                {itinerary?.isAiBudgetPlanner
+                  ? ((itinerary as any).plannedBudget || itinerary.budgetAmount || detailedBudgetSummary.grandTotal)
+                  : detailedBudgetSummary.grandTotal}
               </span>
             </div>
           </div>
