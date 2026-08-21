@@ -65,6 +65,13 @@ export interface DayItinerary {
   dailyBudget?: string;
   estimatedTotalSpend?: string;
   activitySubtotal?: string;
+  dailyCostBreakdown?: {
+    accommodation: string;
+    food: string;
+    localTransport: string;
+    activities: string;
+    miscellaneous: string;
+  };
 }
 
 export interface BudgetBreakdown {
@@ -91,6 +98,7 @@ export interface HotelRecommend {
   rating: number;
   distanceFromCenter: string;
   bookingLink: string;
+  description?: string;
 }
 
 export interface DetailedTransportationCosts {

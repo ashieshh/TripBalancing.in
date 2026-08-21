@@ -513,7 +513,12 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
 
   const currencySym = calculated.currencySymbol;
   const grandTotalNum = calculated.grandTotal;
-  const plannedBudgetNum = parseNumericValue(userBudgetInput);
+  const rawPlannedBudgetNum = parseNumericValue(userBudgetInput);
+  const isRecommendedMode = Boolean(itinerary.isAiBudgetPlanner);
+  // In AI-recommended mode, the recommendation includes a practical 10% safety buffer,
+  // while realisticEstimatedCost remains the deterministic expected trip cost.
+  const recommendedSafeBudgetNum = Math.ceil((grandTotalNum * 1.10) / 100) * 100;
+  const plannedBudgetNum = isRecommendedMode ? recommendedSafeBudgetNum : rawPlannedBudgetNum;
   const plannedBudgetFormatted = plannedBudgetNum > 0
     ? `${currencySym}${plannedBudgetNum.toLocaleString()}`
     : calculated.formatted.grandTotal;
@@ -535,7 +540,9 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
 
   // AI prose must never invent a second cost range. It is overwritten from the same
   // calculator that powers feasibility, the PDF and all budget breakdowns.
-  if (plannedBudgetNum > 0) {
+  if (isRecommendedMode) {
+    itinerary.aiBudgetSummary = `Expected trip cost is ${calculated.formatted.grandTotal}. AI recommended safe budget: ${plannedBudgetFormatted}, including a practical buffer for normal price variation. Expected planning range: ${calculated.formatted.expectedRange}.`;
+  } else if (plannedBudgetNum > 0) {
     if (grandTotalNum > plannedBudgetNum) {
       itinerary.aiBudgetSummary = `Estimated trip cost is ${calculated.formatted.grandTotal} against your planned budget of ${plannedBudgetFormatted}. Estimated shortfall: ${currencySym}${Math.round(grandTotalNum - plannedBudgetNum).toLocaleString()}.`;
     } else {
@@ -596,14 +603,17 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     });
     const allActivitySubtotal = activitySubtotals.reduce((sum: number, value: number) => sum + value, 0);
     const destinationSpendTotal = calculated.hotel + calculated.food + calculated.localTransport + calculated.sightseeing + calculated.miscellaneous;
-    const sharedDaily = (calculated.hotel + calculated.food + calculated.localTransport + calculated.miscellaneous) / dayCount;
+    const stayNights = Math.max(0, dayCount - 1);
+    const hotelPerNight = stayNights > 0 ? calculated.hotel / stayNights : 0;
+    const sharedNonHotelDaily = (calculated.food + calculated.localTransport + calculated.miscellaneous) / dayCount;
     let allocatedSoFar = 0;
 
     itinerary.days.forEach((day: any, idx: number) => {
       const allocatedActivities = allActivitySubtotal > 0
         ? calculated.sightseeing * activitySubtotals[idx] / allActivitySubtotal
         : calculated.sightseeing / dayCount;
-      const rawDayTotal = sharedDaily + allocatedActivities;
+      const accommodationForDay = idx < stayNights ? hotelPerNight : 0;
+      const rawDayTotal = accommodationForDay + sharedNonHotelDaily + allocatedActivities;
       const isLastDay = idx === dayCount - 1;
       const dayAlloc = isLastDay
         ? Math.max(0, Math.round(destinationSpendTotal - allocatedSoFar))
@@ -612,6 +622,22 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       const formattedDay = `${currencySym}${dayAlloc.toLocaleString()}`;
       day.dailyBudget = formattedDay;
       day.estimatedTotalSpend = formattedDay;
+      // Transparent daily cost composition. These values reconcile to the same deterministic trip totals.
+      const accommodationDay = accommodationForDay;
+      const foodDay = calculated.food / dayCount;
+      const transportDay = calculated.localTransport / dayCount;
+      const miscDay = calculated.miscellaneous / dayCount;
+      const activityDay = allocatedActivities;
+      const transparentTotal = accommodationDay + foodDay + transportDay + miscDay + activityDay;
+      const scale = transparentTotal > 0 ? dayAlloc / transparentTotal : 1;
+      const fmtDayPart = (value: number) => `${currencySym}${Math.max(0, Math.round(value)).toLocaleString()}`;
+      day.dailyCostBreakdown = {
+        accommodation: fmtDayPart(accommodationDay * scale),
+        food: fmtDayPart(foodDay * scale),
+        localTransport: fmtDayPart(transportDay * scale),
+        activities: fmtDayPart(activityDay * scale),
+        miscellaneous: fmtDayPart(miscDay * scale)
+      };
     });
   }
 
@@ -744,7 +770,7 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       if (hr.budget) {
         hr.budget.forEach((h: any) => {
           if (!h.pricePerNight || h.pricePerNight.includes("NaN")) {
-            h.pricePerNight = `${currencySym}${Math.round(calculated.hotel / (days * travelers * 2)).toLocaleString()}/night`;
+            h.pricePerNight = `${currencySym}${Math.round(calculated.hotel / (nightsForRates * roomsForRates * 2)).toLocaleString()}/night`;
           }
         });
       }
@@ -752,7 +778,7 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       if (hr.luxury) {
         hr.luxury.forEach((h: any) => {
           if (!h.pricePerNight || h.pricePerNight.includes("NaN")) {
-            h.pricePerNight = `${currencySym}${Math.round(calculated.hotel / (days * travelers)).toLocaleString()}/night`;
+            h.pricePerNight = `${currencySym}${Math.round(calculated.hotel / (nightsForRates * roomsForRates)).toLocaleString()}/night`;
           }
         });
       }

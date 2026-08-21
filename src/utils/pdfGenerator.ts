@@ -1479,7 +1479,7 @@ export const exportPremiumTravelPDF = async (
   // Grid / Badges for Cover
   const coverTodayStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
   const coverBadges = [
-    { label: "PLANNED BUDGET", val: String((itinerary as any).plannedBudget || itinerary.budgetAmount || "Bespoke"), color: [13, 148, 136] },
+    { label: (itinerary as any).isAiBudgetPlanner ? "AI RECOMMENDED BUDGET" : "PLANNED BUDGET", val: String((itinerary as any).plannedBudget || itinerary.budgetAmount || "Bespoke"), color: [13, 148, 136] },
     { label: "REALISTIC ESTIMATE", val: String((itinerary as any).realisticEstimatedCost || itinerary.estimatedBudgetBreakdown?.total || "Calculating"), color: [2, 132, 199] },
     { label: "TRIP DURATION", val: `${itinerary.days?.length || 0} Days`, color: [79, 70, 229] },
     { label: "TOTAL TRAVELERS", val: `${itinerary.travelers} Pax`, color: [217, 119, 6] },
@@ -1635,6 +1635,7 @@ export const exportPremiumTravelPDF = async (
     if (/japan|tokyo|osaka|kyoto/.test(destinationText)) return { general: "110 / 119", police: "110", medical: "119" };
     if (/uae|united arab emirates|dubai|abu dhabi/.test(destinationText)) return { general: "999 / 998", police: "999", medical: "998" };
     if (/azerbaijan|baku/.test(destinationText)) return { general: "112", police: "102", medical: "103" };
+    if (/indonesia|bali|jakarta/.test(destinationText)) return { general: "112", police: "110", medical: "118 / 119" };
     if (/australia|sydney|melbourne|brisbane/.test(destinationText)) return { general: "000", police: "000", medical: "000" };
     // Do not invent country-specific numbers when the app does not have a verified mapping.
     return { general: "Verify locally before travel", police: "Verify locally before travel", medical: "Verify locally before travel" };
@@ -1709,6 +1710,20 @@ export const exportPremiumTravelPDF = async (
         { name: '"Konnichiwa":', value: "A warm Japanese greeting." },
         { name: '"Arigatou gozaimasu":', value: "Expressing gratitude." },
         { name: '"Kore wa ikura desu ka?":', value: "Handy for local markets." }
+      ];
+    }
+    if (dest.includes("azerbaijan") || dest.includes("baku")) {
+      return [
+        { name: '"Salam":', value: "Hello / a common greeting." },
+        { name: '"Çox sağ olun":', value: "Thank you." },
+        { name: '"Bu neçəyədir?":', value: "How much is this?" }
+      ];
+    }
+    if (dest.includes("indonesia") || dest.includes("bali")) {
+      return [
+        { name: '"Halo":', value: "Hello." },
+        { name: '"Terima kasih":', value: "Thank you." },
+        { name: '"Berapa harganya?":', value: "How much is it?" }
       ];
     }
     return [
@@ -1802,7 +1817,7 @@ export const exportPremiumTravelPDF = async (
 
         drawComingSoonPlaceholder(doc, marginX + 4, y + 4, 38, 22, "attraction");
 
-        const contentX = marginX + 46;
+        const contentX = marginX + 42;
         doc.setFont("helvetica", "bold");
         doc.setFontSize(10);
         doc.setTextColor(15, 23, 42);
@@ -1978,8 +1993,13 @@ export const exportPremiumTravelPDF = async (
 
       // Quick parameters stats
       const actCount = day.activities?.length || 0;
-      const dist = (2.4 + actCount * 1.1 + (dIdx % 2) * 0.4).toFixed(1);
-      const travTime = (1.5 + actCount * 0.7).toFixed(1);
+      const routeDistance = (day.activities || []).reduce((sum: number, a: any) => sum + (Number(a.distanceFromPreviousKm) || 0), 0);
+      const walkingDistance = (day.activities || []).reduce((sum: number, a: any) => /walk/i.test(String(a.transportFromPrevious || '')) ? sum + (Number(a.distanceFromPreviousKm) || 0) : sum, 0);
+      const routeMinutes = (day.activities || []).reduce((sum: number, a: any) => {
+        const txt=String(a.travelTimeFromPrevious||''); const h=Number((txt.match(/(\d+)h/)||[])[1]||0); const m=Number((txt.match(/(\d+)m/)||[])[1]||0); const min=Number((txt.match(/(\d+) min/)||[])[1]||0); return sum+h*60+m+min;
+      }, 0);
+      const dist = (walkingDistance || Math.min(routeDistance, 0)).toFixed(1);
+      const travTime = routeMinutes > 0 ? `${Math.floor(routeMinutes/60)}h ${routeMinutes%60}m` : "Route based";
 
       let weatherLabel = "Sunny, 24°C";
       if (headerWeather && headerWeather[dIdx]) {
@@ -1994,7 +2014,7 @@ export const exportPremiumTravelPDF = async (
         { label: "EST. DAILY REQUIREMENT", value: displayBudget, bg: [236, 253, 245], border: [13, 148, 136], txt: [13, 148, 136], icon: "budget" },
         { label: "WEATHER FORECAST", value: weatherLabel, bg: [240, 249, 255], border: [2, 132, 199], txt: [2, 132, 199], icon: "weather" },
         { label: "WALKING DISTANCE", value: `${dist} km`, bg: [255, 241, 242], border: [225, 29, 72], txt: [225, 29, 72], icon: "distance" },
-        { label: "TRAVEL TIME", value: `${travTime} hrs`, bg: [238, 242, 255], border: [79, 70, 229], txt: [79, 70, 229], icon: "time" }
+        { label: "TRAVEL TIME", value: travTime, bg: [238, 242, 255], border: [79, 70, 229], txt: [79, 70, 229], icon: "time" }
       ];
 
       const sw = 42;
@@ -2270,9 +2290,18 @@ export const exportPremiumTravelPDF = async (
       doc.setTextColor(remColor[0], remColor[1], remColor[2]);
       doc.text(displayRemaining, marginX + 131, y + 10.2);
 
+      const dailyParts: any = (day as any).dailyCostBreakdown;
+      if (dailyParts) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(5.6);
+        doc.setTextColor(71, 85, 105);
+        const detail = `Stay ${dailyParts.accommodation} • Food ${dailyParts.food} • Local transport ${dailyParts.localTransport} • Activities ${dailyParts.activities} • Other ${dailyParts.miscellaneous}`;
+        doc.text(doc.splitTextToSize(detail, 164), marginX + 8, y + 13.2);
+      }
+
       // --- Progress Bar ---
       const barX = marginX + 8;
-      const barY = y + 14.5;
+      const barY = y + 17.2;
       const barW = 164;
       doc.setFillColor(226, 232, 240);
       doc.roundedRect(barX, barY, barW, 2.4, 1.0, 1.0, "F");
@@ -2291,9 +2320,9 @@ export const exportPremiumTravelPDF = async (
       doc.setFont("helvetica", "bold");
       doc.setFontSize(6);
       doc.setTextColor(100, 116, 139);
-      doc.text(`Daily total covers destination spend: accommodation, meals, local transport and activities. Flights and trip-level protection are shown separately.`, marginX + 8, y + 21);
+      doc.text(`Daily total covers destination spend. Flights and trip-level protection are shown separately.`, marginX + 8, y + 23.5);
 
-      y += 28;
+      y += 30;
     });
   }
 
@@ -2338,23 +2367,12 @@ export const exportPremiumTravelPDF = async (
     y += 14;
   });
 
-  const hotelData = itinerary.hotelRecommendations || {
-    budget: [
-      { name: "Eco Stay Hostel " + itinerary.destination, pricePerNight: currencySym + "800", rating: 4.2, distanceFromCenter: "1.5 km", bookingLink: "#" },
-      { name: "Central Tourist Inn", pricePerNight: currencySym + "1,200", rating: 4.0, distanceFromCenter: "2.1 km", bookingLink: "#" },
-    ],
-    midRange: [
-      { name: "Grand Vista Hotel " + itinerary.destination, pricePerNight: currencySym + "3,500", rating: 4.4, distanceFromCenter: "1.0 km", bookingLink: "#" },
-      { name: "Urban Comfort Suites", pricePerNight: currencySym + "4,000", rating: 4.3, distanceFromCenter: "0.5 km", bookingLink: "#" },
-    ],
-    luxury: [
-      { name: "The Royal Plaza Resort", pricePerNight: currencySym + "12,000", rating: 4.8, distanceFromCenter: "0.2 km", bookingLink: "#" },
-      { name: "Serene Palms Luxury Villa", pricePerNight: currencySym + "15,000", rating: 4.9, distanceFromCenter: "4.5 km", bookingLink: "#" },
-    ]
-  };
+  const hotelData = itinerary.hotelRecommendations || { budget: [], midRange: [], luxury: [] };
 
   const renderTier = (tierName: string, list: any[], color: [number, number, number], comfortLabel: string) => {
-    checkPageEnd(42);
+    if (!Array.isArray(list) || list.length === 0) return;
+    // Keep the tier heading with at least two hotel cards and use compact cards to prevent one-hotel orphan pages.
+    checkPageEnd(Math.min(74, 12 + Math.min(2, list.length) * 29));
     drawPremiumCard(doc, marginX, y, 180, 8, 1, 1, color, color);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
@@ -2363,11 +2381,11 @@ export const exportPremiumTravelPDF = async (
     y += 12;
 
     list.forEach((hotel) => {
-      checkPageEnd(36);
-      drawPremiumCard(doc, marginX, y, 180, 32, 1.5, 1.5, color);
+      checkPageEnd(29);
+      drawPremiumCard(doc, marginX, y, 180, 26, 1.5, 1.5, color);
 
       // Left Image for hotels (larger size 38x24 for luxury magazine style)
-      drawComingSoonPlaceholder(doc, marginX + 4, y + 4, 38, 24, "hotel");
+      drawComingSoonPlaceholder(doc, marginX + 4, y + 3, 34, 20, "hotel");
 
       const contentX = marginX + 46;
       doc.setFont("helvetica", "bold");
@@ -2391,20 +2409,13 @@ export const exportPremiumTravelPDF = async (
       // Comfort level badge (width 40, centered hotel icon + comfort label text)
       drawCenteredBadge(doc, contentX + 90, y + 14.5, 40, 5, comfortLabel.toUpperCase(), undefined, [254, 243, 199], [217, 119, 6], "hotel");
 
-      // Custom high quality description per lodging class
-      let simulatedDesc = "Comfortable value-oriented accommodation situated within convenient transit range.";
-      if (tierName.toLowerCase().includes("luxury")) {
-        simulatedDesc = "Exquisite five-star retreat featuring elite premium service, premier dining, and views.";
-      } else if (tierName.toLowerCase().includes("mid")) {
-        simulatedDesc = "Superior boutique suites offering high-end amenities and refined modern comfort.";
-      }
-
+      const hotelDesc = String(hotel.description || `${comfortLabel} option. Verify live availability, room type, taxes and cancellation terms before booking.`);
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(7.5);
+      doc.setFontSize(7.2);
       doc.setTextColor(100, 116, 139);
-      doc.text(simulatedDesc, contentX, y + 24.5);
+      doc.text(doc.splitTextToSize(hotelDesc, 126).slice(0, 2), contentX, y + 24.0);
 
-      y += 36;
+      y += 29;
     });
     y += 2;
   };
@@ -2791,7 +2802,7 @@ export const exportPremiumTravelPDF = async (
   // ==========================================
   // PAGE: TRAVEL ADVISORY & COMPANION PASS
   // ==========================================
-  startSectionPage("07", "TRAVEL ADVISORY & PRIVATE MEMORIES", "Essential destination security advisory and private logs.");
+  startSectionPage("07", "TRAVEL ADVISORY & LOCAL INSIGHTS", "Essential destination security advisory and practical local guidance.");
 
   const hasTips = itinerary.travelTips && itinerary.travelTips.length > 0;
   if (hasTips) {

@@ -1566,6 +1566,57 @@ function enforceExactTripDays(itinerary: any, exactDays: number) {
   return { ...itinerary, days, tripDays: exactDays };
 }
 
+
+function sanitizeGeneratedText(value: any): string {
+  let text = String(value ?? "").normalize("NFKC").replace(/[\u0000-\u001F\u007F]/g, " ").replace(/\s+/g, " ").trim();
+  // If a model/API returns a mojibake prefix followed by a clean parenthetical hotel name,
+  // prefer the clean human-readable name. Example: corrupted bytes + "(The ONE Legian)".
+  const parenthetical = text.match(/\(([^()]{4,80})\)\s*$/);
+  const suspiciousPrefix = /^[^A-Za-z0-9]{0,3}[A-Za-z0-9]*[^A-Za-z0-9\s,'&.\-]{2,}/.test(text) || /[�\uFFFD]/.test(text);
+  if (parenthetical && suspiciousPrefix) text = parenthetical[1].trim();
+  return text;
+}
+
+function sanitizeItineraryStrings(itinerary: any) {
+  if (!itinerary || typeof itinerary !== 'object') return itinerary;
+  const clean = (obj: any, key: string) => { if (obj && obj[key] != null) obj[key] = sanitizeGeneratedText(obj[key]); };
+  clean(itinerary, 'destination');
+  for (const p of Array.isArray(itinerary.placesToVisit) ? itinerary.placesToVisit : []) { clean(p,'name'); clean(p,'description'); }
+  for (const f of Array.isArray(itinerary.localFood) ? itinerary.localFood : []) { clean(f,'name'); clean(f,'mustTryAt'); clean(f,'description'); }
+  for (const d of Array.isArray(itinerary.days) ? itinerary.days : []) {
+    clean(d,'theme');
+    for (const a of Array.isArray(d.activities) ? d.activities : []) { clean(a,'title'); clean(a,'location'); clean(a,'description'); }
+  }
+  const hr=itinerary.hotelRecommendations || {};
+  for (const tier of ['budget','midRange','luxury']) for (const h of Array.isArray(hr[tier]) ? hr[tier] : []) { clean(h,'name'); clean(h,'description'); }
+  return itinerary;
+}
+
+function validateGeneratedItinerary(itinerary: any): string[] {
+  const errors: string[] = [];
+  const dest = String(itinerary?.destination || '').toLowerCase();
+  const generic = /(grand landmark|city center & central plaza|botanical & scenic gardens|local artisans market|budget inn|travelers cozy hostel|backpackers haven|central hotel|parkview residency|comfort suites|royal heritage resort|ritz sovereign|morning exploration & breakfast|guided landmark sightseeing|sunset vista & evening local dinner|main food street promenade|old town pastry shop|scenic overlook tea lounge)/i;
+  const names: string[] = [];
+  for (const p of Array.isArray(itinerary?.placesToVisit) ? itinerary.placesToVisit : []) names.push(String(p?.name||''));
+  for (const f of Array.isArray(itinerary?.localFood) ? itinerary.localFood : []) names.push(String(f?.name||''), String(f?.mustTryAt||''));
+  const hr=itinerary?.hotelRecommendations||{};
+  for (const tier of ['budget','midRange','luxury']) for (const h of Array.isArray(hr[tier])?hr[tier]:[]) names.push(String(h?.name||''));
+  if (names.some(n => generic.test(n))) errors.push('generic placeholder recommendation detected');
+  if ((itinerary?.placesToVisit?.length || 0) < 4) errors.push('fewer than four destination-specific attractions');
+  if ((itinerary?.localFood?.length || 0) < 3) errors.push('insufficient destination-specific food recommendations');
+  const days = Array.isArray(itinerary?.days) ? itinerary.days : [];
+  if (!days.length) errors.push('no itinerary days returned');
+  days.forEach((d:any, i:number) => {
+    const acts=Array.isArray(d?.activities)?d.activities:[];
+    if (acts.length < 2) errors.push(`day ${i+1} has fewer than two activities`);
+    if (acts.some((a:any)=>generic.test(`${a?.title||''} ${a?.location||''}`))) errors.push(`day ${i+1} contains generic placeholder activity`);
+  });
+  // Destination-only text such as "Mumbai" is not a useful attraction name.
+  const core=dest.split(',')[0].trim();
+  if (core && (itinerary?.placesToVisit||[]).some((p:any)=>String(p?.name||'').toLowerCase().trim()===core)) errors.push('destination name used as attraction placeholder');
+  return Array.from(new Set(errors));
+}
+
 function improveItineraryQuality(itinerary: any) {
   if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
 
@@ -1624,20 +1675,30 @@ function applySmartRouteAndTransport(itinerary: any) {
     return h*60+min;
   };
   const textOf=(a:any)=>`${a?.title||''} ${a?.location||''} ${a?.description||''}`.toLowerCase();
-  const isRemote=(a:any)=>/(airport|gobustan|mud volcano|ateshgah|yanar dag|national park|peninsula|day trip|excursion|safari|countryside|outside the city)/.test(textOf(a));
-  const isOldCity=(a:any)=>/(old city|icherisheher|maiden tower|shirvanshah)/.test(textOf(a));
+  const isRemote=(a:any)=>/(airport|gobustan|mud volcano|ateshgah|yanar dag|national park|peninsula|day trip|excursion|safari|countryside|outside the city|waterfall|rice terrace|uluwatu|tanah lot)/.test(textOf(a));
+  const isOldCity=(a:any)=>/(old city|icherisheher|maiden tower|shirvanshah|ghat|vishwanath gali)/.test(textOf(a));
+  const destinationText=String(itinerary?.destination||'').toLowerCase();
+  const transportProfile = destinationText.includes('bali') || destinationText.includes('indonesia')
+    ? { short:'Walk / Grab-Gojek', medium:'Grab-Gojek / taxi', long:'Private car / rideshare', remote:'Private car / tour transfer' }
+    : destinationText.includes('varanasi')
+      ? { short:'Walk / e-rickshaw', medium:'Auto-rickshaw / e-rickshaw', long:'Cab / auto-rickshaw', remote:'Cab / pre-booked transfer' }
+      : destinationText.includes('mumbai')
+        ? { short:'Walk / auto-rickshaw', medium:'Metro / local train / cab', long:'Local train / Metro / cab', remote:'Cab / suburban train' }
+        : destinationText.includes('baku') || destinationText.includes('azerbaijan')
+          ? { short:'Walk / Bolt taxi', medium:'Metro / Bolt taxi', long:'Bolt taxi / Metro', remote:'Taxi / tour transfer' }
+          : { short:'Walk / short taxi', medium:'Taxi / verified public transit', long:'Taxi / rideshare', remote:'Private transfer / tour vehicle' };
   const routeMode = (prev:any, cur:any, km: number | null) => {
     if (isOldCity(prev) && isOldCity(cur)) return { mode:'Walk', minutes: km==null?8:Math.max(5,Math.round(km/4.5*60)) };
     if (isRemote(prev) || isRemote(cur)) {
-      if (km!=null && km<=2) return { mode:'Walk / short taxi', minutes:Math.max(8,Math.round(km/18*60)+5) };
-      return { mode:'Taxi / rideshare / tour transfer', minutes: km==null?35:Math.max(25,Math.round(km/38*60)+10) };
+      if (km!=null && km<=2) return { mode:transportProfile.short, minutes:Math.max(8,Math.round(km/18*60)+5) };
+      return { mode:transportProfile.remote, minutes: km==null?35:Math.max(25,Math.round(km/38*60)+10) };
     }
-    if (km == null) return { mode:'Walk / taxi / public transit', minutes:20 };
+    if (km == null) return { mode:transportProfile.medium, minutes:20 };
     if (km <= 0.9) return { mode:'Walk', minutes:Math.max(5,Math.round(km/4.5*60)) };
-    if (km <= 3) return { mode:'Walk / short taxi', minutes:Math.max(10,Math.round(km/18*60)+6) };
-    if (km <= 12) return { mode:'Taxi / public transit', minutes:Math.max(15,Math.round(km/25*60)+8) };
-    if (km <= 40) return { mode:'Taxi / rideshare', minutes:Math.max(25,Math.round(km/34*60)+10) };
-    return { mode:'Private transfer / tour vehicle', minutes:Math.max(50,Math.round(km/50*60)+20) };
+    if (km <= 3) return { mode:transportProfile.short, minutes:Math.max(10,Math.round(km/18*60)+6) };
+    if (km <= 12) return { mode:transportProfile.medium, minutes:Math.max(15,Math.round(km/25*60)+8) };
+    if (km <= 40) return { mode:transportProfile.long, minutes:Math.max(25,Math.round(km/34*60)+10) };
+    return { mode:transportProfile.remote, minutes:Math.max(50,Math.round(km/50*60)+20) };
   };
   const fmt=(m:number)=>m>=60?`${Math.floor(m/60)}h ${m%60?`${m%60}m`:''}`.trim():`${m} min`;
   const visitDuration=(a:any)=>{
@@ -2542,7 +2603,11 @@ Return the response in strict JSON format.`;
       throw new Error("No response generated from the AI model.");
     }
 
-    const parsedItinerary = JSON.parse(jsonText.trim());
+    const parsedItinerary = sanitizeItineraryStrings(JSON.parse(jsonText.trim()));
+    const qualityErrors = validateGeneratedItinerary(parsedItinerary);
+    if (qualityErrors.length) {
+      throw new Error(`AI itinerary failed quality validation: ${qualityErrors.join('; ')}`);
+    }
     
     // Inject accurate geocoded coordinates
     parsedItinerary.latitude = geoCoords.latitude;
@@ -2650,36 +2715,81 @@ Return the response in strict JSON format.`;
       }
     };
 
-    let details = destinationDetails[Object.keys(destinationDetails).find(k => destNormalized.includes(k)) || ""];
-    if (!details) {
-      details = {
+
+    const curatedFallbackDetails: typeof destinationDetails = {
+      mumbai: {
         places: [
-          { name: `${destination} City Center & Central Plaza`, description: `The vibrant historic heart of ${destination}, filled with local heritage, bustling cafes, and historic architecture.`, bestTimeToVisit: "Morning", entryFee: "Free" },
-          { name: `Grand Landmark of ${destination}`, description: `An iconic and highly recommended monument representing the rich historic legacy of ${destination}.`, bestTimeToVisit: "Afternoon", entryFee: "₹150 - ₹500" },
-          { name: `${destination} Botanical & Scenic Gardens`, description: "A lush, beautifully manicured green sanctuary perfect for peaceful walking tours and photography.", bestTimeToVisit: "Early Morning", entryFee: "Free" },
-          { name: `${destination} Local Artisans Market`, description: "A colorful, vibrant market to buy authentic local handicrafts, spices, souvenirs, and engage with friendly locals.", bestTimeToVisit: "Evening", entryFee: "Free" }
+          { name: "Gateway of India", description: "Historic waterfront arch beside Mumbai Harbour and the Colaba heritage district.", bestTimeToVisit: "Early morning or sunset", entryFee: "Free" },
+          { name: "Chhatrapati Shivaji Maharaj Terminus", description: "UNESCO-listed Victorian Gothic railway terminus and one of Mumbai's architectural landmarks.", bestTimeToVisit: "Morning / evening exterior view", entryFee: "Free exterior" },
+          { name: "Marine Drive", description: "Iconic seafront promenade curving along the Arabian Sea, especially atmospheric around sunset.", bestTimeToVisit: "Sunset", entryFee: "Free" },
+          { name: "Elephanta Caves", description: "UNESCO-listed rock-cut cave temples on Elephanta Island, reached by ferry from the Gateway area.", bestTimeToVisit: "Morning", entryFee: "Paid entry + ferry" }
         ],
         food: [
-          { name: `Traditional ${destination} Specialty Platter`, description: "A famous regional platter showcasing authentic cooking styles and secret family spice blends.", type: "both", mustTryAt: "Downtown Heritage Restaurant" },
-          { name: `${destination} Fresh Street Food Delicacies`, description: "Delicious, highly recommended local street food bites prepared fresh on high-heat griddles.", type: "veg", mustTryAt: "Main Food Street Promenade" },
-          { name: `Baked Sweet Delights of ${destination}`, description: "A beloved traditional pastry or pudding dessert with smooth texture and locally-sourced sweet spices.", type: "dessert", mustTryAt: "Old Town Pastry Shop" },
-          { name: `Signature Local Citrus Beverage`, description: "A refreshing locally-brewed mocktail or tea infused with native herbs and citrus.", type: "beverage", mustTryAt: "Scenic Overlook Tea Lounge" }
+          { name: "Vada Pav", description: "Mumbai's classic spicy potato fritter sandwich served with chutneys.", type: "veg", mustTryAt: "Aram Vada Pav, CSMT area" },
+          { name: "Pav Bhaji", description: "Buttery bread rolls with a rich spiced vegetable mash.", type: "veg", mustTryAt: "Cannon Pav Bhaji, South Mumbai" },
+          { name: "Bombay Sandwich", description: "Layered vegetable sandwich with green chutney and masala.", type: "veg", mustTryAt: "Well-reviewed local sandwich stalls" },
+          { name: "Bombil Fry", description: "Crisp fried Bombay duck, a well-known coastal Mumbai specialty.", type: "non-veg", mustTryAt: "Traditional Maharashtrian seafood restaurants" }
         ],
-        packing: [
-          "Comfortable all-day walking sneakers",
-          "Modular clothing layers suited for changing weather",
-          "Refillable insulated water bottle",
-          "Compact umbrella or light rain poncho",
-          "Power bank for smartphones & camera gear",
-          "Sun protection (sunglasses, hat, sunscreen)"
+        packing: ["Comfortable walking shoes", "Compact umbrella or rain jacket during monsoon", "Refillable water bottle", "Power bank", "Light breathable clothing", "Sun protection"],
+        tips: ["Use Mumbai Metro/local trains only where they genuinely suit the route; use a cab or auto for last-mile travel.", "Allow extra traffic buffer for airport and cross-city transfers.", "Use official ferry counters for Elephanta services.", "Carry some small-value cash while keeping valuables secure in crowded areas."]
+      },
+      varanasi: {
+        places: [
+          { name: "Kashi Vishwanath Temple", description: "Major Shiva temple in the old city near the Ganges.", bestTimeToVisit: "Early morning", entryFee: "Free" },
+          { name: "Dashashwamedh Ghat", description: "Central riverfront ghat known for the evening Ganga Aarti.", bestTimeToVisit: "Evening", entryFee: "Free" },
+          { name: "Sarnath", description: "Important Buddhist pilgrimage and archaeological area northeast of central Varanasi.", bestTimeToVisit: "Morning", entryFee: "Paid for selected monuments/museum" },
+          { name: "Ramnagar Fort", description: "Historic sandstone fort and museum on the eastern bank of the Ganges.", bestTimeToVisit: "Afternoon", entryFee: "Paid" }
         ],
-        tips: [
-          `Carry a small amount of cash for local street vendors and neighborhood transport in ${destination}.`,
-          "Respect local customs, greeting codes, and dress respectfully when visiting religious sites.",
-          "Download offline Google Maps of the area for seamless navigation without cellular data.",
-          "Inquire about menu pricing or taxi fare standards beforehand to avoid peak tourist markups."
-        ]
-      };
+        food: [
+          { name: "Tamatar Chaat", description: "Spicy-sweet Banarasi tomato and potato chaat.", type: "veg", mustTryAt: "Deena Chaat Bhandar" },
+          { name: "Kachori Sabzi", description: "Crisp kachori served with spicy potato curry.", type: "veg", mustTryAt: "Ram Bhandar" },
+          { name: "Banarasi Lassi", description: "Thick yogurt drink commonly served in a kulhad.", type: "veg", mustTryAt: "Blue Lassi Shop" },
+          { name: "Banarasi Paan", description: "Traditional betel-leaf preparation associated with Varanasi.", type: "veg", mustTryAt: "Established paan shops in the old city" }
+        ],
+        packing: ["Slip-on walking shoes", "Modest temple clothing", "Light rain protection in monsoon", "Hand sanitizer", "Small cash denominations", "Sun protection"],
+        tips: ["Expect security checks and restricted-item rules around Kashi Vishwanath Temple.", "Use walking/e-rickshaw/auto-rickshaw in the old city rather than assuming Metro access.", "Verify Sarnath museum opening day before travelling.", "Agree boat and auto fares before starting when a meter or fixed-price app is not used."]
+      },
+      bali: {
+        places: [
+          { name: "Sacred Monkey Forest Sanctuary", description: "Forest sanctuary and temple complex in Ubud.", bestTimeToVisit: "Morning", entryFee: "Paid" },
+          { name: "Tanah Lot Temple", description: "Sea temple on a wave-washed rock formation on Bali's southwest coast.", bestTimeToVisit: "Late afternoon / sunset", entryFee: "Paid" },
+          { name: "Uluwatu Temple", description: "Clifftop sea temple on the Bukit Peninsula.", bestTimeToVisit: "Late afternoon", entryFee: "Paid" },
+          { name: "Tegallalang Rice Terraces", description: "Terraced rice landscape north of Ubud.", bestTimeToVisit: "Early morning", entryFee: "Paid / donation depending area" }
+        ],
+        food: [
+          { name: "Nasi Campur", description: "Rice with small portions of vegetables, sambal and optional meat or egg.", type: "both", mustTryAt: "Well-reviewed local warungs" },
+          { name: "Sate Lilit", description: "Seasoned minced meat or seafood wrapped around a skewer and grilled.", type: "non-veg", mustTryAt: "Traditional Balinese warungs" },
+          { name: "Gado-Gado", description: "Vegetables, tofu and tempeh with peanut sauce.", type: "veg", mustTryAt: "Local Ubud warungs" },
+          { name: "Dadar Gulung", description: "Pandan-green coconut-filled sweet pancake roll.", type: "dessert", mustTryAt: "Traditional markets and dessert stalls" }
+        ],
+        packing: ["Lightweight clothing", "Comfortable shoes and waterproof sandals", "Universal adapter", "Reef-safe sunscreen", "Mosquito repellent", "Sarong or scarf for temples"],
+        tips: ["Use Grab/Gojek, taxis or a private driver where available; Bali does not have a Metro network.", "Carry or borrow a sarong for temple visits.", "Allow generous road-travel time because traffic can be slow.", "Use bottled or safely filtered drinking water."]
+      },
+      baku: {
+        places: [
+          { name: "Icherisheher (Old City)", description: "Historic walled core of Baku with lanes, caravanserais and major heritage landmarks.", bestTimeToVisit: "Morning / late afternoon", entryFee: "Free to walk" },
+          { name: "Heydar Aliyev Centre", description: "Major contemporary cultural complex known for its flowing architecture.", bestTimeToVisit: "Late afternoon", entryFee: "Exterior free; exhibitions may be paid" },
+          { name: "Gobustan National Park", description: "Rock-art cultural landscape southwest of Baku.", bestTimeToVisit: "Morning", entryFee: "Paid" },
+          { name: "Ateshgah Fire Temple", description: "Historic fire-temple complex on the Absheron Peninsula.", bestTimeToVisit: "Midday", entryFee: "Paid" }
+        ],
+        food: [
+          { name: "Qutab", description: "Thin stuffed flatbread with herbs, pumpkin or meat.", type: "both", mustTryAt: "Old City qutab restaurants" },
+          { name: "Shah Plov", description: "Saffron rice dish enclosed in a crisp lavash crust with meat and dried fruit.", type: "non-veg", mustTryAt: "Traditional Azerbaijani restaurants" },
+          { name: "Dushbara", description: "Small dumplings served in broth.", type: "non-veg", mustTryAt: "Central Baku Azerbaijani restaurants" },
+          { name: "Shekerbura", description: "Sweet crescent pastry filled with ground nuts and sugar.", type: "dessert", mustTryAt: "Local bakeries" }
+        ],
+        packing: ["Comfortable shoes for cobblestones", "Windproof light jacket", "European-style travel adapter", "Small AZN cash notes", "Modest clothing for mosques", "Sun protection"],
+        tips: ["Use Baku Metro for suitable central routes and Bolt/taxi for point-to-point travel.", "Allow a road transfer or organized tour for Gobustan and Absheron Peninsula sights.", "Baku can be windy, especially at exposed viewpoints.", "Use official/app-based taxis rather than accepting unsolicited airport rides."]
+      }
+    };
+    Object.assign(destinationDetails, curatedFallbackDetails);
+
+    let details = destinationDetails[Object.keys(destinationDetails).find(k => destNormalized.includes(k)) || ""];
+    if (!details) {
+      return res.status(503).json({
+        error: "We could not generate verified destination-specific recommendations right now. Please retry instead of using placeholder travel data.",
+        code: "DESTINATION_DATA_UNVERIFIED"
+      });
     }
 
     // Build the budget calculations based on budget level and numbers
@@ -2694,8 +2804,10 @@ Return the response in strict JSON format.`;
     const bLevel = String(budgetAmount || "medium").toLowerCase();
     const mult = multiplierMap[Object.keys(multiplierMap).find(k => bLevel.includes(k)) || ""] || 2.5;
 
-    const accommodationMin = Math.round(1300 * (Number(travelers) || 1) * diffDays * mult);
-    const accommodationMax = Math.round(1800 * (Number(travelers) || 1) * diffDays * mult);
+    const fallbackNights = Math.max(0, diffDays - 1);
+    const fallbackRooms = Math.max(1, Math.ceil((Number(travelers) || 1) / 2));
+    const accommodationMin = Math.round(1300 * fallbackRooms * fallbackNights * mult);
+    const accommodationMax = Math.round(1800 * fallbackRooms * fallbackNights * mult);
 
     const foodMin = Math.round(700 * (Number(travelers) || 1) * diffDays * mult);
     const foodMax = Math.round(1000 * (Number(travelers) || 1) * diffDays * mult);
@@ -2747,36 +2859,29 @@ Return the response in strict JSON format.`;
       const dayLatOffset3 = Math.sin(dayIdx * 10 + 3) * 0.015;
       const dayLonOffset3 = Math.cos(dayIdx * 10 + 3) * 0.015;
 
+      const primaryPlace = details.places[dayIdx % details.places.length];
+      const meal = details.food[dayIdx % details.food.length];
       daysList.push({
         dayNumber: dayIdx + 1,
-        theme: currentTheme,
+        theme: `${primaryPlace.name} & Local Flavors`,
         activities: [
           {
-            time: "09:00 AM",
-            title: `Morning Exploration & Breakfast`,
-            description: `Start your trip day with delicious local specialties, fresh coffee, or tea. Enjoy a refreshing morning walk around ${destination}'s most scenic neighborhood.`,
-            location: `${destination} Promenade`,
-            cost: "Free",
+            time: dayIdx === 0 ? "10:00 AM" : "09:30 AM",
+            title: primaryPlace.name,
+            description: primaryPlace.description,
+            location: primaryPlace.name,
+            cost: primaryPlace.entryFee,
             latitude: Number((baseLat + dayLatOffset1).toFixed(4)),
             longitude: Number((baseLon + dayLonOffset1).toFixed(4))
           },
           {
             time: "01:30 PM",
-            title: `Guided Landmark Sightseeing`,
-            description: `Embark on a fascinating walking tour of the most renowned monuments, museums, and historical treasures. Take beautiful photos of ${destination} and learn about local heritage.`,
-            location: details.places[dayIdx % details.places.length]?.name || `${destination} Grand Monument`,
-            cost: "₹150 - ₹500",
+            title: `Try ${meal.name}`,
+            description: `${meal.description} This meal stop is included as a practical local-food break rather than a fabricated attraction.`,
+            location: meal.mustTryAt,
+            cost: "₹300 - ₹900",
             latitude: Number((baseLat + dayLatOffset2).toFixed(4)),
             longitude: Number((baseLon + dayLonOffset2).toFixed(4))
-          },
-          {
-            time: "06:30 PM",
-            title: `Sunset Vista & Evening Local Dinner`,
-            description: `Take in the mesmerizing sunset views from a scenic vista or beach shack. Enjoy local culinary masterpieces and traditional desserts with both vegetarian and non-vegetarian selections.`,
-            location: details.food[dayIdx % details.food.length]?.mustTryAt || `${destination} Sunset Point`,
-            cost: "₹400 - ₹1200",
-            latitude: Number((baseLat + dayLatOffset3).toFixed(4)),
-            longitude: Number((baseLon + dayLonOffset3).toFixed(4))
           }
         ],
         foodRecommendations: [
@@ -2807,31 +2912,91 @@ Return the response in strict JSON format.`;
       localFood: details.food,
       packingChecklist: details.packing,
       transportationSuggestions: [
-        { type: "Local Cab/Auto", description: "Convenient and flexible for point-to-point transit across the city.", estimatedCost: "₹200 - ₹500 per ride" },
-        { type: "Metro / Public Bus", description: "The most budget-friendly option to bypass traffic during peak hours.", estimatedCost: "₹20 - ₹50 per trip" },
-        { type: "Walking", description: "The absolute best way to absorb local flavors, street art, and explore hidden alleyways.", estimatedCost: "Free" }
+        { type: "Route-aware transport", description: "TripBalancing selects walking, verified public transit, app-based taxi/rideshare or private transfer based on destination and route distance.", estimatedCost: "Calculated by pricing engine" }
       ],
       travelTips: details.tips,
       latitude: baseLat,
       longitude: baseLon,
       isFallback: true,
-      hotelRecommendations: {
-        budget: [
-          { name: `${destination} Budget Inn`, pricePerNight: `₹${Math.round(1200 * mult)}/night`, rating: 4.1, distanceFromCenter: "1.5 km from city center", bookingLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(destination + ' Budget Inn')}` },
-          { name: `Travelers Cozy Hostel`, pricePerNight: `₹${Math.round(900 * mult)}/night`, rating: 4.3, distanceFromCenter: "2.1 km from city center", bookingLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent('Travelers Cozy Hostel')}` },
-          { name: `Backpackers Haven`, pricePerNight: `₹${Math.round(1000 * mult)}/night`, rating: 4.0, distanceFromCenter: "0.8 km from city center", bookingLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent('Backpackers Haven')}` }
-        ],
-        midRange: [
-          { name: `${destination} Central Hotel`, pricePerNight: `₹${Math.round(3000 * mult)}/night`, rating: 4.4, distanceFromCenter: "0.5 km from city center", bookingLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(destination + ' Central Hotel')}` },
-          { name: `Parkview Residency`, pricePerNight: `₹${Math.round(2800 * mult)}/night`, rating: 4.2, distanceFromCenter: "1.1 km from city center", bookingLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent('Parkview Residency')}` },
-          { name: `The Comfort Suites`, pricePerNight: `₹${Math.round(3500 * mult)}/night`, rating: 4.5, distanceFromCenter: "1.9 km from city center", bookingLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent('The Comfort Suites')}` }
-        ],
-        luxury: [
-          { name: `The Grand ${destination} Palace`, pricePerNight: `₹${Math.round(8000 * mult)}/night`, rating: 4.8, distanceFromCenter: "0.2 km from city center", bookingLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent('The Grand ' + destination + ' Palace')}` },
-          { name: `Royal Heritage Resort`, pricePerNight: `₹${Math.round(7500 * mult)}/night`, rating: 4.7, distanceFromCenter: "3.5 km from city center", bookingLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent('Royal Heritage Resort')}` },
-          { name: `The Ritz Sovereign`, pricePerNight: `₹${Math.round(9500 * mult)}/night`, rating: 4.9, distanceFromCenter: "0.9 km from city center", bookingLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent('The Ritz Sovereign')}` }
-        ]
-      },
+      fallbackDataQuality: "curated-destination-profile",
+      hotelRecommendations: (() => {
+        const key = Object.keys(curatedFallbackDetails).find(k => destNormalized.includes(k)) || "";
+        const hotelCatalog: Record<string, any> = {
+          mumbai: {
+            budget: [
+              { name: "goSTOPS Mumbai", rating: 4.1, distanceFromCenter: "South Mumbai area", description: "Value-focused hostel option; verify current branch, room type and availability before booking." },
+              { name: "The Hosteller Mumbai", rating: 4.2, distanceFromCenter: "Mumbai", description: "Hostel-style budget stay; verify the exact Mumbai property and current rate before booking." },
+              { name: "Zostel Mumbai", rating: 4.2, distanceFromCenter: "Mumbai", description: "Popular backpacker-style accommodation; confirm current location and availability." }
+            ],
+            midRange: [
+              { name: "Residency Hotel Fort", rating: 4.4, distanceFromCenter: "Fort", description: "Central South Mumbai location convenient for heritage sights around Fort and Colaba." },
+              { name: "The Gordon House Hotel", rating: 4.3, distanceFromCenter: "Colaba", description: "Boutique option close to Gateway of India and Colaba attractions." },
+              { name: "Abode Bombay", rating: 4.5, distanceFromCenter: "Colaba", description: "Boutique stay in the Colaba heritage district; verify room category and current inclusions." }
+            ],
+            luxury: [
+              { name: "The Taj Mahal Palace, Mumbai", rating: 4.8, distanceFromCenter: "Colaba", description: "Landmark luxury hotel beside the Gateway of India with premium service and harbour access." },
+              { name: "The Oberoi, Mumbai", rating: 4.8, distanceFromCenter: "Nariman Point", description: "Luxury waterfront stay at Nariman Point, well placed for South Mumbai." },
+              { name: "Trident, Nariman Point", rating: 4.7, distanceFromCenter: "Nariman Point", description: "Established upscale waterfront hotel with convenient South Mumbai access." }
+            ]
+          },
+          varanasi: {
+            budget: [
+              { name: "goSTOPS Varanasi", rating: 4.2, distanceFromCenter: "Varanasi", description: "Social budget stay suited to value-focused travellers; verify current property details." },
+              { name: "Zostel Varanasi", rating: 4.3, distanceFromCenter: "Varanasi", description: "Backpacker-style stay with easy access to city sightseeing; verify exact room type." },
+              { name: "Moustache Varanasi", rating: 4.3, distanceFromCenter: "Varanasi", description: "Budget hostel/guesthouse option; check current location and availability." }
+            ],
+            midRange: [
+              { name: "Ganpati Guest House", rating: 4.4, distanceFromCenter: "Ghats area", description: "Guesthouse near the riverfront, convenient for old-city and ghat exploration." },
+              { name: "Hotel Temple on Ganges", rating: 4.3, distanceFromCenter: "Assi Ghat area", description: "Mid-range riverfront-area option convenient for Assi Ghat and early-morning activities." },
+              { name: "Hotel Alka", rating: 4.2, distanceFromCenter: "Ghats area", description: "Established ghat-side option; verify the specific room view and access conditions." }
+            ],
+            luxury: [
+              { name: "BrijRama Palace, Varanasi", rating: 4.7, distanceFromCenter: "Darbhanga Ghat", description: "Heritage riverfront luxury property with direct access to the old-city ghat atmosphere." },
+              { name: "Taj Ganges, Varanasi", rating: 4.6, distanceFromCenter: "Nadesar", description: "Full-service upscale hotel with larger grounds away from the narrow old-city lanes." },
+              { name: "Taj Nadesar Palace", rating: 4.8, distanceFromCenter: "Nadesar", description: "High-end heritage palace stay focused on privacy, service and a quieter setting." }
+            ]
+          },
+          bali: {
+            budget: [
+              { name: "Cara Cara Inn", rating: 4.2, distanceFromCenter: "Kuta", description: "Value-focused Kuta option useful for travellers prioritizing beach access and a modest room budget." },
+              { name: "Puri Garden Hotel & Hostel", rating: 4.5, distanceFromCenter: "Ubud", description: "Well-known hostel/hotel format in Ubud; verify private-room versus dorm pricing." },
+              { name: "Kuta Suci Guesthouse", rating: 4.1, distanceFromCenter: "Kuta", description: "Simple guesthouse-style accommodation in Kuta; confirm current amenities and availability." }
+            ],
+            midRange: [
+              { name: "The ONE Legian", rating: 4.3, distanceFromCenter: "Legian", description: "Mid-range Legian hotel with practical access to Kuta/Legian dining and nightlife." },
+              { name: "Anumana Ubud Hotel", rating: 4.5, distanceFromCenter: "Ubud", description: "Boutique Ubud option near central attractions and Monkey Forest area." },
+              { name: "Swiss-Belresort Watu Jimbar", rating: 4.4, distanceFromCenter: "Sanur", description: "Resort-style mid-range stay in Sanur, useful for a quieter coastal base." }
+            ],
+            luxury: [
+              { name: "The Kayon Jungle Resort", rating: 4.8, distanceFromCenter: "Ubud area", description: "Luxury jungle resort experience outside central Ubud, best suited to travellers prioritizing retreat time." },
+              { name: "AYANA Resort Bali", rating: 4.8, distanceFromCenter: "Jimbaran", description: "Large luxury resort complex in Jimbaran with extensive on-site facilities." },
+              { name: "Maya Ubud Resort & Spa", rating: 4.7, distanceFromCenter: "Ubud", description: "Upscale Ubud resort blending a natural setting with convenient access to the cultural centre." }
+            ]
+          },
+          baku: {
+            budget: [
+              { name: "Sahil Hostel & Hotel", rating: 4.2, distanceFromCenter: "Central Baku", description: "Budget-oriented central option; verify current room category and operating details." },
+              { name: "Travel Inn Hostel", rating: 4.2, distanceFromCenter: "Central Baku", description: "Hostel-style central stay suitable for value-focused city sightseeing." },
+              { name: "Hostel Inn Baku", rating: 4.1, distanceFromCenter: "Central Baku", description: "Simple budget accommodation; confirm current reviews and room availability." }
+            ],
+            midRange: [
+              { name: "Centric Baku Boutique Hotel", rating: 4.5, distanceFromCenter: "Central Baku", description: "Boutique central option convenient for walking to major downtown sights." },
+              { name: "Promenade Hotel Baku", rating: 4.5, distanceFromCenter: "Old City / waterfront", description: "Mid-range/upscale option near the historic core and waterfront promenade." },
+              { name: "Midtown Hotel Baku", rating: 4.4, distanceFromCenter: "Central Baku", description: "Modern central hotel with practical road access across the city." }
+            ],
+            luxury: [
+              { name: "Four Seasons Hotel Baku", rating: 4.8, distanceFromCenter: "Waterfront / Old City", description: "Luxury waterfront hotel beside the historic core, strong for walkable central sightseeing." },
+              { name: "Fairmont Baku, Flame Towers", rating: 4.7, distanceFromCenter: "Flame Towers", description: "High-rise luxury stay with panoramic views above the city and Caspian waterfront." },
+              { name: "JW Marriott Absheron Baku", rating: 4.7, distanceFromCenter: "Central waterfront", description: "Full-service luxury hotel near the central waterfront and business district." }
+            ]
+          }
+        };
+        const tiers = hotelCatalog[key] || { budget: [], midRange: [], luxury: [] };
+        for (const tier of ['budget','midRange','luxury']) {
+          tiers[tier] = (tiers[tier] || []).map((h:any) => ({ ...h, pricePerNight: "Calculated", bookingLink: `https://www.booking.com/searchresults.html?ss=${encodeURIComponent(h.name + ' ' + destination)}` }));
+        }
+        return tiers;
+      })(),
       detailedTransportationCosts: {
         taxiStart: `₹${Math.round(50 * mult)}`,
         taxiPerKm: `₹${Math.round(15 * mult)}/km`,
