@@ -692,7 +692,7 @@ const drawMiniRouteMap = (doc: any, x: number, y: number, w: number, h: number, 
     if (i < nodes - 1) {
       const nextCx = x + 8 + ((i + 1) * step);
       const midX = (cx + nextCx) / 2;
-      const transMode = ["Walk", "Cab", "Metro", "Drive"][i % 4];
+      const transMode = String((activities[i + 1] as any)?.transportFromPrevious || (activities[i + 1] as any)?.transport || "Walk");
       
       // Draw tiny transport icon in the middle of the line segment
       doc.setFillColor(248, 250, 252);
@@ -2160,7 +2160,7 @@ export const exportPremiumTravelPDF = async (
         doc.text(simulatedDuration, cardX + 11.5, badgeY2 - 0.1, { align: "center" });
 
         // Row 2 - Badge 4: Transport (Balanced Icon & Text Center Grouping)
-        const simulatedTransit = ["Walk", "Cab", "Metro", "Drive"][actIdx % 4];
+        const simulatedTransit = String((act as any).transportFromPrevious || (act as any).transport || (actIdx === 0 ? "Walk" : "Cab"));
         const transitBoxX = cardX + 23;
         const transitBoxW = 24;
         const transitTextWidth = simulatedTransit.length * 0.85;

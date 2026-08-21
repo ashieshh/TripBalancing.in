@@ -586,63 +586,68 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     grandTotal: calculated.formatted.grandTotal
   };
 
-  // Reconcile day-by-day ON-TRIP spend. Long-distance travel and travel
-  // protection are trip-level costs and stay in the trip summary; they must not
-  // make Day 1 look artificially expensive.
+  // Reconcile day-by-day ON-TRIP spend from CATEGORY allocations first.
+  // Each visible daily component is an authoritative slice of the trip-level category,
+  // and dailyBudget is then derived from those components. This guarantees that:
+  //   1) each day's visible components add exactly to that day's displayed total; and
+  //   2) all days together add exactly to every trip-level category total.
   if (Array.isArray(itinerary.days) && itinerary.days.length > 0) {
     const dayCount = itinerary.days.length;
     const parseMoney = (value: any): number => {
-      if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-      const cleaned = String(value ?? "").replace(/[^0-9.-]/g, "");
-      const parsed = Number(cleaned);
-      return Number.isFinite(parsed) ? parsed : 0;
+      if (typeof value === "number") return Number.isFinite(value) ? Math.max(0, value) : 0;
+      const text = String(value ?? "").replace(/,/g, "");
+      if (/\bfree\b|included/i.test(text)) return 0;
+      const match = text.match(/[0-9]+(?:\.[0-9]+)?/);
+      if (!match) return 0;
+      const parsed = Number(match[0]);
+      return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
     };
-    const activitySubtotals = itinerary.days.map((day: any) => {
-      const activities = Array.isArray(day.activities) ? day.activities : [];
-      return activities.reduce((sum: number, activity: any) => sum + parseMoney(activity.cost), 0);
-    });
-    const allActivitySubtotal = activitySubtotals.reduce((sum: number, value: number) => sum + value, 0);
-    const destinationSpendTotal = calculated.hotel + calculated.food + calculated.localTransport + calculated.sightseeing + calculated.miscellaneous;
+
+    // Exact integer distributor: rounds the whole pool once and assigns every rupee.
+    const distributeExact = (total: number, weights: number[]): number[] => {
+      const target = Math.max(0, Math.round(total));
+      if (!weights.length) return [];
+      const safeWeights = weights.map(w => Number.isFinite(w) && w > 0 ? w : 0);
+      const weightSum = safeWeights.reduce((a, b) => a + b, 0);
+      const effective = weightSum > 0 ? safeWeights : weights.map(() => 1);
+      const effectiveSum = effective.reduce((a, b) => a + b, 0) || 1;
+      const raw = effective.map(w => target * w / effectiveSum);
+      const base = raw.map(v => Math.floor(v));
+      let remainder = target - base.reduce((a, b) => a + b, 0);
+      const order = raw.map((v, i) => ({ i, frac: v - Math.floor(v) }))
+        .sort((a, b) => b.frac - a.frac || a.i - b.i);
+      for (let k = 0; k < remainder; k++) base[order[k % order.length].i] += 1;
+      return base;
+    };
+
     const stayNights = Math.max(0, dayCount - 1);
-    const hotelPerNight = stayNights > 0 ? calculated.hotel / stayNights : 0;
-    const sharedNonHotelDaily = (calculated.food + calculated.localTransport + calculated.miscellaneous) / dayCount;
-    let allocatedSoFar = 0;
+    const hotelWeights = itinerary.days.map((_: any, idx: number) => idx < stayNights ? 1 : 0);
+    const evenWeights = itinerary.days.map(() => 1);
+    const activityWeights = itinerary.days.map((day: any) => {
+      const activities = Array.isArray(day.activities) ? day.activities : [];
+      return activities.reduce((sum: number, activity: any) => sum + parseMoney(activity?.cost), 0);
+    });
+
+    const hotelByDay = distributeExact(calculated.hotel, hotelWeights);
+    const foodByDay = distributeExact(calculated.food, evenWeights);
+    const transportByDay = distributeExact(calculated.localTransport, evenWeights);
+    const miscByDay = distributeExact(calculated.miscellaneous, evenWeights);
+    const activitiesByDay = distributeExact(calculated.sightseeing, activityWeights);
+
+    const fmtDayPart = (value: number) => `${currencySym}${Math.max(0, Math.round(value)).toLocaleString()}`;
 
     itinerary.days.forEach((day: any, idx: number) => {
-      const allocatedActivities = allActivitySubtotal > 0
-        ? calculated.sightseeing * activitySubtotals[idx] / allActivitySubtotal
-        : calculated.sightseeing / dayCount;
-      const accommodationForDay = idx < stayNights ? hotelPerNight : 0;
-      const rawDayTotal = accommodationForDay + sharedNonHotelDaily + allocatedActivities;
-      const isLastDay = idx === dayCount - 1;
-      const dayAlloc = isLastDay
-        ? Math.max(0, Math.round(destinationSpendTotal - allocatedSoFar))
-        : Math.max(0, Math.round(rawDayTotal));
-      allocatedSoFar += dayAlloc;
-      const formattedDay = `${currencySym}${dayAlloc.toLocaleString()}`;
+      const parts = [
+        hotelByDay[idx] || 0,
+        foodByDay[idx] || 0,
+        transportByDay[idx] || 0,
+        activitiesByDay[idx] || 0,
+        miscByDay[idx] || 0
+      ];
+      const dayAlloc = parts.reduce((sum, value) => sum + value, 0);
+      const formattedDay = fmtDayPart(dayAlloc);
       day.dailyBudget = formattedDay;
       day.estimatedTotalSpend = formattedDay;
-      // Transparent daily cost composition. These values reconcile to the same deterministic trip totals.
-      const accommodationDay = accommodationForDay;
-      const foodDay = calculated.food / dayCount;
-      const transportDay = calculated.localTransport / dayCount;
-      const miscDay = calculated.miscellaneous / dayCount;
-      const activityDay = allocatedActivities;
-      const transparentTotal = accommodationDay + foodDay + transportDay + miscDay + activityDay;
-      const scale = transparentTotal > 0 ? dayAlloc / transparentTotal : 1;
-      // Round components as integers, then assign the rounding remainder to misc.
-      // This guarantees the five visible line items add EXACTLY to dailyBudget.
-      const parts = [accommodationDay, foodDay, transportDay, activityDay, miscDay].map(v => Math.max(0, Math.round(v * scale)));
-      const roundedPartsTotal = parts.reduce((sum, v) => sum + v, 0);
-      parts[4] = Math.max(0, parts[4] + (dayAlloc - roundedPartsTotal));
-      // Extremely defensive fallback if a negative remainder ever exceeds misc.
-      let correction = dayAlloc - parts.reduce((sum, v) => sum + v, 0);
-      for (let i = parts.length - 1; correction !== 0 && i >= 0; i--) {
-        const next = parts[i] + correction;
-        if (next >= 0) { parts[i] = next; correction = 0; }
-        else { correction = next; parts[i] = 0; }
-      }
-      const fmtDayPart = (value: number) => `${currencySym}${Math.max(0, value).toLocaleString()}`;
       day.dailyCostBreakdown = {
         accommodation: fmtDayPart(parts[0]),
         food: fmtDayPart(parts[1]),
@@ -652,7 +657,6 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       };
     });
   }
-
 
 
   // GLOBAL CURRENCY NORMALIZATION
