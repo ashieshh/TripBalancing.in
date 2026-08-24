@@ -620,12 +620,43 @@ const getRazorpayKeys = () => {
   return { keyId, keySecret };
 };
 
+// Require a real signed-in Supabase user for payment operations.
+async function verifyPaymentUser(req: express.Request, res: express.Response, next: express.NextFunction) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Please sign in before purchasing a plan." });
+    }
+    const token = authHeader.substring(7).trim();
+    if (!token || !supabaseAuth) {
+      return res.status(401).json({ error: "Unable to verify your signed-in session." });
+    }
+    const { data: { user }, error } = await supabaseAuth.auth.getUser(token);
+    if (error || !user?.id || !user.email) {
+      return res.status(401).json({ error: "Your session is invalid or expired. Please sign in again." });
+    }
+    (req as any).paymentUser = { id: user.id, email: user.email };
+    next();
+  } catch (error) {
+    console.error("[Razorpay Auth] User verification failed:", error);
+    return res.status(401).json({ error: "Unable to verify your signed-in session." });
+  }
+}
+
+const PLAN_PRICES: Record<string, Record<string, number>> = {
+  INR: { pay_per_trip: 9900, yearly: 49900, lifetime: 149900 },
+  USD: { pay_per_trip: 200, yearly: 700, lifetime: 1900 }
+};
+
+const getServerPlanAmount = (planType: string, currency: string) =>
+  PLAN_PRICES[currency]?.[planType] ?? null;
+
 // Razorpay API configuration endpoint
 app.get("/api/razorpay/config", (req, res) => {
   const { keyId, keySecret } = getRazorpayKeys();
   const isConfigured = !!(keyId && keySecret);
   res.json({
-    keyId: keyId || "rzp_test_mock_key_id",
+    keyId: keyId || "",
     isConfigured
   });
 });
@@ -642,29 +673,19 @@ const handleCreateOrder = async (req: express.Request, res: express.Response) =>
     }
 
     const { planType, currency = "INR", receipt } = req.body;
-    let amount = req.body.amount; // May be passed in paise directly or calculated from planType
-
-    if (amount === undefined || amount === null) {
-      const isUsd = currency === "USD";
-      if (isUsd) {
-        if (planType === "pay_per_trip") amount = 200; // $2 (200 cents)
-        else if (planType === "yearly") amount = 700; // $7
-        else if (planType === "lifetime") amount = 1900; // $19
-        else amount = 200;
-      } else {
-        if (planType === "pay_per_trip") amount = 9900; // ₹99 (9900 paise)
-        else if (planType === "yearly") amount = 49900; // ₹499
-        else if (planType === "lifetime") amount = 149900; // ₹1499
-        else amount = 9900;
-      }
+    const paymentUser = (req as any).paymentUser as { id: string; email: string };
+    const targetCurrency = String(currency || "INR").toUpperCase();
+    if (!["pay_per_trip", "yearly", "lifetime"].includes(planType)) {
+      return res.status(400).json({ error: "Invalid TripBalancing plan." });
     }
-
-    // Minimum amount: 100 paise
-    if (typeof amount !== "number" || amount < 100) {
-      return res.status(400).json({ error: "Amount must be at least 100 paise." });
+    if (!["INR", "USD"].includes(targetCurrency)) {
+      return res.status(400).json({ error: "Unsupported payment currency." });
     }
-
-    const targetCurrency = currency || "INR";
+    // Price is always determined on the server. Never trust a browser-supplied amount.
+    const amount = getServerPlanAmount(planType, targetCurrency);
+    if (!amount) {
+      return res.status(400).json({ error: "Unable to determine the selected plan price." });
+    }
 
     const razorpay = new Razorpay({
       key_id: keyId,
@@ -674,7 +695,12 @@ const handleCreateOrder = async (req: express.Request, res: express.Response) =>
     const options = {
       amount: Math.round(amount),
       currency: targetCurrency,
-      receipt: receipt || `receipt_${planType || "order"}_${Date.now()}`
+      receipt: receipt || `receipt_${planType || "order"}_${Date.now()}`,
+      notes: {
+        planType,
+        userId: paymentUser.id,
+        userEmail: paymentUser.email
+      }
     };
 
     try {
@@ -701,7 +727,8 @@ const handleCreateOrder = async (req: express.Request, res: express.Response) =>
           const fallbackOrder = await razorpay.orders.create({
             amount: fallbackInrAmount,
             currency: "INR",
-            receipt: receipt || `receipt_${planType || "order"}_inr_${Date.now()}`
+            receipt: receipt || `receipt_${planType || "order"}_inr_${Date.now()}`,
+            notes: { planType, userId: paymentUser.id, userEmail: paymentUser.email }
           });
           console.log(`[Razorpay API] Created fallback INR order ${fallbackOrder.id}`);
           return res.json({
@@ -736,8 +763,8 @@ const handleCreateOrder = async (req: express.Request, res: express.Response) =>
   }
 };
 
-app.post("/api/create-order", handleCreateOrder);
-app.post("/api/razorpay/create-order", handleCreateOrder);
+app.post("/api/create-order", verifyPaymentUser, handleCreateOrder);
+app.post("/api/razorpay/create-order", verifyPaymentUser, handleCreateOrder);
 
 // Verify Razorpay Payment Signature Handler
 const handleVerifyPayment = async (req: express.Request, res: express.Response) => {
@@ -752,9 +779,10 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
       });
     }
 
-    const { keySecret } = getRazorpayKeys();
+    const { keyId, keySecret } = getRazorpayKeys();
+    const paymentUser = (req as any).paymentUser as { id: string; email: string };
 
-    if (!keySecret) {
+    if (!keyId || !keySecret) {
       return res.status(400).json({ 
         status: "failure", 
         verified: false, 
@@ -766,12 +794,53 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
     hmac.update(razorpay_order_id + "|" + razorpay_payment_id);
     const generated_signature = hmac.digest("hex");
 
-    if (generated_signature === razorpay_signature) {
+    const expectedBuffer = Buffer.from(generated_signature, "utf8");
+    const receivedBuffer = Buffer.from(String(razorpay_signature), "utf8");
+    const signatureMatches = expectedBuffer.length === receivedBuffer.length && crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
+
+    if (signatureMatches) {
       console.log(`[Razorpay API] Signature verified successfully for order: ${razorpay_order_id}`);
 
-      // Record verified payment in server store and Supabase
-      const { user_email, planType, amount, user_id } = req.body;
-      if (user_email) {
+      // Fetch the authoritative Razorpay records. Plan, price and ownership must never come from the browser.
+      const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
+      const [order, payment] = await Promise.all([
+        razorpay.orders.fetch(razorpay_order_id),
+        razorpay.payments.fetch(razorpay_payment_id)
+      ]);
+      if (payment.order_id !== razorpay_order_id) {
+        return res.status(400).json({ status: "failure", verified: false, error: "Payment does not belong to this order." });
+      }
+      if (!["captured", "authorized"].includes(String(payment.status))) {
+        return res.status(400).json({ status: "failure", verified: false, error: "Payment has not been successfully authorized." });
+      }
+      const planType = String((order.notes as any)?.planType || "");
+      const orderUserId = String((order.notes as any)?.userId || "");
+      if (!PLAN_PRICES.INR[planType] || orderUserId !== paymentUser.id) {
+        return res.status(403).json({ status: "failure", verified: false, error: "Payment order ownership or plan is invalid." });
+      }
+      const orderCurrency = String(order.currency || "INR").toUpperCase();
+      const expectedAmount = getServerPlanAmount(planType, orderCurrency);
+      if (!expectedAmount || Number(order.amount) !== expectedAmount || Number(payment.amount) !== Number(order.amount)) {
+        return res.status(400).json({ status: "failure", verified: false, error: "Payment amount does not match the selected plan." });
+      }
+      const user_email = paymentUser.email;
+      const user_id = paymentUser.id;
+      const amountMajor = Number(order.amount) / 100;
+
+      // Idempotency: a verified Razorpay payment can grant entitlement only once.
+      let alreadyProcessed = IN_MEMORY_PAYMENTS.some(p => p.razorpay_payment_id === razorpay_payment_id);
+      if (!alreadyProcessed && supabaseAdmin) {
+        const { data: existingPayment } = await supabaseAdmin
+          .from("payments")
+          .select("razorpay_payment_id")
+          .eq("razorpay_payment_id", razorpay_payment_id)
+          .maybeSingle();
+        alreadyProcessed = !!existingPayment;
+      }
+      if (alreadyProcessed) {
+        return res.json({ status: "success", verified: true, alreadyProcessed: true, planType, currency: orderCurrency, amount: amountMajor, tripsAdded: 0, message: "Payment was already verified." });
+      }
+      {
         const paymentRec: PaymentRecord = {
           id: `pay_rec_${Date.now()}`,
           user_id: user_id,
@@ -779,8 +848,8 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
           razorpay_order_id: razorpay_order_id,
           razorpay_payment_id: razorpay_payment_id,
           plan_purchased: planType || "pay_per_trip",
-          amount: amount || (planType === "yearly" ? 499 : planType === "lifetime" ? 1499 : 99),
-          currency: "INR",
+          amount: amountMajor,
+          currency: orderCurrency,
           payment_status: "captured",
           is_test_mode: false,
           created_at: new Date().toISOString()
@@ -814,8 +883,8 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
               razorpay_payment_id: razorpay_payment_id,
               plan_purchased: planType || "pay_per_trip",
               amount: paymentRec.amount,
-              currency: "INR",
-              payment_status: "captured"
+              currency: orderCurrency,
+              payment_status: String(payment.status)
             }]);
 
             await supabaseAdmin.from("subscriptions").upsert([{
@@ -825,6 +894,22 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
               purchase_date: new Date().toISOString(),
               status: "active"
             }]);
+
+            // Entitlement is granted server-side only after verified payment.
+            const profileUpdate: any = {
+              plan: planType,
+              is_premium: planType === "yearly" || planType === "lifetime"
+            };
+            if (planType === "pay_per_trip") {
+              const { data: existingProfile } = await supabaseAdmin
+                .from("user_profiles")
+                .select("paid_trips_balance")
+                .eq("id", user_id)
+                .maybeSingle();
+              const creditsToAdd = orderCurrency === "USD" ? 2 : 1;
+              profileUpdate.paid_trips_balance = Number(existingProfile?.paid_trips_balance || 0) + creditsToAdd;
+            }
+            await supabaseAdmin.from("user_profiles").update(profileUpdate).eq("id", user_id);
           } catch (e) {
             console.warn("[Razorpay Verification] Supabase sync warning:", e);
           }
@@ -849,7 +934,7 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
         }
       }
 
-      return res.json({ status: "success", verified: true, message: "Payment verified successfully" });
+      return res.json({ status: "success", verified: true, planType, currency: orderCurrency, amount: amountMajor, tripsAdded: planType === "pay_per_trip" ? (orderCurrency === "USD" ? 2 : 1) : 0, message: "Payment verified successfully" });
     } else {
       console.warn(`[Razorpay API] Signature mismatch for order: ${razorpay_order_id}`);
       
@@ -880,8 +965,8 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
   }
 };
 
-app.post("/api/verify-payment", handleVerifyPayment);
-app.post("/api/razorpay/verify-payment", handleVerifyPayment);
+app.post("/api/verify-payment", verifyPaymentUser, handleVerifyPayment);
+app.post("/api/razorpay/verify-payment", verifyPaymentUser, handleVerifyPayment);
 
 // ==============================================================================
 // Admin Dashboard Secure API Routes

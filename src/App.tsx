@@ -115,20 +115,18 @@ export default function App() {
 
   const isPremium = plan === "yearly" || plan === "lifetime";
 
-  const handleUpgradeSuccess = async (chosenPlan: "pay_per_trip" | "yearly" | "lifetime", tripsAddedCount = 1) => {
-    if (user) {
+  const handleUpgradeSuccess = async (chosenPlan: "pay_per_trip" | "yearly" | "lifetime", tripsAddedCount = 0) => {
+    if (!user) return;
+    // Payment entitlements are written by the server only after Razorpay verification.
+    // Refresh the authoritative profile instead of allowing the browser to grant itself a plan.
+    const profile = await db.getUserProfile(user.id, user.email);
+    if (profile) {
+      setPlan(profile.plan || chosenPlan);
+      setPaidTripsBalance(profile.paid_trips_balance ?? paidTripsBalance + tripsAddedCount);
+    } else {
+      // UI fallback only; no database entitlement is written from the browser.
       setPlan(chosenPlan);
-      let newBalance = paidTripsBalance;
-      if (chosenPlan === "pay_per_trip") {
-        newBalance = paidTripsBalance + (tripsAddedCount || 1);
-        setPaidTripsBalance(newBalance);
-      }
-      await db.upsertUserProfile({
-        id: user.id,
-        plan: chosenPlan,
-        is_premium: chosenPlan === "yearly" || chosenPlan === "lifetime",
-        paid_trips_balance: newBalance
-      });
+      if (chosenPlan === "pay_per_trip") setPaidTripsBalance(v => v + tripsAddedCount);
     }
   };
 

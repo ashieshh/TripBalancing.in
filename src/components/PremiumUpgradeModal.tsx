@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { db } from "../lib/supabase";
 import { 
   Crown, Sparkles, Zap, ShieldCheck, 
   ArrowRight, Landmark, Heart,
@@ -96,10 +97,12 @@ export default function PremiumUpgradeModal({
         });
       }
 
-      // 1. First call /api/create-order (or /api/razorpay/create-order)
+      // 1. Create the order as the authenticated user.
+      const accessToken = await db.getAccessToken();
+      if (!accessToken) throw new Error("Please sign in again before purchasing a plan.");
       const res = await fetch("/api/create-order", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
         body: JSON.stringify({ planType: selectedPlan, currency })
       });
 
@@ -116,7 +119,8 @@ export default function PremiumUpgradeModal({
       }
 
       const planInfo = getPlanDetails(selectedPlan, currency);
-      const keyId = razorpayConfig?.keyId || ((import.meta as any).env?.VITE_RAZORPAY_KEY_ID as string) || "rzp_test_TJGWI6QqKRLd1i";
+      const keyId = razorpayConfig?.keyId || "";
+      if (!keyId || !razorpayConfig?.isConfigured) throw new Error("Payment gateway is temporarily unavailable. Please try again later.");
 
       // 2. Configure official Razorpay Checkout popup
       const options = {
@@ -139,12 +143,11 @@ export default function PremiumUpgradeModal({
             // 3. Call /api/verify-payment after payment
             const verifyRes = await fetch("/api/verify-payment", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
               body: JSON.stringify({
                 razorpay_order_id: response.razorpay_order_id,
                 razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-                planType: selectedPlan
+                razorpay_signature: response.razorpay_signature
               })
             });
 
@@ -157,8 +160,8 @@ export default function PremiumUpgradeModal({
             // 4. Activate plan ONLY after successful server-side signature verification
             setIsSubmitting(false);
             setStep("success");
-            const tripsToAdd = (selectedPlan === "pay_per_trip" && currency === "USD") ? 2 : 1;
-            onUpgradeSuccess(selectedPlan, tripsToAdd);
+            const verifiedPlan = verifyData.planType as "pay_per_trip" | "yearly" | "lifetime";
+            onUpgradeSuccess(verifiedPlan, Number(verifyData.tripsAdded || 0));
           } catch (err: any) {
             console.error("Verification error:", err?.message || "Payment verification error");
             setPaymentError(err.message || "Payment verification failed. Please contact support.");
