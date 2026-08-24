@@ -306,6 +306,8 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
           days: Math.max(1, Number(travelDays) || Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1),
           travelStyle,
           userBudgetInput: fixedBudgetAmount,
+          startDate,
+          endDate,
         });
 
         setFeasibility(check);

@@ -1,0 +1,52 @@
+TripBalancing Step 2 — Global Budget & PDF Audit
+Date: 2026-08-24
+
+Scope preserved:
+- No UI redesign.
+- No payment/auth/Gemini changes.
+- No TripBalancing concept change.
+- Step 1 flight pricing preserved.
+
+Global fixes:
+1. Hotel nights now use actual start/end dates when available.
+   Example: Aug 31 -> Sep 3 = 3 nights, not 4.
+   Falls back to days - 1 only when dates are unavailable.
+2. Fixed-budget feasibility now passes startDate/endDate into the same budget engine.
+3. Daily accommodation allocation uses the exact calculated night count and leaves departure day at zero when appropriate.
+4. Daily visible total remains the exact sum of accommodation + food + local transport + activities + miscellaneous.
+5. PDF now reconciles a cloned itinerary through the same global budgetCalculator used by the website before formatting.
+   PDF no longer acts as a separate budget engine or silently moves discrepancies into Miscellaneous.
+6. PDF realistic total is derived from the already-reconciled visible category sum.
+
+Verification performed:
+- TypeScript/TSX syntax parse: PASS.
+- budgetCalculator standalone TypeScript compile: PASS.
+- Mathematical tests:
+  * Mumbai -> Varanasi, 4 days / 3 nights / 2 travelers: category grand total reconciles; daily destination totals reconcile; departure stay = 0.
+  * Mumbai -> Baku international, 4 days / 3 nights / 2 travelers: PASS.
+  * Delhi -> Goa, 7 days / 6 nights / 1 traveler: PASS.
+  * Mumbai local 1-day trip / 0 nights: PASS.
+  * London -> Paris trip crossing year boundary: PASS.
+
+Cleanup performed (unused/stale only):
+- Removed old duplicate server-fixed.ts.
+- Removed unused root components/Dashboard.tsx duplicate.
+- Removed unused src/services/budgetEngine.ts duplicate calculator.
+- Removed unused src/components/LiveFlightSearch.tsx.
+- Removed unused src/components/DashboardOverview.tsx.
+- Removed unused old PWA source JPG after confirming generated public icons remain.
+- Removed unused src/db Drizzle/Postgres source tree; active runtime uses Supabase.
+- Removed old patch/fix note files from prior iterations.
+- Removed unused assets/.aistudio metadata folder.
+
+Kept intentionally:
+- Supabase files and migrations.
+- Firebase configuration because Google Contacts authentication still imports Firebase Auth.
+- Razorpay/payment files untouched (Step 3).
+- Gemini generation/fallback untouched (Step 4).
+- Both PWA manifests because index.html and service worker currently reference them.
+- Existing package dependencies/lockfiles were left unchanged to avoid an unverified dependency-lock rewrite.
+
+Build limitation:
+- Full npm dependency install/build could not be completed in this environment because dependency installation timed out.
+- This is not reported as a successful full production build.

@@ -1,4 +1,5 @@
 import { Itinerary, HotelRecommend } from "../types";
+import { reconcileItineraryBudget } from "./budgetCalculator";
 
 // Helper to load QR code or fall back
 const loadImgUrlBase64 = (url: string): Promise<string | null> => {
@@ -934,10 +935,12 @@ const sanitizeItineraryText = (obj: any): any => {
 
 // Robust Mathematical Validation and Proportionate Scaling Engine
 const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): Itinerary => {
-  const itinerary = sanitizeItineraryText(rawItinerary);
+  // PDF formatting must never run a second budget engine. Reconcile a clone with
+  // the same global calculator used by the website, then only format that result.
+  const cloned = JSON.parse(JSON.stringify(rawItinerary));
+  const itinerary = sanitizeItineraryText(reconcileItineraryBudget(cloned));
 
-  // Reconcile visible PDF categories without forcing realistic costs into the
-  // user's planned budget. The calculated breakdown is the source of truth.
+  // Read the already-reconciled categories. Do not independently rescale them.
   const b = itinerary.estimatedBudgetBreakdown || ({} as any);
   const d = itinerary.detailedBudgetSummary || ({} as any);
   const hasOrigin = Boolean(itinerary.origin && itinerary.origin.trim() !== "");
@@ -953,38 +956,15 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
   const explicitTotal = parseVal(b.total) || parseVal(d.grandTotal) || parseVal((itinerary as any).realisticEstimatedCost);
   const visibleSubtotal = acc + food + activitiesBudget + localTransport + flight + visaInsurance + miscellaneous;
   const calculatedTotal = explicitTotal > 0 ? explicitTotal : visibleSubtotal;
-
-  // Put any rounding/reconciliation delta into miscellaneous so every visible
-  // row adds exactly to the displayed grand total.
-  if (calculatedTotal > 0 && visibleSubtotal !== calculatedTotal) {
-    miscellaneous = Math.max(0, miscellaneous + (calculatedTotal - visibleSubtotal));
-  }
-
   const fmt = (value: number) => `${currencySym}${Math.round(value).toLocaleString()}`;
-  const formattedTotal = fmt(calculatedTotal);
 
-  itinerary.realisticEstimatedCost = formattedTotal;
-  itinerary.estimatedBudgetBreakdown = {
-    accommodation: fmt(acc),
-    food: fmt(food),
-    activities: fmt(activitiesBudget),
-    transport: fmt(localTransport),
-    miscellaneous: fmt(miscellaneous),
-    originToDestinationTravel: flight > 0 ? fmt(flight) : "N/A",
-    visaAndInsurance: fmt(visaInsurance),
-    total: formattedTotal
-  } as any;
-
-  itinerary.detailedBudgetSummary = {
-    accommodationTotal: fmt(acc),
-    foodTotal: fmt(food),
-    attractionTotal: fmt(activitiesBudget),
-    localTransportTotal: fmt(localTransport),
-    miscellaneousExpenses: fmt(miscellaneous),
-    originToDestinationCost: flight > 0 ? fmt(flight) : "N/A",
-    visaAndInsurance: fmt(visaInsurance),
-    grandTotal: formattedTotal
-  } as any;
+  // reconcileItineraryBudget guarantees category sum == realistic total. If an
+  // old saved itinerary is malformed, prefer the visible category sum rather
+  // than silently moving a discrepancy into Miscellaneous inside the PDF.
+  const pdfGrandTotal = visibleSubtotal > 0 ? visibleSubtotal : calculatedTotal;
+  itinerary.realisticEstimatedCost = fmt(pdfGrandTotal);
+  if (itinerary.estimatedBudgetBreakdown) itinerary.estimatedBudgetBreakdown.total = fmt(pdfGrandTotal);
+  if (itinerary.detailedBudgetSummary) itinerary.detailedBudgetSummary.grandTotal = fmt(pdfGrandTotal);
 
   // 3. Constrain location and hotel names to max 40 chars
   if (itinerary.placesToVisit) {
@@ -1056,7 +1036,7 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
   });
 
   const plannedBudgetValue = parseVal((itinerary as any).plannedBudget || itinerary.budgetAmount);
-  const shortfall = Math.max(0, calculatedTotal - plannedBudgetValue);
+  const shortfall = Math.max(0, pdfGrandTotal - plannedBudgetValue);
   (itinerary as any).budgetShortfall = fmt(shortfall);
 
   return itinerary;

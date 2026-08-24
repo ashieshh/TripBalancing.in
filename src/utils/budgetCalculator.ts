@@ -8,7 +8,8 @@ export interface BudgetFactorsInput {
   travelStyle: string; // Budget, Mid-range, Premium, Luxury, Family, Solo, Adventure
   userBudgetInput?: string | number; // User entered budget string or number
   flightEstimateInr?: number; // Optional market-based round-trip total for ALL travelers
-  startDate?: string; // Used only for accommodation seasonality
+  startDate?: string; // Used for seasonality and exact hotel-night calculation
+  endDate?: string; // Used with startDate to calculate hotel nights
 }
 
 export interface CalculatedCategoryBreakdown {
@@ -179,12 +180,25 @@ const getDestinationTier = (destination: string): { tier: 1 | 2 | 3; isInternati
   return { tier: 3, isInternational };
 };
 
+
+const calculateHotelNights = (startDate: string | undefined, endDate: string | undefined, fallbackDays: number): number => {
+  if (startDate && endDate) {
+    const start = new Date(`${startDate}T12:00:00Z`);
+    const end = new Date(`${endDate}T12:00:00Z`);
+    const diffMs = end.getTime() - start.getTime();
+    if (Number.isFinite(diffMs) && diffMs >= 0) {
+      return Math.max(0, Math.round(diffMs / 86400000));
+    }
+  }
+  return Math.max(0, fallbackDays - 1);
+};
+
 // Calculate realistic, mathematically consistent travel budget
 export const calculateRealWorldBudget = (input: BudgetFactorsInput): CalculatedCategoryBreakdown => {
   const travelers = Math.max(1, input.travelers || 1);
   const days = Math.max(1, input.days || 1);
-  // A 1-day trip has no overnight stay unless the itinerary explicitly adds one.
-  const nights = Math.max(0, days - 1);
+  // Hotel nights come from the actual dates when available. A 4-day Aug 31 → Sep 3 trip is 3 nights.
+  const nights = calculateHotelNights(input.startDate, input.endDate, days);
   const rooms = Math.ceil(travelers / 2);
   const styleRaw = (input.travelStyle || "Mid-range").toLowerCase();
 
@@ -508,7 +522,8 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     travelStyle,
     userBudgetInput,
     flightEstimateInr: Number(itinerary.flightEstimateInr) || undefined,
-    startDate: itinerary.startDate
+    startDate: itinerary.startDate,
+    endDate: itinerary.endDate
   });
 
   const currencySym = calculated.currencySymbol;
@@ -620,7 +635,7 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       return base;
     };
 
-    const stayNights = Math.max(0, dayCount - 1);
+    const stayNights = Math.min(dayCount, calculateHotelNights(itinerary.startDate, itinerary.endDate, dayCount));
     const hotelWeights = itinerary.days.map((_: any, idx: number) => idx < stayNights ? 1 : 0);
     const evenWeights = itinerary.days.map(() => 1);
     const activityWeights = itinerary.days.map((day: any) => {
