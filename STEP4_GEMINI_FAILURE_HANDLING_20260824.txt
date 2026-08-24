@@ -1,0 +1,74 @@
+TripBalancing Step 4 - Gemini quota / failure handling audit
+Date: 2026-08-24
+
+Scope
+- Gemini quota exhaustion (HTTP 429 / RESOURCE_EXHAUSTED)
+- Gemini overload/unavailable errors (HTTP 503 / UNAVAILABLE)
+- malformed JSON/schema failures
+- missing/invalid Gemini configuration
+- user trip-credit protection during provider failures
+- removal of misleading failure fallbacks that could show fabricated data
+
+Files changed
+1. server.ts
+2. src/App.tsx
+
+Changes
+
+1) Central Gemini failure classifier
+Added one shared classifier for quota, overload, configuration, malformed-response and unknown Gemini errors. Endpoints now receive consistent error codes instead of unrelated generic 500 errors.
+
+2) Bounded retries with backoff
+Gemini calls use the shared generateContentWithRetry helper. Retryable failures get bounded exponential backoff with jitter. The retry count is intentionally limited so a single user request cannot repeatedly consume quota or keep the UI hanging.
+
+3) Quota/overload cooldown
+Added a short server-side cooldown after 429/RESOURCE_EXHAUSTED or 503/UNAVAILABLE. New requests fail quickly with a retryable response instead of hammering Gemini while the provider is already rejecting calls.
+
+4) All server Gemini generation calls use the same retry wrapper
+The destination-recommendation endpoint was still bypassing the shared retry helper. It now uses generateContentWithRetry too.
+
+5) Trip allowance protection
+If Gemini fails and TripBalancing serves a curated destination fallback, the response is marked billableGeneration=false. The React client will not consume a free-trip allowance or paid Pay-Per-Trip token for a provider-failure fallback.
+
+6) Curated fallback is explicitly degraded
+Known destination profiles can still keep the app usable during a temporary AI failure, but the response is marked generation.source=curated-fallback and degraded=true. It is no longer silently presented internally as a normal Gemini success.
+
+7) Unknown destinations never receive fabricated placeholder travel data
+If Gemini is unavailable and there is no verified curated profile for the requested destination, the endpoint returns a structured retryable error. It does not invent hotels, restaurants or attractions and it does not consume a trip allowance.
+
+8) Cached fallback remains non-billable
+The itinerary cache preserves generationSource. A previously cached curated fallback cannot later be mistaken for a normal Gemini generation and consume a user trip token.
+
+9) Geocoding no longer silently returns New Delhi
+The old /api/geocode failure path returned New Delhi coordinates for any failed location. It now uses the existing multi-provider geocoder and returns GEOCODING_UNAVAILABLE when all providers fail. This prevents maps/routes for an unrelated city.
+
+10) Travel-advisory fallback no longer invents source citations
+When live grounded advisories fail, general safety reminders can still be returned, but sources=[] and the payload clearly says the content is a general fallback, not a live alert.
+
+11) Weather failure no longer fabricates a seven-day forecast
+The old Gemini weather catch generated made-up temperatures/conditions and attached generic source links. Now it serves the last successful cached forecast when available; otherwise it returns a structured temporary-unavailable response. Existing Open-Meteo itinerary weather is unchanged.
+
+12) Front-end quota handling
+src/App.tsx only increments free_trips_used or decrements paid_trips_balance when billableGeneration is not false.
+
+Not changed
+- TripBalancing UI/theme/navigation
+- budget engine or Step 2 calculations
+- flight pricing
+- Razorpay/payment logic
+- subscription prices/plans
+- Supabase/RLS/auth
+- PDF design
+- TripBalancing product concept
+
+Validation
+- Inspected every direct Gemini model call in server.ts. All remaining model calls now pass through generateContentWithRetry.
+- Ran the TypeScript compiler. A full type-check could not complete because the uploaded ZIP does not contain installed project dependencies and dependency installation timed out; the errors were missing packages/types (React, Express, @google/genai, etc.), not a successful production build result.
+- Removed the partially created node_modules directory before packaging.
+
+Recommended deployment test
+A. Normal Gemini success: generate a new uncached trip and verify the trip allowance decrements once.
+B. Temporarily use an invalid/limited Gemini key in a staging environment: verify a known curated destination can return degraded fallback without consuming a trip allowance.
+C. Test an uncached destination during provider failure: verify the UI receives a clear temporary-unavailable error and no free/paid token is consumed.
+D. Verify travel tips show general fallback with no fake live sources during AI failure.
+E. Verify /api/geocode never returns New Delhi simply because geocoding failed.

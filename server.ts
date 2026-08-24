@@ -290,7 +290,103 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
-// Robust auto-retry handler for Gemini API calls to gracefully absorb 503 (Unavailable) or 429 (Quota) errors
+type GeminiFailureKind = "quota" | "overloaded" | "config" | "invalid_response" | "unknown";
+
+class GeminiServiceError extends Error {
+  kind: GeminiFailureKind;
+  retryable: boolean;
+  retryAfterSeconds?: number;
+  original?: any;
+
+  constructor(message: string, kind: GeminiFailureKind, retryable: boolean, original?: any, retryAfterSeconds?: number) {
+    super(message);
+    this.name = "GeminiServiceError";
+    this.kind = kind;
+    this.retryable = retryable;
+    this.original = original;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+let GEMINI_COOLDOWN_UNTIL = 0;
+
+function classifyGeminiError(error: any): GeminiServiceError {
+  if (error instanceof GeminiServiceError) return error;
+  const status = String(error?.status || "").toUpperCase();
+  const code = Number(error?.code || error?.statusCode || 0);
+  const text = `${error?.message || ""} ${String(error || "")}`.toLowerCase();
+
+  if (status === "RESOURCE_EXHAUSTED" || code === 429 || text.includes("resource_exhausted") || text.includes("quota") || text.includes("429")) {
+    return new GeminiServiceError(
+      "The AI service has temporarily reached its usage limit. Please try again shortly.",
+      "quota",
+      true,
+      error,
+      60
+    );
+  }
+
+  if (status === "UNAVAILABLE" || code === 503 || text.includes("unavailable") || text.includes("overloaded") || text.includes("high demand") || text.includes("503")) {
+    return new GeminiServiceError(
+      "The AI service is temporarily busy. Please try again shortly.",
+      "overloaded",
+      true,
+      error,
+      20
+    );
+  }
+
+  if (text.includes("api key") || text.includes("permission") || code === 401 || code === 403) {
+    return new GeminiServiceError(
+      "The AI service is not configured correctly.",
+      "config",
+      false,
+      error
+    );
+  }
+
+  if (text.includes("json") || text.includes("schema") || text.includes("parse")) {
+    return new GeminiServiceError(
+      "The AI service returned an invalid response.",
+      "invalid_response",
+      true,
+      error,
+      5
+    );
+  }
+
+  return new GeminiServiceError(
+    "The AI service could not complete the request.",
+    "unknown",
+    false,
+    error
+  );
+}
+
+function geminiHttpErrorPayload(error: any) {
+  const classified = classifyGeminiError(error);
+  const codeMap: Record<GeminiFailureKind, string> = {
+    quota: "GEMINI_QUOTA_LIMIT",
+    overloaded: "GEMINI_TEMPORARILY_UNAVAILABLE",
+    config: "GEMINI_CONFIGURATION_ERROR",
+    invalid_response: "GEMINI_INVALID_RESPONSE",
+    unknown: "GEMINI_REQUEST_FAILED"
+  };
+
+  return {
+    status: classified.kind === "config" ? 500 : 503,
+    body: {
+      error: classified.message,
+      code: codeMap[classified.kind],
+      retryable: classified.retryable,
+      retryAfterSeconds: classified.retryAfterSeconds || null
+    },
+    classified
+  };
+}
+
+// Central retry + cooldown so every Gemini-powered endpoint behaves consistently
+// during quota exhaustion or temporary provider overload.
 async function generateContentWithRetry(
   ai: GoogleGenAI,
   options: {
@@ -298,39 +394,51 @@ async function generateContentWithRetry(
     contents: any;
     config?: any;
   },
-  maxRetries = 3,
+  maxRetries = 2,
   delayMs = 1000
 ): Promise<any> {
+  if (Date.now() < GEMINI_COOLDOWN_UNTIL) {
+    const retryAfter = Math.max(1, Math.ceil((GEMINI_COOLDOWN_UNTIL - Date.now()) / 1000));
+    throw new GeminiServiceError(
+      "The AI service is temporarily cooling down after a quota or overload response.",
+      "quota",
+      true,
+      undefined,
+      retryAfter
+    );
+  }
+
   let attempt = 0;
+
   while (true) {
     try {
       return await ai.models.generateContent(options);
-    } catch (error: any) {
+    } catch (rawError: any) {
+      const error = classifyGeminiError(rawError);
       attempt++;
-      const statusStr = String(error?.status || "");
-      const msgStr = String(error?.message || "");
-      const code = Number(error?.code || 0);
 
-      const isTransient =
-        statusStr === "UNAVAILABLE" ||
-        statusStr === "RESOURCE_EXHAUSTED" ||
-        code === 503 ||
-        code === 429 ||
-        msgStr.includes("503") ||
-        msgStr.includes("429") ||
-        msgStr.includes("overloaded") ||
-        msgStr.includes("demand") ||
-        msgStr.includes("RESOURCE_EXHAUSTED") ||
-        msgStr.includes("UNAVAILABLE") ||
-        String(error).includes("503") ||
-        String(error).includes("429");
+      if (error.kind === "quota" || error.kind === "overloaded") {
+        const cooldownSeconds = error.kind === "quota" ? 60 : 20;
+        GEMINI_COOLDOWN_UNTIL = Math.max(
+          GEMINI_COOLDOWN_UNTIL,
+          Date.now() + cooldownSeconds * 1000
+        );
+      }
 
-      if (isTransient && attempt <= maxRetries) {
-        const backoffDelay = delayMs * Math.pow(2, attempt - 1);
-        console.warn(`[Gemini API Transient Error] Attempt ${attempt} failed with ${msgStr || error}. Retrying in ${backoffDelay}ms...`);
+      if (error.retryable && attempt <= maxRetries) {
+        const backoffDelay =
+          delayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 300);
+        console.warn(
+          `[Gemini ${error.kind}] Attempt ${attempt} failed. Retrying in ${backoffDelay}ms.`
+        );
         await new Promise((resolve) => setTimeout(resolve, backoffDelay));
+
+        // The cooldown is intended to protect against new concurrent requests.
+        // This in-flight request is allowed to perform its bounded retry.
+        GEMINI_COOLDOWN_UNTIL = 0;
         continue;
       }
+
       throw error;
     }
   }
@@ -1564,7 +1672,7 @@ Rules:
 
 Return strict JSON only.`;
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithRetry(ai, {
       model: process.env.GEMINI_MODEL || "gemini-3.5-flash",
       contents: prompt,
       config: {
@@ -1618,7 +1726,14 @@ Return strict JSON only.`;
     return res.json({ recommendations });
   } catch (error: any) {
     console.error("Destination recommendation failed:", error?.message || error);
-    return res.status(500).json({ error: "Unable to recommend destinations right now. Please try again." });
+    const failure = geminiHttpErrorPayload(error);
+    if (failure.classified.retryAfterSeconds) {
+      res.setHeader("Retry-After", String(failure.classified.retryAfterSeconds));
+    }
+    return res.status(failure.status).json({
+      ...failure.body,
+      error: "Destination recommendations are temporarily unavailable. Please try again shortly."
+    });
   }
 });
 
@@ -2314,7 +2429,13 @@ app.post("/api/generate-itinerary", async (req, res) => {
           : undefined
       }, origin || "", destination, startDate, endDate, travelers);
       const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality(cachedPrepared)), diffDays));
-      return res.json({ itinerary: cachedItinerary });
+      const cachedSource = cached.data?.generationSource || "gemini";
+      cachedItinerary.generationSource = cachedSource;
+      return res.json({
+        itinerary: cachedItinerary,
+        generation: { source: cachedSource, degraded: cachedSource !== "gemini", cached: true },
+        billableGeneration: cachedSource === "gemini"
+      });
     }
 
     // Backend pricing and limit enforcement
@@ -2736,10 +2857,16 @@ Return the response in strict JSON format.`;
       timestamp: Date.now()
     });
 
-    return res.json({ itinerary: reconciledItinerary });
+    reconciledItinerary.generationSource = "gemini";
+    return res.json({
+      itinerary: reconciledItinerary,
+      generation: { source: "gemini", degraded: false },
+      billableGeneration: true
+    });
 
   } catch (error: any) {
-    console.warn("AI Itinerary Generation Error, providing high-quality custom fallback:", error);
+    const geminiFailure = geminiHttpErrorPayload(error);
+    console.warn(`[AI Itinerary Generation Error:${geminiFailure.classified.kind}]`, error?.message || error);
 
     const { destination, origin, startDate, endDate, tripDays, budgetAmount, travelers, travelStyle, isAiBudgetPlanner } = req.body;
 
@@ -2879,9 +3006,16 @@ Return the response in strict JSON format.`;
 
     let details = destinationDetails[Object.keys(destinationDetails).find(k => destNormalized.includes(k)) || ""];
     if (!details) {
-      return res.status(503).json({
-        error: "We could not generate verified destination-specific recommendations right now. Please retry instead of using placeholder travel data.",
-        code: "DESTINATION_DATA_UNVERIFIED"
+      if (geminiFailure.classified.retryAfterSeconds) {
+        res.setHeader("Retry-After", String(geminiFailure.classified.retryAfterSeconds));
+      }
+      return res.status(geminiFailure.status).json({
+        ...geminiFailure.body,
+        error: "We could not generate verified destination-specific recommendations right now. Please retry. Your trip allowance has not been used.",
+        code: geminiFailure.body.code === "GEMINI_REQUEST_FAILED"
+          ? "DESTINATION_DATA_UNVERIFIED"
+          : geminiFailure.body.code,
+        billableGeneration: false
       });
     }
 
@@ -3145,11 +3279,23 @@ Return the response in strict JSON format.`;
       timestamp: Date.now()
     });
 
-    return res.json({ itinerary: reconciledFallback });
+    reconciledFallback.generationSource = "curated-fallback";
+    return res.json({
+      itinerary: reconciledFallback,
+      generation: {
+        source: "curated-fallback",
+        degraded: true,
+        reason: geminiFailure.body.code
+      },
+      billableGeneration: false,
+      notice: "AI generation is temporarily unavailable, so TripBalancing used a verified destination profile. Your trip allowance was not used."
+    });
   }
 });
 
-// AI Geocoding Endpoint
+// Geocoding Endpoint
+// Uses the existing multi-provider geocoder (Open-Meteo -> Nominatim -> Gemini).
+// Never substitutes a different city's coordinates when every provider fails.
 app.post("/api/geocode", async (req, res) => {
   try {
     const { destination } = req.body;
@@ -3157,46 +3303,23 @@ app.post("/api/geocode", async (req, res) => {
       return res.status(400).json({ error: "Missing destination for geocoding" });
     }
 
-    // Check Geocode cache
-    const geoKey = destination.toLowerCase().trim();
-    const cachedGeo = GEOCODE_CACHE.get(geoKey);
-    if (cachedGeo && (Date.now() - cachedGeo.timestamp < GEOCODE_TTL)) {
-      console.log(`[Cache Hit] Returning cached geocode for: ${destination}`);
-      return res.json(cachedGeo.data);
+    const result = await geocodeDestination(destination);
+    if (!result) {
+      return res.status(503).json({
+        error: "Location coordinates are temporarily unavailable. Please try again.",
+        code: "GEOCODING_UNAVAILABLE",
+        retryable: true
+      });
     }
 
-    const ai = getGeminiClient();
-    const prompt = `Find the approximate global latitude and longitude coordinates for "${destination}". Respond in strict JSON.`;
-
-    const response = await generateContentWithRetry(ai, {
-      model: "gemini-3.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            latitude: { type: Type.NUMBER, description: "Latitude coordinate of destination" },
-            longitude: { type: Type.NUMBER, description: "Longitude coordinate of destination" }
-          },
-          required: ["latitude", "longitude"]
-        }
-      }
-    });
-
-    const parsed = JSON.parse(response.text.trim());
-    
-    // Store in cache
-    GEOCODE_CACHE.set(geoKey, {
-      data: parsed,
-      timestamp: Date.now()
-    });
-
-    return res.json(parsed);
+    return res.json(result);
   } catch (error: any) {
-    console.error("AI Geocoding Error:", error);
-    // Return standard fallback coordinates (New Delhi)
-    return res.json({ latitude: 28.6139, longitude: 77.2090 });
+    console.error("Geocoding Error:", error?.message || error);
+    return res.status(503).json({
+      error: "Location coordinates are temporarily unavailable. Please try again.",
+      code: "GEOCODING_UNAVAILABLE",
+      retryable: true
+    });
   }
 });
 
@@ -3363,10 +3486,10 @@ Return the response in strict JSON format matching this schema:
 
     return res.json({
       tips: fallbackTips,
-      sources: [
-        { title: "World Travel & Tourism Council (WTTC)", url: "https://wttc.org" },
-        { title: "Global Weather & Security Services", url: "https://weather.com" }
-      ]
+      sources: [],
+      isFallback: true,
+      degraded: true,
+      notice: "Live AI-grounded advisories are temporarily unavailable. These are general travel-safety reminders, not live destination alerts."
     });
   }
 });
@@ -3498,60 +3621,28 @@ Return the output in strict JSON format.`;
 
   } catch (error: any) {
     const { destination } = req.body || {};
-    const isQuotaError = error?.status === "RESOURCE_EXHAUSTED" || error?.code === 429 || String(error).includes("429") || String(error).includes("quota");
-    if (isQuotaError) {
-      console.log(`[Weather API] Serving elegant seasonal weather fallback for ${destination} due to API quota limit restriction.`);
-    } else {
-      console.log(`[Weather API] Serving elegant seasonal weather fallback for ${destination}:`, error?.message || error);
+    const cacheKey = String(destination || "").toLowerCase().trim();
+    const stale = WEATHER_CACHE.get(cacheKey);
+
+    if (stale?.data) {
+      return res.json({
+        ...stale.data,
+        isFallback: true,
+        degraded: true,
+        notice: "Live AI-grounded weather is temporarily unavailable. Showing the last successful cached forecast."
+      });
     }
-    
-    // Create an elegant, realistic 7-day fallback based on the destination
-    const fallbackDays = ["Today", "Tomorrow", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7"];
-    const baseTemp = destination?.toLowerCase().includes("goa") || destination?.toLowerCase().includes("mumbai") || destination?.toLowerCase().includes("maldives") ? 30 : 22;
-    const isTropical = destination?.toLowerCase().includes("beach") || destination?.toLowerCase().includes("goa") || destination?.toLowerCase().includes("tropical") || destination?.toLowerCase().includes("island");
 
-    const fallbackForecast = fallbackDays.map((day, i) => {
-      // Add slight variations
-      const tempMax = baseTemp + (i % 3) - (i % 2);
-      const tempMin = tempMax - 6 - (i % 2);
-      let condition = "Partly Cloudy";
-      let iconType = "partly-cloudy";
-      let precipitation = "15%";
-      let humidity = "60%";
+    const failure = geminiHttpErrorPayload(error);
+    if (failure.classified.retryAfterSeconds) {
+      res.setHeader("Retry-After", String(failure.classified.retryAfterSeconds));
+    }
 
-      if (i === 0 || i === 4) {
-        condition = isTropical ? "Sunny & Warm" : "Sunny";
-        iconType = "sunny";
-        precipitation = "5%";
-      } else if (i === 2 || i === 5) {
-        condition = "Light Showers";
-        iconType = "rainy";
-        precipitation = "60%";
-        humidity = "85%";
-      }
-
-      return {
-        dayName: day,
-        tempMax: Math.round(tempMax),
-        tempMin: Math.round(tempMin),
-        condition,
-        iconType,
-        precipitation,
-        humidity
-      };
+    return res.status(failure.status).json({
+      ...failure.body,
+      error: "Live weather could not be refreshed right now. Please try again shortly.",
+      weatherUnavailable: true
     });
-
-    const fallbackResult = {
-      summary: `Currently showing a typical seasonal weather forecast for ${destination || "your destination"}.`,
-      forecast: fallbackForecast,
-      sources: [
-        { title: "National Meteorological Center", url: "https://weather.com" },
-        { title: "Global Weather Archives", url: "https://wmo.int" }
-      ],
-      isFallback: true
-    };
-
-    return res.json(fallbackResult);
   }
 });
 

@@ -489,8 +489,10 @@ export default function App() {
       if (data.itinerary) {
         setActiveItinerary(data.itinerary);
         
-        // Deduct quota / increment usage upon successful generation
-        if (user && !isPremium) {
+        // Only consume a trip allowance when a normal Gemini generation succeeded.
+        // Provider-failure fallbacks are deliberately non-billable so users do not
+        // lose a free trip or paid token because Gemini hit quota/overload.
+        if (data.billableGeneration !== false && user && !isPremium) {
           if (plan === "free" && remainingFree > 0) {
             const nextFreeUsed = freeTripsUsed + 1;
             setFreeTripsUsed(nextFreeUsed);
