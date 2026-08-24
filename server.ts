@@ -1923,7 +1923,11 @@ async function getMarketFlightEstimate(origin: string, destination: string, depa
   const common = {
     origin: originCode,
     destination: destinationCode,
-    currency: 'inr',
+    // Aviasales Data API only supports USD/EUR/RUB for these fare endpoints.
+    // Request USD, then convert the returned fare to INR with TripBalancing's shared FX rate.
+    // Requesting INR caused valid Indian-origin searches to come back empty and forced the
+    // route-model fallback even when Aviasales had cached fares.
+    currency: 'usd',
     // Most TripBalancing users currently search from India. Explicitly selecting the
     // India market avoids falling back to Travelpayouts' default RU cache when market
     // inference is sparse.
@@ -2027,9 +2031,13 @@ async function getMarketFlightEstimate(origin: string, destination: string, depa
     return null;
   }
 
-  // Data API prices are cached market fares for ONE traveler in the requested currency.
-  // Add a modest 8% booking-variation reserve, then multiply exactly once by party size.
-  const perTravelerInr = Math.max(1, Math.round(picked.fare.price * 1.08));
+  // Data API prices are cached market fares for ONE traveler in USD (requested above).
+  // Convert through the same shared FX table used by the rest of TripBalancing. Do not add
+  // an arbitrary markup here: the UI already labels cached fares as estimates, and adding a
+  // hidden percentage makes the displayed flight price less faithful to the market source.
+  const usdToInr = getLiveCrossRate('USD', 'INR');
+  const safeUsdToInr = Number.isFinite(usdToInr) && usdToInr > 1 ? usdToInr : 85;
+  const perTravelerInr = Math.max(1, Math.round(picked.fare.price * safeUsdToInr));
   const value: FlightEstimate = {
     totalInr: Math.round(perTravelerInr * travelers),
     perTravelerInr,
