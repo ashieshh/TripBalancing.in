@@ -2365,6 +2365,18 @@ export const exportPremiumTravelPDF = async (
   });
 
   const hotelData = itinerary.hotelRecommendations || { budget: [], midRange: [], luxury: [] };
+  const accommodationAllowance = parseVal(itinerary.estimatedBudgetBreakdown?.accommodation || "0");
+  const startMs = itinerary.startDate ? new Date(`${itinerary.startDate}T00:00:00`).getTime() : NaN;
+  const endMs = itinerary.endDate ? new Date(`${itinerary.endDate}T00:00:00`).getTime() : NaN;
+  const hotelNights = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, Math.round((endMs - startMs) / 86400000)) : 0;
+  const nightlyAllowance = hotelNights > 0 ? Math.round(accommodationAllowance / hotelNights) : 0;
+  if (nightlyAllowance > 0) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(13, 148, 136);
+    doc.text(`Trip accommodation allowance: ${currencySym}${nightlyAllowance.toLocaleString()} per night (${hotelNights} night${hotelNights === 1 ? "" : "s"}). Recommendations below are reference options, not a forced tier.`, marginX, y);
+    y += 7;
+  }
 
   const renderTier = (tierName: string, list: any[], color: [number, number, number], comfortLabel: string) => {
     if (!Array.isArray(list) || list.length === 0) return;
@@ -2488,18 +2500,18 @@ export const exportPremiumTravelPDF = async (
     const transitVal = parseVal(b.originToDestinationTravel || "0");
     const visaInsuranceVal = parseVal((b as any).visaAndInsurance || "0");
 
-    // Keep flights separate from local transport so a large airfare does not make
-    // the PDF misleadingly report most of the budget as "Transit & Tours".
-    const localOtherVal = localTransVal + visaInsuranceVal + miscVal;
+    // Use the same categories as the detailed budget table. Do not merge unrelated
+    // insurance or miscellaneous costs into local transport.
     const flightVal = transitVal;
-    const totalVal = accommVal + foodVal + actVal + localOtherVal + flightVal || 1;
+    const totalVal = accommVal + foodVal + actVal + localTransVal + visaInsuranceVal + miscVal + flightVal || 1;
 
-    // Calculate percentage allocations for the 5 stat cards.
     const rawPcts = [
       (accommVal / totalVal) * 100,
       (foodVal / totalVal) * 100,
       (actVal / totalVal) * 100,
-      (localOtherVal / totalVal) * 100,
+      (localTransVal / totalVal) * 100,
+      (visaInsuranceVal / totalVal) * 100,
+      (miscVal / totalVal) * 100,
       (flightVal / totalVal) * 100
     ];
 
@@ -2521,7 +2533,9 @@ export const exportPremiumTravelPDF = async (
       [13, 148, 136], // Accommodation - Teal
       [217, 119, 6],  // Food - Amber
       [79, 70, 229],  // Activities - Indigo
-      [2, 132, 199],  // Local transport & other - Sky Blue
+      [2, 132, 199],  // Local transport - Sky Blue
+      [5, 150, 105],  // Visa / insurance - Emerald
+      [100, 116, 139],// Miscellaneous - Slate
       [124, 58, 237]  // Flights - Violet
     ];
 
@@ -2560,8 +2574,10 @@ export const exportPremiumTravelPDF = async (
       { name: "Accommodation", color: [13, 148, 136], pct: percentages[0] },
       { name: "Meals & Food", color: [217, 119, 6], pct: percentages[1] },
       { name: "Activities", color: [79, 70, 229], pct: percentages[2] },
-      { name: "Local Transport & Other", color: [2, 132, 199], pct: percentages[3] },
-      { name: "Flights", color: [124, 58, 237], pct: percentages[4] }
+      { name: "Local Transport", color: [2, 132, 199], pct: percentages[3] },
+      { name: "Visa / Insurance", color: [5, 150, 105], pct: percentages[4] },
+      { name: "Miscellaneous", color: [100, 116, 139], pct: percentages[5] },
+      { name: "Flights", color: [124, 58, 237], pct: percentages[6] }
     ];
 
     legendItems.forEach((item, idx) => {
@@ -2581,8 +2597,10 @@ export const exportPremiumTravelPDF = async (
       { name: "ACCOMMODATION", val: b.accommodation, pct: percentages[0], color: [13, 148, 136], icon: "hotel" },
       { name: "MEALS & FOOD", val: b.food, pct: percentages[1], color: [217, 119, 6], icon: "clock" },
       { name: "ACTIVITIES", val: b.activities, pct: percentages[2], color: [79, 70, 229], icon: "calendar" },
-      { name: "LOCAL & OTHER", val: currencySym + localOtherVal.toLocaleString(), pct: percentages[3], color: [2, 132, 199], icon: "mapPin" },
-      { name: "FLIGHTS", val: currencySym + flightVal.toLocaleString(), pct: percentages[4], color: [124, 58, 237], icon: "mapPin" }
+      { name: "LOCAL TRANSPORT", val: currencySym + localTransVal.toLocaleString(), pct: percentages[3], color: [2, 132, 199], icon: "mapPin" },
+      { name: "VISA / INSURANCE", val: currencySym + visaInsuranceVal.toLocaleString(), pct: percentages[4], color: [5, 150, 105], icon: "mapPin" },
+      { name: "MISCELLANEOUS", val: currencySym + miscVal.toLocaleString(), pct: percentages[5], color: [100, 116, 139], icon: "mapPin" },
+      { name: "FLIGHTS", val: currencySym + flightVal.toLocaleString(), pct: percentages[6], color: [124, 58, 237], icon: "mapPin" }
     ];
 
     statCards.forEach((sc) => {
@@ -2658,7 +2676,12 @@ export const exportPremiumTravelPDF = async (
       ...(aiSafetyBufferValue > 0 ? [{ label: "Recommended Safety Buffer", val: aiSafetyBufferText }] : [])
     ];
 
-    const tableHeight = 12 + (categories.length * 4.8);
+    const flightSourceNote = itinerary.flightEstimateSource === "travelpayouts-aviasales-cache"
+      ? `Airfare source: recent cached Aviasales fare${itinerary.flightEstimateMethod ? ` (${itinerary.flightEstimateMethod})` : ""}. Not a guaranteed live booking price.`
+      : itinerary.flightEstimateSource === "route-model-fallback"
+        ? "Airfare source: planning estimate because a usable recent fare was unavailable for the selected dates."
+        : "";
+    const tableHeight = 12 + (categories.length * 4.8) + (flightSourceNote ? 7 : 0);
 
     // Consolidated Invoicing details table
     checkPageEnd(tableHeight + 10);
@@ -2684,6 +2707,13 @@ export const exportPremiumTravelPDF = async (
       doc.text(cat.label, marginX + 6, cy);
       doc.text(String(cat.val), 190, cy, { align: "right" });
     });
+    if (flightSourceNote) {
+      const noteY = y + 15 + (categories.length * 4.5);
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(6.8);
+      doc.setTextColor(100, 116, 139);
+      doc.text(doc.splitTextToSize(flightSourceNote, 166), marginX + 6, noteY);
+    }
 
     y += tableHeight + 5;
 

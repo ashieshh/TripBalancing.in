@@ -1,0 +1,21 @@
+TripBalancing Step 2 final consistency pass - 2026-08-24
+
+Scope only: budget/PDF consistency and stale-file cleanup. No product redesign.
+
+Changes:
+1. PDF allocation chart now uses the same seven categories as the detailed budget:
+   Accommodation, Food, Activities, Local Transport, Visa/Insurance, Miscellaneous, Flights.
+   Removed the misleading merged "Local & Other" category.
+2. Accommodation recommendations now show the trip's calculated accommodation allowance per night,
+   derived globally from accommodation total / actual date-based hotel nights. Recommendation tiers remain unchanged.
+3. PDF airfare section now identifies whether airfare came from recent Aviasales cached fare data or the route-model planning fallback.
+   Existing website fare-source wording remains intact.
+4. Removed obvious stale duplicate/patch files previously identified as unused. No runtime feature files were removed.
+
+Not changed:
+- UI theme/layout/navigation
+- TripBalancing budget concept
+- Razorpay
+- Gemini
+- Supabase/auth/RLS
+- Step 1 flight pricing logic

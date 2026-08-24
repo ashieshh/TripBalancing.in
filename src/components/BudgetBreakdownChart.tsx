@@ -117,6 +117,11 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
   );
 
   const destination = itinerary?.destination || "your destination";
+  const accommodationTotalValue = parseBudgetRange(breakdown.accommodation || "0").max;
+  const startMs = itinerary?.startDate ? new Date(`${itinerary.startDate}T00:00:00`).getTime() : NaN;
+  const endMs = itinerary?.endDate ? new Date(`${itinerary.endDate}T00:00:00`).getTime() : NaN;
+  const accommodationNights = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, Math.round((endMs - startMs) / 86400000)) : 0;
+  const accommodationPerNight = accommodationNights > 0 ? Math.round(accommodationTotalValue / accommodationNights) : 0;
   
   // Safe extraction of hotel recommendations with elegant fallbacks
   const hotelRecommendations = itinerary?.hotelRecommendations || {
@@ -940,6 +945,9 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Highly recommended hotels at different comfort tiers. Prices are estimated seasonal averages.
+            {accommodationPerNight > 0 && (
+              <> Your trip currently allocates about <strong>{currencySymbol}{accommodationPerNight.toLocaleString()} per night</strong> across {accommodationNights} night{accommodationNights === 1 ? "" : "s"}; the tiers below are reference options, not a forced selection.</>
+            )}
           </p>
 
           {/* Hotel Cards Grid */}
