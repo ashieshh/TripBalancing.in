@@ -2679,20 +2679,33 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
     const selectedTravelerGuidance = travelerTypeGuidance[String(travelerType)] || "Personalize pacing, lodging, activities, dining and transport appropriately for the stated traveler type without overriding explicit budget, style, interests or trip-purpose inputs.";
 
     const styleGuidance: Record<string, string> = {
-      "Budget": "Prioritize lowest practical cost, clean budget stays, public transport, free attractions and authentic local food. Never inflate real item prices.",
-      "Smart Luxury": "Calculate the best-value luxury plan: boutique or heritage hotels, selective private transfers, premium dining moments and high-value experiences without wasteful ultra-luxury spending.",
-      "Luxury": "Create a genuinely premium trip using high-quality hotels/resorts, comfortable private or premium transport where practical, fine dining and elevated experiences. Keep pricing realistic and avoid wasteful or implausible upgrades.",
-      "Adventure": "Prioritize outdoor activities, trekking, water sports, wildlife, active routes and safety requirements.",
-      "Backpacker": "Prioritize hostels, public transport, local eateries, free walking routes, social activities and low daily spend.",
-      "Food Explorer": "Build the trip around authentic food: breakfast, street food, lunch, dinner, desserts, markets, cooking classes and signature local dishes. Keep unit prices realistic and identify price units such as per piece, per plate or per person.",
-      "Wellness & Spa": "Prioritize spa, yoga, meditation, healthy food, nature, thermal experiences and slow pacing.",
-      "Culture & History": "Prioritize museums, heritage sites, architecture, local traditions, performances, guided history and UNESCO places.",
-      "Beach Escape": "Prioritize beaches, suitable beachfront stays, sunset points, water activities, seafood/local dining and weather-aware relaxation.",
-      "Nature & Wildlife": "Prioritize scenic landscapes, national parks, wildlife experiences, nature stays, viewpoints and environmentally responsible activities.",
-      "Shopping": "Prioritize authentic markets, local crafts, shopping districts, malls when relevant, price-conscious buying tips and enough free time for browsing.",
-      "Nightlife": "Prioritize safe evening districts, live music, lounges, night markets, entertainment and late-evening transport planning appropriate to the traveler type."
+      "Budget": "Build a genuinely good low-cost trip, not a stripped-down trip. Favor clean well-reviewed budget stays, public transit or economical local transport, free/low-fee signature sights, authentic local eateries, markets and high-value experiences. Include at least one memorable signature experience when affordable. Never inflate real item prices and never recommend premium services merely to consume budget.",
+      "Smart Luxury": "Build the strongest value-for-comfort itinerary. Favor distinctive boutique/heritage 3.5-4.5 star stays, comfortable rooms, selective private transfers only when they materially improve the day, one or two premium dining/experience moments, priority/skip-the-line options where useful, and local hidden gems. Avoid both backpacker choices and wasteful ultra-luxury. Every premium spend must have a clear experience or convenience benefit.",
+      "Luxury": "Create a visibly premium end-to-end trip, not a normal itinerary with inflated prices. The ACTUAL daily plan should use upscale or five-star lodging as the working stay, private chauffeur/airport transfer or premium transport where practical, destination-worthy fine dining or acclaimed upscale restaurants, reserved/premium cultural or leisure experiences, spa/wellness or yacht/private-tour style experiences when destination-appropriate, and concierge-like pacing with comfort buffers. Avoid hostels, scooters for primary transport, budget shacks/dhabas, generic souvenir stops and long unnecessary walks unless they are themselves iconic experiences. Keep all prices realistic and do not add luxury where the destination does not support it.",
+      "Adventure": "Make active experiences the spine of the itinerary. Prioritize destination-specific trekking, water sports, cycling, climbing, rafting, diving, wildlife/adventure excursions or equivalent activities, with realistic transfer time, difficulty, equipment, guide requirements, weather/season caveats and recovery time. Do not fill most days with passive sightseeing if meaningful adventure options exist.",
+      "Backpacker": "Design for independent low-cost exploration and social travel. Favor reputable hostels/guesthouses, public transport, walkable neighborhoods, local buses/trains, inexpensive local eateries, free walking routes, social hostels/markets/community experiences and flexible plans. Avoid private drivers and premium venues unless necessary for safety or geography.",
+      "Food Explorer": "Make food the organizing theme of every day. Include distinct breakfast/local cafe, market/street-food, regional lunch/dinner, dessert/beverage and food-craft experiences such as cooking classes, spice/produce markets, winery/brewery/tea/coffee experiences where locally appropriate. Name specific dishes and plausible venues, label veg/non-veg, state price units clearly, and do not turn every food stop into an attraction with fabricated claims.",
+      "Wellness & Spa": "Create a restorative low-rush itinerary. Favor wellness-focused or serene accommodation, reputable spa/ayurveda/onsen/hammam/thermal treatments where locally appropriate, yoga/meditation, healthy local food, nature, sleep-friendly timing, limited late nights, hydration/rest blocks and gentle transfers. Include at least one substantial wellness experience on most full days without fabricating medical benefits.",
+      "Culture & History": "Make heritage and local culture the core narrative. Prioritize important museums, archaeological/heritage sites, historic districts, architecture, UNESCO places, local crafts, religious/cultural context, performances and guided interpretation. Organize days by historical/geographic theme and include context-rich experiences rather than merely listing monuments.",
+      "Beach Escape": "Build the trip around coast time and water-oriented relaxation. Favor beachfront/near-beach stays where practical, distinct beaches rather than repetitive beach hopping, sunrise/sunset, swimming/water sports when safe, seafood/coastal cuisine, beach clubs or relaxed shacks appropriate to the selected budget tier, and weather/tide/monsoon-aware alternatives. Preserve downtime instead of over-scheduling.",
+      "Nature & Wildlife": "Make landscapes, ecosystems and wildlife the main purpose. Favor national parks, reserves, forests, waterfalls, birding, scenic drives, nature lodges and responsible guided wildlife experiences. Include best time-of-day logic, realistic remote transfers, seasonal/access caveats and low-impact behavior. Avoid claiming guaranteed animal sightings.",
+      "Shopping": "Design purposeful shopping time rather than filler. Include authentic local markets, craft districts, specialty streets, design boutiques/outlets/malls when destination-relevant, locally distinctive products, price/haggling/payment tips and enough unhurried browsing time. Pair shopping areas with nearby food/culture so routing remains efficient; avoid repeating generic souvenir markets.",
+      "Nightlife": "Make evenings a meaningful part of the trip while preserving daytime quality. Prioritize destination-appropriate live music, lounges, clubs, night markets, cultural shows, rooftop venues or entertainment districts; include one strong evening option on most full days, late-night meal ideas, realistic closing/return planning and dependable transport. Keep safety guidance practical and traveler-type appropriate without fear-based restrictions."
     };
     const selectedStyleGuidance = styleGuidance[String(travelStyle)] || styleGuidance.Budget;
+
+    const universalItineraryQualityRules = `
+ITINERARY QUALITY STANDARD (MANDATORY FOR EVERY TRAVEL STYLE):
+- The selected travel style must change WHAT the traveler does, WHERE they stay/eat, HOW they move, the pace, and the cost mix. Do not merely change adjectives or multiply prices.
+- Each full sightseeing day should normally contain 3-5 meaningful, geographically compatible activity/meal blocks. Arrival/departure days may be lighter but should still feel intentional.
+- Use destination-specific, plausible venue/experience names. Avoid repetitive templates such as "Attraction + Local Flavors" every day and avoid making a meal the only second activity unless the day is intentionally light.
+- Build a coherent daily story: morning anchor experience, practical lunch/food stop, afternoon experience, and an evening/sunset/dinner/entertainment option when appropriate.
+- Avoid repeating the same type of activity every day. Mix signature sights with hidden gems and style-specific experiences.
+- For premium styles, spend must buy visible quality/convenience/exclusivity; for value styles, savings must come from venue/transport choices rather than unrealistically low unit prices.
+- If a style-specific experience is unavailable or inappropriate at the destination/season, choose the closest authentic substitute and explain it naturally through the itinerary rather than inventing a venue.
+- Keep route geography realistic. Remote excursions need appropriate transfer modes and enough time; never show impossible 1-2 km route totals for far-away day trips.
+- Do not fabricate exact live ratings, opening hours, availability, weather, or guaranteed prices. Use estimates and advise verification where date-sensitive.
+`;
 
     let prompt = "";
     if (isAiBudgetPlanner) {
@@ -2706,6 +2719,7 @@ ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
 - Traveler-Type Planning Rules: ${selectedTravelerGuidance}
 - Travel Style: ${travelStyle}
 - Style Planning Rules: ${selectedStyleGuidance}
+${universalItineraryQualityRules}
 - Start Date: ${startDate}
 
 CRITICAL MANDATES FOR "AI BUDGET PLANNER ✨" MODE:
@@ -2722,6 +2736,10 @@ CRITICAL MANDATES FOR "AI BUDGET PLANNER ✨" MODE:
 5. Provide a short 'aiBudgetSummary' explaining that the backend will calculate the recommended ideal budget for this exact ${diffDays}-day trip. Do not choose a different trip because of currency.
 6. Set 'maxDaysComfortable' to ${diffDays}.
 7. STYLE PERSONALIZATION IS MANDATORY: the selected travel style (${travelStyle}) must visibly influence lodging level, dining, activities, transport comfort, pacing and hidden-gem choices according to the Style Planning Rules. Do not silently convert AI Budget Planner trips back to Budget style.
+7A. CONTENT DEPTH: For each full day, create 3-5 meaningful, geographically coherent blocks across morning/afternoon/evening, including at least one style-defining experience. Arrival/departure days may contain 2-4 blocks. Each activity must include a useful description, visitDuration, transportFromPrevious and travelTimeFromPrevious. Do not generate repetitive "one attraction + one meal" days unless geography/flight timing truly requires it.
+7B. STYLE-AUTHENTIC SPENDING: Never make a Luxury/Smart Luxury itinerary look premium only by increasing category totals. Select genuinely higher-tier lodging/venues/transport/experiences. Conversely, Budget/Backpacker must remain enjoyable and destination-specific rather than simply deleting activities.
+7C. LUXURY QUALITY FLOOR: When travelStyle is Luxury, the working itinerary must clearly reference an upscale/five-star or equivalent stay, premium/private transfers where useful, at least two destination-appropriate elevated experiences across the trip (for example private/curated tour, yacht/cruise, spa/wellness, premium cultural access, chef-led/fine dining), and comfortable pacing. Do not use hostel, budget guesthouse, scooter rental as the primary mobility plan, budget shack/dhaba as the signature dining plan, or generic souvenir shopping as a main luxury activity.
+7D. STYLE SIGNATURE: Every day should contain content that a user could recognize as belonging to the selected style without reading the style label. Apply the full Style Planning Rules, not only cost multipliers.
 8. Provide highly realistic cost ranges for 6 categories (Accommodation, Food, Local Transport, Sights, Misc, and originToDestinationTravel which estimates realistic flight/train transit costs from ${origin || "starting city"} to ${destination} for ${travelers} travelers, set to 'N/A' if no starting city is provided) in 'estimatedBudgetBreakdown'. Costs must match the selected travel style (${travelStyle}) while remaining realistic. The 'total' field must be the sum of all 6 categories including originToDestinationTravel.
 9. Under 'hotelRecommendations', recommend 3 Budget, 3 Mid-range, and 3 Luxury Hotels as reference options, but the actual itinerary lodging choices and budget calculation must follow the selected travel style (${travelStyle}).
 10. Under 'detailedBudgetSummary', estimate calculated totals for the entire trip duration and travelers for: accommodationTotal, foodTotal, localTransportTotal, attractionTotal, miscellaneousExpenses, originToDestinationCost (estimate realistic round-trip flight or train cost from ${origin || "starting city"} to ${destination} for ${travelers} travelers, or set to 'N/A' if no starting city is provided), and grandTotal. Make sure the grandTotal is the sum of all categories including originToDestinationCost!
@@ -2746,6 +2764,7 @@ ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
 - Interests: ${Array.isArray(interests) ? interests.join(", ") : "General"}
 - Planning Mode: ${planningMode || "known_destination"}
 - Style Planning Rules: ${selectedStyleGuidance}
+${universalItineraryQualityRules}
 - IMPORTANT: Display currency is intentionally excluded from trip-content generation. The same economic trip must have the same hotels, attractions, meals, activities and route regardless of whether the user later views INR, AED, USD, EUR, GBP or JPY.
 
 Please tailor the recommendations explicitly:
@@ -2777,7 +2796,10 @@ Please tailor the recommendations explicitly:
 7. List essential packing items suitable for the destination's climate during those dates.
 8. Provide essential transportation suggestions for getting around.
 9. List very practical travel tips, safety hacks, and cultural etiquettes.
-9A. STYLE PERSONALIZATION IS MANDATORY: hotels, food, fun activities, transport, pace, hidden gems and daily itinerary must visibly match the selected travel style.
+9A. STYLE PERSONALIZATION IS MANDATORY: hotels, food, fun activities, transport, pace, hidden gems and daily itinerary must visibly match the selected travel style. A user should be able to infer the selected style from the itinerary content without seeing the label.
+9A1. STYLE-AUTHENTIC SPENDING: style changes must come from real service/venue/experience choices, not by multiplying the price of the same item. Luxury and Smart Luxury require visibly higher-tier choices; Budget and Backpacker require smart value choices while preserving memorable experiences.
+9A2. LUXURY QUALITY FLOOR: for Luxury, use an upscale/five-star or equivalent working stay, premium/private transfers where useful, destination-worthy upscale dining, and at least two elevated experiences across the trip. Do not center the trip on scooters, hostels, budget shacks or generic shopping unless explicitly requested.
+9A3. ADVENTURE/FOOD/WELLNESS/CULTURE/BEACH/NATURE/SHOPPING/NIGHTLIFE QUALITY FLOOR: on most full days include at least one experience clearly tied to the selected theme. Do not let generic sightseeing dominate a themed itinerary when authentic theme-specific options exist.
 9AA. TRAVELER-TYPE PERSONALIZATION IS MANDATORY: apply the Traveler-Type Planning Rules above so the selected traveler type (${travelerType || "general traveler"}) meaningfully changes pacing, lodging suitability, dining, transport, activity timing and practical advice. Do not let traveler type override explicit budget, travel style, interests, trip purpose or dates, and do not use stereotypes or unnecessary restrictions.
 9B. PRICE INTEGRITY IS MANDATORY: never change the real price of the same item at the same outlet merely because the travel style changed. Distinguish per-piece, per-plate, per-person and group totals. Change the venue/service level, not the factual unit price.
 9C. For Smart Luxury, set budgetAmount to the Recommended Smart Luxury total and explain Minimum Luxury, Recommended Smart Luxury and Premium Luxury in aiBudgetSummary.
