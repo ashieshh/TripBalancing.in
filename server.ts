@@ -2661,6 +2661,21 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
 
     const ai = getGeminiClient();
 
+    const travelerTypeGuidance: Record<string, string> = {
+      "Couple": "Plan for two adults traveling together: favor shared experiences, comfortable pacing, date-friendly dining and rooms suitable for a couple. Do not make the trip romantic unless the purpose/interests suggest it.",
+      "Honeymoon": "Prioritize romantic atmosphere, privacy, memorable couple experiences, scenic meals, sunset/evening moments and honeymoon-suitable stays. Keep the selected budget/style authoritative and avoid forcing expensive upgrades.",
+      "Family": "Prioritize family-friendly attractions, practical meal times, manageable transfers, flexible breaks, convenient accommodation and activities that work for mixed ages. Avoid overly late nights unless explicitly requested.",
+      "Friends": "Prioritize social experiences, flexible group-friendly activities, shared dining, nightlife/entertainment when compatible with the selected style, and transport/accommodation practical for friends traveling together.",
+      "Solo": "Prioritize easy navigation, flexible pacing, centrally convenient stays, social-but-optional experiences and practical transport. Include normal destination safety guidance without making the itinerary restrictive or fear-based.",
+      "Business": "Prioritize efficient routing, reliable transport, punctual schedules, strong connectivity/work-friendly accommodation, practical meal options and buffer time around work commitments. Keep leisure activities concise unless the user asks for more.",
+      "Senior Citizens": "Prioritize comfortable pacing, shorter walking stretches, seating/rest breaks, elevators or accessible alternatives where practical, convenient transport, daytime sightseeing and medical/pharmacy access awareness. Do not assume disability; offer easier alternatives rather than removing major sights automatically.",
+      "Students": "Prioritize strong value, public transport, hostels/budget stays when style allows, student-friendly/free attractions, inexpensive local food and discount opportunities. Preserve safety and realistic travel times.",
+      "Women-only Trip": "Prioritize well-connected areas, reputable accommodation, dependable transport, sensible late-evening return options and practical destination-specific safety information. Do not restrict normal activities or stereotype travelers; keep recommendations empowering and equivalent in quality.",
+      "Group Trip": "Prioritize group logistics: meeting points, advance reservations where useful, group-capacity transport, restaurants/activities that can handle the party size, room allocation practicality and buffer time for coordination.",
+      "Parents with Children": "Prioritize child-friendly attractions, stroller/restroom practicality where relevant, shorter activity blocks, meal/rest breaks, safe transfers and accommodation suitable for parents with children. Avoid very late schedules unless requested."
+    };
+    const selectedTravelerGuidance = travelerTypeGuidance[String(travelerType)] || "Personalize pacing, lodging, activities, dining and transport appropriately for the stated traveler type without overriding explicit budget, style, interests or trip-purpose inputs.";
+
     let prompt = "";
     if (isAiBudgetPlanner) {
       prompt = `Create a highly comprehensive, personalized travel itinerary for TripBalancing.
@@ -2669,12 +2684,15 @@ Target Details:
 ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
 - Canonical Economic Budget: ${canonicalBudgetForAi}
 - Travelers: ${travelers} people
+- Traveler Type: ${travelerType || "Not specified"}
+- Traveler-Type Planning Rules: ${selectedTravelerGuidance}
 - Travel Style: Budget (Optimized by AI Budget Planner)
 - Start Date: ${startDate}
 
 CRITICAL MANDATES FOR "AI BUDGET PLANNER ✨" MODE:
 1. The user's selected duration is authoritative: generate EXACTLY ${diffDays} itinerary days. Never add or remove days based on currency or budget display.
-2. Build the itinerary from destination, origin, dates, traveler count and travel style only. The user's display currency MUST NOT influence attractions, hotels, restaurants, daily activities, route, transit choices, or trip pacing.
+2. Build the itinerary from destination, origin, dates, traveler count, traveler type and travel style only. The user's display currency MUST NOT influence attractions, hotels, restaurants, daily activities, route, transit choices, or trip pacing.
+2T. TRAVELER-TYPE PERSONALIZATION IS MANDATORY: apply the Traveler-Type Planning Rules above to pacing, lodging, dining, transport, activity timing and practical advice. Traveler type must influence the trip meaningfully, but must never override explicit budget, travel style, interests, trip purpose, dates or safety constraints.
 2A. ITINERARY REALISM: group each day geographically so consecutive stops are practical; avoid unnecessary cross-city backtracking. Never repeat the same major attraction on multiple days.
 2B. TIME REALISM: schedules must include realistic visit duration plus transfer/buffer time. Do not schedule overlapping activities. Keep arrival/departure days lighter when relevant. For each activity provide visitDuration, transportFromPrevious and travelTimeFromPrevious. Never suggest walking/metro for a remote excursion simply to save money; choose transport appropriate to geographic distance.
 2C. OPENING-HOURS SAFETY: do not claim exact opening hours unless reliable current data is available. Schedule museums/paid attractions during normal daytime operating windows and label users to verify live hours where hours may vary.
@@ -2716,6 +2734,7 @@ ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
 - Canonical Economic Budget: ${canonicalBudgetForAi}
 - Travelers: ${travelers} people
 - Traveler Type: ${travelerType || "Not specified"}
+- Traveler-Type Planning Rules: ${selectedTravelerGuidance}
 - Travel Style: ${travelStyle}
 - Budget Mode: ${budgetMode || "fixed"}
 - Trip Purpose: ${tripPurpose || "Vacation"}
@@ -2754,7 +2773,8 @@ Please tailor the recommendations explicitly:
 7. List essential packing items suitable for the destination's climate during those dates.
 8. Provide essential transportation suggestions for getting around.
 9. List very practical travel tips, safety hacks, and cultural etiquettes.
-9A. STYLE PERSONALIZATION IS MANDATORY: hotels, food, fun activities, transport, pace, hidden gems and daily itinerary must visibly match the selected travel style and traveler type (${travelerType || "general traveler"}).
+9A. STYLE PERSONALIZATION IS MANDATORY: hotels, food, fun activities, transport, pace, hidden gems and daily itinerary must visibly match the selected travel style.
+9AA. TRAVELER-TYPE PERSONALIZATION IS MANDATORY: apply the Traveler-Type Planning Rules above so the selected traveler type (${travelerType || "general traveler"}) meaningfully changes pacing, lodging suitability, dining, transport, activity timing and practical advice. Do not let traveler type override explicit budget, travel style, interests, trip purpose or dates, and do not use stereotypes or unnecessary restrictions.
 9B. PRICE INTEGRITY IS MANDATORY: never change the real price of the same item at the same outlet merely because the travel style changed. Distinguish per-piece, per-plate, per-person and group totals. Change the venue/service level, not the factual unit price.
 9C. For Smart Luxury, set budgetAmount to the Recommended Smart Luxury total and explain Minimum Luxury, Recommended Smart Luxury and Premium Luxury in aiBudgetSummary.
 

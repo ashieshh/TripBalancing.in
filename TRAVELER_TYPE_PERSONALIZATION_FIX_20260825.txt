@@ -1,0 +1,20 @@
+TripBalancing Traveler-Type Personalization Fix — 2026-08-25
+
+Scope: backend AI prompt personalization only. No UI redesign, pricing, payments, budget formulas, PDF layout, Supabase/RLS, or travel-style definitions changed.
+
+What changed
+- Added explicit traveler-type planning rules for:
+  Couple, Honeymoon, Family, Friends, Solo, Business, Senior Citizens,
+  Students, Women-only Trip, Group Trip, and Parents with Children.
+- Applied traveler-type rules to BOTH normal itinerary generation and AI Budget Planner mode.
+- Traveler type now explicitly influences pacing, lodging suitability, dining,
+  transportation, activity timing and practical advice.
+- Explicit user budget, travel style, interests, trip purpose, dates and safety rules
+  remain authoritative and are not overridden by traveler-type personalization.
+- Added anti-stereotyping language for traveler types such as Women-only Trip and
+  Senior Citizens so personalization remains useful without unnecessarily restricting travel.
+
+Build note
+A full TypeScript build could not be certified in this environment because the uploaded
+project does not contain installed dependencies/node_modules. The compiler stops on missing
+React/Express/etc. packages rather than on this prompt-only change.
