@@ -29,6 +29,9 @@ export default function PremiumUpgradeModal({
   const [step, setStep] = useState<"pricing" | "success">("pricing");
   const [selectedPlan, setSelectedPlan] = useState<"pay_per_trip" | "yearly" | "lifetime">("yearly");
   const [currency, setCurrency] = useState<"USD" | "INR">("USD");
+  const [pricingRegion, setPricingRegion] = useState<"IN" | "INTL" | null>(null);
+  const [regionLoading, setRegionLoading] = useState(false);
+  const [regionSaving, setRegionSaving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentError, setPaymentError] = useState<string>("");
 
@@ -51,7 +54,50 @@ export default function PremiumUpgradeModal({
         console.error("Failed to fetch Razorpay config:", err);
         setRazorpayConfig({ keyId: "", isConfigured: false });
       });
+
+    setRegionLoading(true);
+    db.getAccessToken()
+      .then((token) => {
+        if (!token) throw new Error("Please sign in again.");
+        return fetch("/api/account/pricing-region", { headers: { Authorization: `Bearer ${token}` } });
+      })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Unable to load account region.");
+        const region = data.pricingRegion === "IN" ? "IN" : data.pricingRegion === "INTL" ? "INTL" : null;
+        setPricingRegion(region);
+        if (region === "IN") setCurrency("INR");
+        if (region === "INTL") setCurrency("USD");
+      })
+      .catch((err) => {
+        console.error("Failed to fetch account pricing region:", err);
+        setPricingRegion(null);
+      })
+      .finally(() => setRegionLoading(false));
   }, [isOpen]);
+
+  const savePricingRegion = async (region: "IN" | "INTL") => {
+    if (regionSaving) return;
+    setRegionSaving(true);
+    setPaymentError("");
+    try {
+      const token = await db.getAccessToken();
+      if (!token) throw new Error("Please sign in again before setting your region.");
+      const res = await fetch("/api/account/pricing-region", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ pricingRegion: region })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Unable to save your account region.");
+      setPricingRegion(region);
+      setCurrency(region === "IN" ? "INR" : "USD");
+    } catch (err: any) {
+      setPaymentError(err.message || "Unable to save your account region.");
+    } finally {
+      setRegionSaving(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -103,7 +149,7 @@ export default function PremiumUpgradeModal({
       const res = await fetch("/api/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
-        body: JSON.stringify({ planType: selectedPlan, currency })
+        body: JSON.stringify({ planType: selectedPlan })
       });
 
       if (!res.ok) {
@@ -181,7 +227,7 @@ export default function PremiumUpgradeModal({
         console.error("Razorpay Payment failed:", response.error?.description || "Payment failed");
         const errMsg = response.error?.description || "Payment failed or was cancelled.";
         if (errMsg.toLowerCase().includes("merchant") || currency === "USD") {
-          setPaymentError("Razorpay Merchant Notice: USD ($) payments require enabling 'International Payments' in your Razorpay Dashboard (Settings -> Payment Methods). Switch to INR (₹) below for instant payment via UPI, Credit/Debit Cards, or Netbanking.");
+          setPaymentError("Razorpay Merchant Notice: USD ($) payments require International Payments to be enabled for your merchant account. Please contact support if checkout remains unavailable.");
         } else {
           setPaymentError(errMsg);
         }
@@ -226,7 +272,7 @@ export default function PremiumUpgradeModal({
       onClick={onClose}
     >
       <div 
-        className="bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-900 rounded-3xl max-w-5xl w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+        className="bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-900 rounded-3xl max-w-6xl w-full max-h-[92vh] shadow-2xl overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Banner header */}
@@ -273,42 +319,31 @@ export default function PremiumUpgradeModal({
                 ))}
               </div>
 
-              {/* Region & Currency Selector */}
+              {/* Account pricing region */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200/80 dark:border-slate-800">
                 <div className="flex items-center gap-2">
                   <Globe className="w-4 h-4 text-teal-500" />
                   <div>
-                    <span className="text-xs font-black text-slate-800 dark:text-slate-100 block">Select Region & Currency</span>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Choose USD ($) for international members or INR (₹) for India</span>
+                    <span className="text-xs font-black text-slate-800 dark:text-slate-100 block">Account Region & Pricing</span>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Pricing is linked to the region saved on your account.</span>
                   </div>
                 </div>
 
-                <div className="flex items-center bg-white dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm w-full sm:w-auto">
-                  <button
-                    type="button"
-                    onClick={() => setCurrency("USD")}
-                    className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                      currency === "USD"
-                        ? "bg-teal-600 text-white shadow-sm"
-                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                    }`}
-                  >
-                    <span>🌐</span>
-                    <span>USD ($) International</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCurrency("INR")}
-                    className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                      currency === "INR"
-                        ? "bg-teal-600 text-white shadow-sm"
-                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                    }`}
-                  >
-                    <span>🇮🇳</span>
-                    <span>INR (₹) India</span>
-                  </button>
-                </div>
+                {regionLoading ? (
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-500"><Loader2 className="w-4 h-4 animate-spin" /> Loading region...</div>
+                ) : pricingRegion ? (
+                  <div className="px-3.5 py-2 rounded-xl border border-teal-500/30 bg-teal-500/10 text-xs font-black text-teal-700 dark:text-teal-300">
+                    {pricingRegion === "IN" ? "🇮🇳 India • INR (₹)" : "🌐 International • USD ($)"}
+                  </div>
+                ) : (
+                  <div className="w-full sm:w-auto">
+                    <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mb-1.5">Choose once to finish account setup</div>
+                    <div className="flex items-center bg-white dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <button type="button" disabled={regionSaving} onClick={() => savePricingRegion("INTL")} className="flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900">🌐 Outside India</button>
+                      <button type="button" disabled={regionSaving} onClick={() => savePricingRegion("IN")} className="flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold bg-teal-600 text-white">🇮🇳 India</button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Pricing Cards Comparison */}
@@ -317,7 +352,7 @@ export default function PremiumUpgradeModal({
                   Select Your Plan Choice ({currency})
                 </span>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-stretch">
                   {/* Free Plan */}
                   <div 
                     className={`flex flex-col justify-between h-full p-5 rounded-3xl border transition-all duration-300 relative ${
@@ -527,20 +562,6 @@ export default function PremiumUpgradeModal({
                   <p className="leading-relaxed pl-6 text-[11px] text-rose-600 dark:text-rose-300">
                     {paymentError}
                   </p>
-                  {currency === "USD" && (
-                    <div className="pl-6 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCurrency("INR");
-                          setPaymentError("");
-                        }}
-                        className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-all shadow-sm cursor-pointer flex items-center gap-1.5"
-                      >
-                        <span>🇮🇳 Switch to INR (₹) & Retry Payment</span>
-                      </button>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -549,7 +570,7 @@ export default function PremiumUpgradeModal({
                 id="modal-proceed-to-checkout-btn"
                 type="button"
                 onClick={handleProceedWithRazorpay}
-                disabled={isSubmitting}
+                disabled={isSubmitting || regionLoading || !pricingRegion}
                 className="w-full flex items-center justify-center gap-2 h-14 bg-gradient-to-r from-teal-500 via-emerald-500 to-cyan-500 text-white font-bold rounded-2xl hover:shadow-lg hover:shadow-teal-500/10 active:scale-[0.99] transition-all cursor-pointer text-sm shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? (
@@ -572,7 +593,7 @@ export default function PremiumUpgradeModal({
 
               <div className="text-center space-y-2">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
-                  🔒 Secure Razorpay checkout • International USD & INR supported
+                  🔒 Secure Razorpay checkout • Currency is locked to your account region
                 </span>
                 {onOpenLegalPage && (
                   <div className="flex items-center justify-center gap-3 text-[11px] font-semibold text-slate-500 dark:text-slate-400">

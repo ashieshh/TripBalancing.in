@@ -858,6 +858,71 @@ const PLAN_PRICES: Record<string, Record<string, number>> = {
 const getServerPlanAmount = (planType: string, currency: string) =>
   PLAN_PRICES[currency]?.[planType] ?? null;
 
+
+type PricingRegion = 'IN' | 'INTL';
+
+async function getAccountPricingRegion(userId: string): Promise<PricingRegion | null> {
+  if (!supabaseAdmin) return null;
+  const { data, error } = await supabaseAdmin
+    .from('user_profiles')
+    .select('pricing_region,country_code')
+    .eq('id', userId)
+    .maybeSingle();
+  if (error) {
+    console.warn('[Pricing Region] Could not read profile region:', error.message);
+    return null;
+  }
+  if (data?.pricing_region === 'IN' || data?.pricing_region === 'INTL') return data.pricing_region;
+  if (data?.country_code === 'IN') return 'IN';
+  if (data?.country_code) return 'INTL';
+  return null;
+}
+
+app.get('/api/account/pricing-region', verifyPaymentUser, async (req, res) => {
+  try {
+    const paymentUser = (req as any).paymentUser as { id: string; email: string };
+    const region = await getAccountPricingRegion(paymentUser.id);
+    return res.json({
+      pricingRegion: region,
+      currency: region === 'IN' ? 'INR' : region === 'INTL' ? 'USD' : null,
+      needsSetup: !region
+    });
+  } catch (error) {
+    console.error('[Pricing Region] Read failed:', error);
+    return res.status(500).json({ error: 'Unable to read account pricing region.' });
+  }
+});
+
+app.post('/api/account/pricing-region', verifyPaymentUser, async (req, res) => {
+  try {
+    const paymentUser = (req as any).paymentUser as { id: string; email: string };
+    const requested = String(req.body?.pricingRegion || '').toUpperCase();
+    if (requested !== 'IN' && requested !== 'INTL') {
+      return res.status(400).json({ error: 'Please select India or International.' });
+    }
+    if (!supabaseAdmin) return res.status(503).json({ error: 'Account service is unavailable.' });
+
+    const existing = await getAccountPricingRegion(paymentUser.id);
+    if (existing) {
+      return res.status(409).json({ error: 'Your account pricing region is already set.', pricingRegion: existing });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('user_profiles')
+      .update({
+        pricing_region: requested,
+        country_code: requested === 'IN' ? 'IN' : 'INTL',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', paymentUser.id);
+    if (error) throw error;
+    return res.json({ pricingRegion: requested, currency: requested === 'IN' ? 'INR' : 'USD' });
+  } catch (error: any) {
+    console.error('[Pricing Region] Setup failed:', error);
+    return res.status(500).json({ error: error?.message || 'Unable to save account pricing region.' });
+  }
+});
+
 // Razorpay API configuration endpoint
 app.get("/api/razorpay/config", (req, res) => {
   const { keyId, keySecret } = getRazorpayKeys();
@@ -879,9 +944,13 @@ const handleCreateOrder = async (req: express.Request, res: express.Response) =>
       });
     }
 
-    const { planType, currency = "INR", receipt } = req.body;
+    const { planType, receipt } = req.body;
     const paymentUser = (req as any).paymentUser as { id: string; email: string };
-    const targetCurrency = String(currency || "INR").toUpperCase();
+    const pricingRegion = await getAccountPricingRegion(paymentUser.id);
+    if (!pricingRegion) {
+      return res.status(409).json({ error: "Please complete your account country/region before purchasing a plan.", needsRegionSetup: true });
+    }
+    const targetCurrency = pricingRegion === 'IN' ? 'INR' : 'USD';
     if (!["pay_per_trip", "yearly", "lifetime"].includes(planType)) {
       return res.status(400).json({ error: "Invalid TripBalancing plan." });
     }
@@ -906,7 +975,8 @@ const handleCreateOrder = async (req: express.Request, res: express.Response) =>
       notes: {
         planType,
         userId: paymentUser.id,
-        userEmail: paymentUser.email
+        userEmail: paymentUser.email,
+        pricingRegion
       }
     };
 
@@ -922,32 +992,13 @@ const handleCreateOrder = async (req: express.Request, res: express.Response) =>
     } catch (rzpErr: any) {
       console.error("[Razorpay API] Order creation failed:", rzpErr?.error?.description || rzpErr?.message || "Order creation failed.");
       
-      // If USD order creation failed due to merchant currency restrictions, retry with INR equivalent
+      // International accounts keep international pricing. Never silently fall back
+      // to India pricing if a USD payment cannot be created.
       if (targetCurrency === "USD") {
-        console.warn("[Razorpay API] USD order creation failed, falling back to INR...");
-        let fallbackInrAmount = 9900;
-        if (planType === "pay_per_trip") fallbackInrAmount = 9900; // ₹99
-        else if (planType === "yearly") fallbackInrAmount = 49900; // ₹499
-        else if (planType === "lifetime") fallbackInrAmount = 149900; // ₹1,499
-
-        try {
-          const fallbackOrder = await razorpay.orders.create({
-            amount: fallbackInrAmount,
-            currency: "INR",
-            receipt: receipt || `receipt_${planType || "order"}_inr_${Date.now()}`,
-            notes: { planType, userId: paymentUser.id, userEmail: paymentUser.email }
-          });
-          console.log(`[Razorpay API] Created fallback INR order ${fallbackOrder.id}`);
-          return res.json({
-            order_id: fallbackOrder.id,
-            id: fallbackOrder.id,
-            amount: fallbackOrder.amount,
-            currency: fallbackOrder.currency,
-            convertedFromUsd: true
-          });
-        } catch (fallbackErr: any) {
-          console.error("[Razorpay API] INR fallback order creation also failed:", fallbackErr?.message || fallbackErr);
-        }
+        const description = rzpErr?.error?.description || rzpErr?.message || "USD payment could not be started.";
+        return res.status(rzpErr?.statusCode || 400).json({
+          error: `International payment could not be started: ${description}`
+        });
       }
 
       const isAuthFailure = 
@@ -1026,6 +1077,11 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
         return res.status(403).json({ status: "failure", verified: false, error: "Payment order ownership or plan is invalid." });
       }
       const orderCurrency = String(order.currency || "INR").toUpperCase();
+      const accountRegion = await getAccountPricingRegion(paymentUser.id);
+      const accountCurrency = accountRegion === 'IN' ? 'INR' : accountRegion === 'INTL' ? 'USD' : null;
+      if (!accountCurrency || orderCurrency !== accountCurrency) {
+        return res.status(403).json({ status: "failure", verified: false, error: "Payment currency does not match the account pricing region." });
+      }
       const expectedAmount = getServerPlanAmount(planType, orderCurrency);
       if (!expectedAmount || Number(order.amount) !== expectedAmount || Number(payment.amount) !== Number(order.amount)) {
         return res.status(400).json({ status: "failure", verified: false, error: "Payment amount does not match the selected plan." });

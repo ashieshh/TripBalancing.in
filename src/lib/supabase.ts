@@ -56,7 +56,7 @@ class LocalMockClient {
   }
 
   // AUTH APIS
-  async signUp(email: string, password?: string, fullName?: string) {
+  async signUp(email: string, password?: string, fullName?: string, countryCode?: string) {
     const users = this.getUsers();
     if (users.find(u => u.email === email)) {
       return { data: { user: null }, error: { message: "User already exists with this email." } };
@@ -66,6 +66,8 @@ class LocalMockClient {
       id: Math.random().toString(36).substring(2, 11),
       email,
       fullName: fullName || email.split("@")[0],
+      country_code: countryCode || null,
+      pricing_region: countryCode === 'IN' ? 'IN' : countryCode ? 'INTL' : null,
       createdAt: new Date().toISOString()
     };
 
@@ -277,7 +279,7 @@ export const localMock = new LocalMockClient();
 export const db = {
   isMock: !isRealSupabaseConfigured,
 
-  async signUp(email: string, password?: string, fullName?: string) {
+  async signUp(email: string, password?: string, fullName?: string, countryCode?: string) {
     if (isRealSupabaseConfigured && supabase) {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -285,12 +287,14 @@ export const db = {
         options: {
           data: {
             full_name: fullName,
+            country_code: countryCode || null,
+            pricing_region: countryCode === 'IN' ? 'IN' : countryCode ? 'INTL' : null,
           }
         }
       });
       return { data, error };
     } else {
-      return localMock.signUp(email, password, fullName);
+      return localMock.signUp(email, password, fullName, countryCode);
     }
   },
 
@@ -368,6 +372,8 @@ export const db = {
           free_trips_used: data.free_trips_used ?? 0,
           paid_trips_balance: data.paid_trips_balance ?? 0,
           global_packing_checked: data.global_packing_checked || {},
+          country_code: data.country_code || null,
+          pricing_region: data.pricing_region || null,
           created_at: data.created_at,
           updated_at: data.updated_at
         };
@@ -413,6 +419,8 @@ export const db = {
           free_trips_used: row.free_trips_used ?? 0,
           paid_trips_balance: row.paid_trips_balance ?? 0,
           global_packing_checked: row.global_packing_checked || {},
+          country_code: row.country_code || null,
+          pricing_region: row.pricing_region || null,
           created_at: row.created_at,
           updated_at: row.updated_at
         };

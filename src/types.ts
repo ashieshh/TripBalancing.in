@@ -155,6 +155,8 @@ export interface UserProfile {
   free_trips_used: number;
   paid_trips_balance: number;
   global_packing_checked?: Record<string, boolean>;
+  country_code?: string | null;
+  pricing_region?: 'IN' | 'INTL' | null;
   created_at?: string;
   updated_at?: string;
 }

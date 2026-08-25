@@ -1,0 +1,24 @@
+TripBalancing Step 5B - Account Region Pricing
+
+What changed:
+- Added Country / Pricing Region to Create Account.
+- New accounts choose India or Outside India during registration.
+- New-account auth metadata is stored into user_profiles by the Supabase trigger.
+- Existing accounts with no region are asked once in the Premium screen.
+- Premium pricing is now locked to the saved account region:
+  India -> INR prices
+  International -> USD prices
+- Removed the user-facing manual INR/USD switch after region is saved.
+- Razorpay order creation now derives currency server-side from user_profiles.
+- Payment verification re-checks that the Razorpay order currency matches the account region.
+- International USD payment failure no longer silently falls back to cheaper India pricing.
+- Premium modal responsiveness improved: larger desktop width and internal vertical scrolling.
+
+Required database migration:
+Run STEP5B_ACCOUNT_REGION_PRICING.sql once in Supabase SQL Editor after deploying this code.
+
+Existing users:
+Existing accounts have no region yet. On first opening Premium they will be asked to choose India or Outside India once. The region is then locked in the profile.
+
+New users:
+Email/password signup records the chosen region immediately. OAuth/Google users complete it once when opening Premium if no region exists.

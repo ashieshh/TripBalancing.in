@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from "react";
-import { Mail, Lock, User, AlertCircle, ArrowRight, ArrowLeft, Check, KeyRound, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, User, AlertCircle, ArrowRight, ArrowLeft, Check, KeyRound, Eye, EyeOff, Globe2 } from "lucide-react";
 import { TripBalancingLogo } from "./TripBalancingLogo";
 import { db } from "../lib/supabase";
 
@@ -13,6 +13,7 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const [countryCode, setCountryCode] = useState<"IN" | "INTL" | "">("");
   
   // States for new password setting
   const [newPassword, setNewPassword] = useState("");
@@ -74,7 +75,11 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
           setError(passwordRequirementText);
           return;
         }
-        const { data, error: err } = await db.signUp(email, password, fullName);
+        if (!countryCode) {
+          setError("Please select your country/region. This sets the correct TripBalancing pricing currency.");
+          return;
+        }
+        const { data, error: err } = await db.signUp(email, password, fullName, countryCode);
         if (err) throw err;
         if (data?.user) {
           onSuccess(data.user);
@@ -262,6 +267,33 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
                     required={view === "register"}
                   />
                 </div>
+              </div>
+            )}
+
+            {view === "register" && (
+              <div className="space-y-1.5">
+                <label htmlFor="countryCode" className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider block">
+                  Country / Pricing Region
+                </label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
+                    <Globe2 className="w-4 h-4" />
+                  </span>
+                  <select
+                    id="countryCode"
+                    value={countryCode}
+                    onChange={(e) => setCountryCode(e.target.value as "IN" | "INTL" | "")}
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800 dark:text-slate-200 text-sm transition-colors"
+                    required
+                  >
+                    <option value="">Select your region</option>
+                    <option value="IN">India</option>
+                    <option value="INTL">Outside India / International</option>
+                  </select>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
+                  This sets your account pricing: India uses INR (₹); other regions use USD ($).
+                </p>
               </div>
             )}
 
