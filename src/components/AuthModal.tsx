@@ -273,7 +273,7 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
             {view === "register" && (
               <div className="space-y-1.5">
                 <label htmlFor="countryCode" className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider block">
-                  Country / Pricing Region
+                  Select Country
                 </label>
                 <div className="relative">
                   <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 pointer-events-none">
@@ -286,14 +286,11 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
                     className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800 dark:text-slate-200 text-sm transition-colors"
                     required
                   >
-                    <option value="">Select your region</option>
+                    <option value="">Select Country</option>
                     <option value="IN">India</option>
                     <option value="INTL">Outside India / International</option>
                   </select>
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
-                  This sets your account pricing: India uses INR (₹); other regions use USD ($).
-                </p>
               </div>
             )}
 
