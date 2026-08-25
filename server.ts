@@ -882,8 +882,12 @@ app.get('/api/account/pricing-region', verifyPaymentUser, async (req, res) => {
   try {
     const paymentUser = (req as any).paymentUser as { id: string; email: string };
     const region = await getAccountPricingRegion(paymentUser.id);
+    const { data: profile } = supabaseAdmin
+      ? await supabaseAdmin.from('user_profiles').select('country_code').eq('id', paymentUser.id).maybeSingle()
+      : { data: null as any };
     return res.json({
       pricingRegion: region,
+      countryCode: profile?.country_code || null,
       currency: region === 'IN' ? 'INR' : region === 'INTL' ? 'USD' : null,
       needsSetup: !region
     });
@@ -896,10 +900,11 @@ app.get('/api/account/pricing-region', verifyPaymentUser, async (req, res) => {
 app.post('/api/account/pricing-region', verifyPaymentUser, async (req, res) => {
   try {
     const paymentUser = (req as any).paymentUser as { id: string; email: string };
-    const requested = String(req.body?.pricingRegion || '').toUpperCase();
-    if (requested !== 'IN' && requested !== 'INTL') {
-      return res.status(400).json({ error: 'Please select India or International.' });
+    const countryCode = String(req.body?.countryCode || '').trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(countryCode)) {
+      return res.status(400).json({ error: 'Please select a valid country.' });
     }
+    const requested: PricingRegion = countryCode === 'IN' ? 'IN' : 'INTL';
     if (!supabaseAdmin) return res.status(503).json({ error: 'Account service is unavailable.' });
 
     const existing = await getAccountPricingRegion(paymentUser.id);
@@ -911,12 +916,12 @@ app.post('/api/account/pricing-region', verifyPaymentUser, async (req, res) => {
       .from('user_profiles')
       .update({
         pricing_region: requested,
-        country_code: requested === 'IN' ? 'IN' : 'INTL',
+        country_code: countryCode,
         updated_at: new Date().toISOString()
       })
       .eq('id', paymentUser.id);
     if (error) throw error;
-    return res.json({ pricingRegion: requested, currency: requested === 'IN' ? 'INR' : 'USD' });
+    return res.json({ pricingRegion: requested, countryCode, currency: requested === 'IN' ? 'INR' : 'USD' });
   } catch (error: any) {
     console.error('[Pricing Region] Setup failed:', error);
     return res.status(500).json({ error: error?.message || 'Unable to save account pricing region.' });

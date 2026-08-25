@@ -2,6 +2,7 @@ import { useState, useEffect, FormEvent } from "react";
 import { Mail, Lock, User, AlertCircle, ArrowRight, ArrowLeft, Check, KeyRound, Eye, EyeOff, Globe2 } from "lucide-react";
 import { TripBalancingLogo } from "./TripBalancingLogo";
 import { db } from "../lib/supabase";
+import { COUNTRY_OPTIONS } from "../constants/countries";
 
 interface AuthModalProps {
   onSuccess: (user: any) => void;
@@ -13,7 +14,7 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [countryCode, setCountryCode] = useState<"IN" | "INTL" | "">("");
+  const [countryCode, setCountryCode] = useState<string>("");
   
   // States for new password setting
   const [newPassword, setNewPassword] = useState("");
@@ -76,7 +77,7 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
           return;
         }
         if (!countryCode) {
-          setError("Please select your country/region. This sets the correct TripBalancing pricing currency.");
+          setError("Please select your country.");
           return;
         }
         const { data, error: err } = await db.signUp(email, password, fullName, countryCode);
@@ -282,13 +283,16 @@ export default function AuthModal({ onSuccess, onClose }: AuthModalProps) {
                   <select
                     id="countryCode"
                     value={countryCode}
-                    onChange={(e) => setCountryCode(e.target.value as "IN" | "INTL" | "")}
+                    onChange={(e) => setCountryCode(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 text-slate-800 dark:text-slate-200 text-sm transition-colors"
                     required
                   >
                     <option value="">Select Country</option>
-                    <option value="IN">India</option>
-                    <option value="INTL">Outside India / International</option>
+                    {COUNTRY_OPTIONS.map((country) => (
+                      <option key={country.code} value={country.code}>
+                        {country.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
