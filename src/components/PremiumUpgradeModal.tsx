@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { db } from "../lib/supabase";
-import { COUNTRY_OPTIONS, getCountryName } from "../constants/countries";
 import { 
   Crown, Sparkles, Zap, ShieldCheck, 
   ArrowRight, Landmark, Heart,
@@ -31,10 +30,7 @@ export default function PremiumUpgradeModal({
   const [selectedPlan, setSelectedPlan] = useState<"pay_per_trip" | "yearly" | "lifetime">("yearly");
   const [currency, setCurrency] = useState<"USD" | "INR">("USD");
   const [pricingRegion, setPricingRegion] = useState<"IN" | "INTL" | null>(null);
-  const [accountCountryCode, setAccountCountryCode] = useState<string | null>(null);
-  const [setupCountryCode, setSetupCountryCode] = useState<string>("");
   const [regionLoading, setRegionLoading] = useState(false);
-  const [regionSaving, setRegionSaving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentError, setPaymentError] = useState<string>("");
 
@@ -69,7 +65,6 @@ export default function PremiumUpgradeModal({
         if (!res.ok) throw new Error(data.error || "Unable to load account region.");
         const region = data.pricingRegion === "IN" ? "IN" : data.pricingRegion === "INTL" ? "INTL" : null;
         setPricingRegion(region);
-        setAccountCountryCode(typeof data.countryCode === "string" ? data.countryCode : null);
         if (region === "IN") setCurrency("INR");
         if (region === "INTL") setCurrency("USD");
       })
@@ -80,31 +75,6 @@ export default function PremiumUpgradeModal({
       .finally(() => setRegionLoading(false));
   }, [isOpen]);
 
-  const saveAccountCountry = async (countryCode: string) => {
-    if (regionSaving) return;
-    setRegionSaving(true);
-    setPaymentError("");
-    try {
-      const token = await db.getAccessToken();
-      if (!token) throw new Error("Please sign in again before setting your region.");
-      if (!countryCode) throw new Error("Please select your country.");
-      const res = await fetch("/api/account/pricing-region", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ countryCode })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Unable to save your account region.");
-      const region = data.pricingRegion === "IN" ? "IN" : "INTL";
-      setPricingRegion(region);
-      setAccountCountryCode(countryCode);
-      setCurrency(region === "IN" ? "INR" : "USD");
-    } catch (err: any) {
-      setPaymentError(err.message || "Unable to save your account region.");
-    } finally {
-      setRegionSaving(false);
-    }
-  };
 
   if (!isOpen) return null;
 
@@ -326,47 +296,14 @@ export default function PremiumUpgradeModal({
                 ))}
               </div>
 
-              {/* Account pricing region */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-                <div className="flex items-center gap-2">
-                  <Globe className="w-4 h-4 text-teal-500" />
-                  <div>
-                    <span className="text-xs font-black text-slate-800 dark:text-slate-100 block">Account Region & Pricing</span>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Pricing is linked to the region saved on your account.</span>
-                  </div>
+              {/* Pricing is resolved automatically from the country saved at signup.
+                  Do not ask for country again on the Premium/payment page. */}
+              {!regionLoading && !pricingRegion && (
+                <div className="flex items-start gap-2 p-3.5 bg-amber-50 dark:bg-amber-950/30 rounded-2xl border border-amber-200 dark:border-amber-900/60 text-xs font-semibold text-amber-800 dark:text-amber-200">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>Your account country is missing. Please sign out and sign in again. If this continues, contact support.</span>
                 </div>
-
-                {regionLoading ? (
-                  <div className="flex items-center gap-2 text-xs font-bold text-slate-500"><Loader2 className="w-4 h-4 animate-spin" /> Loading region...</div>
-                ) : pricingRegion ? (
-                  <div className="px-3.5 py-2 rounded-xl border border-teal-500/30 bg-teal-500/10 text-xs font-black text-teal-700 dark:text-teal-300">
-                    {accountCountryCode ? getCountryName(accountCountryCode) : (pricingRegion === "IN" ? "India" : "International")} • {pricingRegion === "IN" ? "INR (₹)" : "USD ($)"}
-                  </div>
-                ) : (
-                  <div className="w-full sm:w-[280px] space-y-2">
-                    <div className="text-[10px] font-bold text-amber-600 dark:text-amber-400">Select your country once to finish account setup</div>
-                    <select
-                      value={setupCountryCode}
-                      onChange={(e) => setSetupCountryCode(e.target.value)}
-                      disabled={regionSaving}
-                      className="w-full px-3 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200"
-                    >
-                      <option value="">Select Country</option>
-                      {COUNTRY_OPTIONS.map((country) => (
-                        <option key={country.code} value={country.code}>{country.name}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      disabled={regionSaving || !setupCountryCode}
-                      onClick={() => saveAccountCountry(setupCountryCode)}
-                      className="w-full px-3.5 py-2 rounded-xl text-xs font-bold bg-teal-600 text-white disabled:opacity-50"
-                    >
-                      {regionSaving ? "Saving..." : "Save Country"}
-                    </button>
-                  </div>
-                )}
-              </div>
+              )}
 
               {/* Pricing Cards Comparison */}
               <div className="space-y-4">

@@ -1,0 +1,8 @@
+TripBalancing Premium Country Flow Fix — 2026-08-25
+
+- Country is selected only during account creation.
+- Premium/payment page no longer contains a country selector or Save Country button.
+- Premium pricing is loaded automatically from the country already stored on the signed-in account.
+- India accounts use INR pricing; all other saved countries use USD pricing.
+- If an account has no saved country, checkout stays disabled and shows a missing-account-country message instead of asking for country again on the payment page.
+- No plan prices, Razorpay payment amounts, budget engine, PDF, or trip-generation logic were changed.
