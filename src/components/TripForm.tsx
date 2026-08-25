@@ -88,7 +88,8 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const [endDate, setEndDate] = useState("");
   const [travelDays, setTravelDays] = useState<number | "">("");
   type BudgetCurrency = "INR" | "USD" | "AED" | "EUR" | "GBP" | "JPY";
-  const [budgetCurrency, setBudgetCurrency] = useState<BudgetCurrency>("INR");
+  const [budgetCurrency, setBudgetCurrency] = useState<BudgetCurrency>("USD");
+  const preferredCurrencyLoadedRef = useRef(false);
   const [budgetVal, setBudgetVal] = useState("50000");
   const currencySymbols: Record<BudgetCurrency, string> = { INR: "₹", USD: "$", AED: "AED ", EUR: "€", GBP: "£", JPY: "¥" };
   const budgetPrefix = currencySymbols[budgetCurrency];
@@ -116,6 +117,37 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const recommendationsRef = useRef<HTMLElement | null>(null);
   const [errorHighlight, setErrorHighlight] = useState(false);
   const recommendBudget = budgetMode === "recommended" || travelStyle === "Smart Luxury";
+
+  // Default the trip-budget currency from the country saved on the user's account,
+  // while still allowing the user to choose any other supported currency afterwards.
+  useEffect(() => {
+    if (preferredCurrencyLoadedRef.current) return;
+    preferredCurrencyLoadedRef.current = true;
+
+    const supportedCurrencyForCountry = (countryCode?: string | null): BudgetCurrency => {
+      const code = String(countryCode || "").toUpperCase();
+      if (code === "IN") return "INR";
+      if (code === "AE") return "AED";
+      if (code === "GB") return "GBP";
+      if (code === "JP") return "JPY";
+      if ([
+        "AT", "BE", "HR", "CY", "EE", "FI", "FR", "DE", "GR", "IE",
+        "IT", "LV", "LT", "LU", "MT", "NL", "PT", "SK", "SI", "ES"
+      ].includes(code)) return "EUR";
+      return "USD";
+    };
+
+    (async () => {
+      try {
+        const user = await db.getSessionUser();
+        if (!user) return;
+        const profile = await db.getUserProfile(user.id, user.email || undefined);
+        setBudgetCurrency(supportedCurrencyForCountry(profile?.country_code));
+      } catch {
+        // USD remains the neutral fallback if the profile cannot be loaded.
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (!feasibility || feasibility.feasible || !feasibilityRef.current) return;
@@ -593,7 +625,13 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
             </div>
           </FieldLabel>
         ) : <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-700 dark:border-teal-900/40 dark:bg-teal-950/20 dark:text-teal-300"><div className="flex flex-wrap items-center justify-between gap-3"><div><Sparkles className="mb-2 h-5 w-5" /><strong>AI budget recommendation enabled.</strong><p className="mt-1 text-xs opacity-80">You will receive minimum practical, recommended and premium estimates in your selected currency.</p></div><select value={budgetCurrency} onChange={(event) => setBudgetCurrency(event.target.value as BudgetCurrency)} className="rounded-xl border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-slate-800 dark:border-teal-800 dark:bg-slate-900 dark:text-white" aria-label="Recommended budget currency"><option value="INR">₹ INR</option><option value="USD">$ USD</option><option value="AED">AED</option><option value="EUR">€ EUR</option><option value="GBP">£ GBP</option><option value="JPY">¥ JPY</option></select></div></div>}
-        <FieldLabel icon={<Users className="h-4 w-4 text-teal-500" />} label="Number of travelers"><div className="flex items-center gap-3"><button type="button" onClick={() => setTravelers((value) => Math.max(1, value - 1))} className="counter-btn">−</button><input type="number" min="1" value={travelers} onChange={(event) => setTravelers(Math.max(1, Number(event.target.value) || 1))} className="input-field text-center font-bold" /><button type="button" onClick={() => setTravelers((value) => value + 1)} className="counter-btn">+</button></div></FieldLabel>
+        <FieldLabel icon={<Users className="h-4 w-4 text-teal-500" />} label="Number of travelers">
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={() => setTravelers((value) => Math.max(1, value - 1))} className="counter-btn" aria-label="Decrease travelers">−</button>
+            <input type="text" inputMode="numeric" value={travelers} readOnly aria-label="Number of travelers" className="input-field cursor-default text-center font-bold" />
+            <button type="button" onClick={() => setTravelers((value) => Math.min(50, value + 1))} className="counter-btn" aria-label="Increase travelers">+</button>
+          </div>
+        </FieldLabel>
       </section>
 
       {planningMode === "help_choose" && (

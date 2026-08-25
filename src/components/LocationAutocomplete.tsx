@@ -33,6 +33,7 @@ export default function LocationAutocomplete({
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const requestId = useRef(0);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
@@ -66,6 +67,7 @@ export default function LocationAutocomplete({
         if (currentRequest !== requestId.current) return;
         const next = Array.isArray(data?.suggestions) ? data.suggestions : [];
         setSuggestions(next);
+        setHighlightedIndex(next.length > 0 ? 0 : -1);
         setMessage(next.length === 0 ? "No matching city found. Try a different spelling." : "");
         setOpen(true);
       } catch {
@@ -95,8 +97,45 @@ export default function LocationAutocomplete({
           onFocus={() => !confirmed && value.trim().length >= 2 && setOpen(true)}
           onChange={(event) => {
             onChange(event.target.value);
+            setHighlightedIndex(-1);
             setOpen(true);
           }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              if (!open) setOpen(true);
+              if (suggestions.length > 0) {
+                setHighlightedIndex((current) => current < 0 ? 0 : (current + 1) % suggestions.length);
+              }
+              return;
+            }
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              if (!open) setOpen(true);
+              if (suggestions.length > 0) {
+                setHighlightedIndex((current) => current <= 0 ? suggestions.length - 1 : current - 1);
+              }
+              return;
+            }
+            if (event.key === "Enter" && open && highlightedIndex >= 0 && suggestions[highlightedIndex]) {
+              event.preventDefault();
+              onSelect(suggestions[highlightedIndex]);
+              setOpen(false);
+              setSuggestions([]);
+              setHighlightedIndex(-1);
+              return;
+            }
+            if (event.key === "Escape" && open) {
+              event.preventDefault();
+              setOpen(false);
+              setHighlightedIndex(-1);
+            }
+          }}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={open && !confirmed}
+          aria-controls={`${label.replace(/\s+/g, "-").toLowerCase()}-suggestions`}
+          aria-activedescendant={highlightedIndex >= 0 ? `${label.replace(/\s+/g, "-").toLowerCase()}-suggestion-${highlightedIndex}` : undefined}
           placeholder={placeholder}
           autoComplete="off"
           className={`input-field !pl-10 !pr-10 ${confirmed ? "border-teal-500/70 ring-2 ring-teal-500/10" : ""}`}
@@ -117,17 +156,22 @@ export default function LocationAutocomplete({
       {confirmed && <p className="text-[11px] font-semibold text-teal-600 dark:text-teal-400">✓ Location selected</p>}
 
       {open && !confirmed && value.trim().length >= 2 && (
-        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
-          {suggestions.map((suggestion) => (
+        <div id={`${label.replace(/\s+/g, "-").toLowerCase()}-suggestions`} role="listbox" className="absolute z-50 mt-1 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+          {suggestions.map((suggestion, index) => (
             <button
               key={`${suggestion.canonicalName}-${suggestion.latitude}-${suggestion.longitude}`}
+              id={`${label.replace(/\s+/g, "-").toLowerCase()}-suggestion-${index}`}
+              role="option"
+              aria-selected={index === highlightedIndex}
               type="button"
+              onMouseEnter={() => setHighlightedIndex(index)}
               onClick={() => {
                 onSelect(suggestion);
                 setOpen(false);
                 setSuggestions([]);
+                setHighlightedIndex(-1);
               }}
-              className="flex w-full items-start gap-3 border-b border-slate-100 px-4 py-3 text-left transition last:border-b-0 hover:bg-teal-50 dark:border-slate-900 dark:hover:bg-teal-950/20"
+              className={`flex w-full items-start gap-3 border-b border-slate-100 px-4 py-3 text-left transition last:border-b-0 ${index === highlightedIndex ? "bg-teal-50 dark:bg-teal-950/20" : "hover:bg-teal-50 dark:border-slate-900 dark:hover:bg-teal-950/20"}`}
             >
               <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-teal-500" />
               <div className="min-w-0">
