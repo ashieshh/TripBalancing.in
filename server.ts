@@ -2641,6 +2641,8 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
           : undefined
       }, origin || "", destination, startDate, endDate, travelers);
       const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality(cachedPrepared)), diffDays));
+      cachedItinerary.travelStyle = travelStyle;
+      cachedItinerary.travelers = Number(travelers) || 1;
       const cachedSource = cached.data?.generationSource || "gemini";
       cachedItinerary.generationSource = cachedSource;
       let entitlementAfter = authoritativeEntitlement;
@@ -2676,6 +2678,22 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
     };
     const selectedTravelerGuidance = travelerTypeGuidance[String(travelerType)] || "Personalize pacing, lodging, activities, dining and transport appropriately for the stated traveler type without overriding explicit budget, style, interests or trip-purpose inputs.";
 
+    const styleGuidance: Record<string, string> = {
+      "Budget": "Prioritize lowest practical cost, clean budget stays, public transport, free attractions and authentic local food. Never inflate real item prices.",
+      "Smart Luxury": "Calculate the best-value luxury plan: boutique or heritage hotels, selective private transfers, premium dining moments and high-value experiences without wasteful ultra-luxury spending.",
+      "Luxury": "Create a genuinely premium trip using high-quality hotels/resorts, comfortable private or premium transport where practical, fine dining and elevated experiences. Keep pricing realistic and avoid wasteful or implausible upgrades.",
+      "Adventure": "Prioritize outdoor activities, trekking, water sports, wildlife, active routes and safety requirements.",
+      "Backpacker": "Prioritize hostels, public transport, local eateries, free walking routes, social activities and low daily spend.",
+      "Food Explorer": "Build the trip around authentic food: breakfast, street food, lunch, dinner, desserts, markets, cooking classes and signature local dishes. Keep unit prices realistic and identify price units such as per piece, per plate or per person.",
+      "Wellness & Spa": "Prioritize spa, yoga, meditation, healthy food, nature, thermal experiences and slow pacing.",
+      "Culture & History": "Prioritize museums, heritage sites, architecture, local traditions, performances, guided history and UNESCO places.",
+      "Beach Escape": "Prioritize beaches, suitable beachfront stays, sunset points, water activities, seafood/local dining and weather-aware relaxation.",
+      "Nature & Wildlife": "Prioritize scenic landscapes, national parks, wildlife experiences, nature stays, viewpoints and environmentally responsible activities.",
+      "Shopping": "Prioritize authentic markets, local crafts, shopping districts, malls when relevant, price-conscious buying tips and enough free time for browsing.",
+      "Nightlife": "Prioritize safe evening districts, live music, lounges, night markets, entertainment and late-evening transport planning appropriate to the traveler type."
+    };
+    const selectedStyleGuidance = styleGuidance[String(travelStyle)] || styleGuidance.Budget;
+
     let prompt = "";
     if (isAiBudgetPlanner) {
       prompt = `Create a highly comprehensive, personalized travel itinerary for TripBalancing.
@@ -2686,7 +2704,8 @@ ${origin ? `- Traveling From (Origin City): ${origin}` : ""}
 - Travelers: ${travelers} people
 - Traveler Type: ${travelerType || "Not specified"}
 - Traveler-Type Planning Rules: ${selectedTravelerGuidance}
-- Travel Style: Budget (Optimized by AI Budget Planner)
+- Travel Style: ${travelStyle}
+- Style Planning Rules: ${selectedStyleGuidance}
 - Start Date: ${startDate}
 
 CRITICAL MANDATES FOR "AI BUDGET PLANNER ✨" MODE:
@@ -2702,30 +2721,15 @@ CRITICAL MANDATES FOR "AI BUDGET PLANNER ✨" MODE:
 4. Set the field 'isAiBudgetPlanner' to true.
 5. Provide a short 'aiBudgetSummary' explaining that the backend will calculate the recommended ideal budget for this exact ${diffDays}-day trip. Do not choose a different trip because of currency.
 6. Set 'maxDaysComfortable' to ${diffDays}.
-7. Savor regional budget specialties, street food, and economy dining, explicitly labeling veg/non-veg.
-8. Savor highly realistic budget cost ranges for 6 categories (Accommodation, Food, Local Transport, Sights, Misc, and originToDestinationTravel which estimates realistic flight/train transit costs from ${origin || "starting city"} to ${destination} for ${travelers} travelers, set to 'N/A' if no starting city is provided) in 'estimatedBudgetBreakdown', and ensure they represent economy class choices. The 'total' field in 'estimatedBudgetBreakdown' must be the sum of all 6 categories including originToDestinationTravel!
-9. Under 'hotelRecommendations', recommend 3 Budget, 3 Mid-range, and 3 Luxury Hotels.
+7. STYLE PERSONALIZATION IS MANDATORY: the selected travel style (${travelStyle}) must visibly influence lodging level, dining, activities, transport comfort, pacing and hidden-gem choices according to the Style Planning Rules. Do not silently convert AI Budget Planner trips back to Budget style.
+8. Provide highly realistic cost ranges for 6 categories (Accommodation, Food, Local Transport, Sights, Misc, and originToDestinationTravel which estimates realistic flight/train transit costs from ${origin || "starting city"} to ${destination} for ${travelers} travelers, set to 'N/A' if no starting city is provided) in 'estimatedBudgetBreakdown'. Costs must match the selected travel style (${travelStyle}) while remaining realistic. The 'total' field must be the sum of all 6 categories including originToDestinationTravel.
+9. Under 'hotelRecommendations', recommend 3 Budget, 3 Mid-range, and 3 Luxury Hotels as reference options, but the actual itinerary lodging choices and budget calculation must follow the selected travel style (${travelStyle}).
 10. Under 'detailedBudgetSummary', estimate calculated totals for the entire trip duration and travelers for: accommodationTotal, foodTotal, localTransportTotal, attractionTotal, miscellaneousExpenses, originToDestinationCost (estimate realistic round-trip flight or train cost from ${origin || "starting city"} to ${destination} for ${travelers} travelers, or set to 'N/A' if no starting city is provided), and grandTotal. Make sure the grandTotal is the sum of all categories including originToDestinationCost!
 11. Under 'remainingBudget', calculate the leftover amount (Total Budget minus estimated grandTotal) as a formatted string (e.g. "₹2,500" or "$35").
 12. In the field 'originToDestinationDuration', estimate a realistic travel time/duration to go from ${origin || "starting city"} to ${destination} (e.g., '3h 15m via Flight' or '8h via Train' or 'N/A' if origin is not provided).
 
 Return the response in strict JSON format.`;
     } else {
-      const styleGuidance: Record<string, string> = {
-        "Budget": "Prioritize lowest practical cost, clean budget stays, public transport, free attractions and authentic local food. Never inflate real item prices.",
-        "Smart Luxury": "Do not use a user-entered spending cap. Calculate three realistic totals: Minimum Luxury, Recommended Smart Luxury (best value), and Premium Luxury. Build the itinerary around Recommended Smart Luxury. Maximize luxury feel through boutique or heritage hotels, selective private transfers, premium dining moments and high-value experiences without wasteful overspending.",
-        "Luxury": "Treat the entered budget as a hard maximum. Create the most luxurious-feeling trip possible within it using best-value boutique/heritage stays, premium experiences and selective upgrades. Do not recommend unaffordable ultra-luxury items unless clearly marked as optional upgrades.",
-        "Adventure": "Prioritize outdoor activities, trekking, water sports, wildlife, active routes and safety requirements.",
-        "Backpacker": "Prioritize hostels, public transport, local eateries, free walking routes, social activities and low daily spend.",
-        "Food Explorer": "Build the trip around authentic food: breakfast, street food, lunch, dinner, desserts, markets, cooking classes and signature local dishes. Keep unit prices realistic and identify price units such as per piece, per plate or per person.",
-        "Wellness & Spa": "Prioritize spa, yoga, meditation, healthy food, nature, thermal experiences and slow pacing.",
-        "Culture & History": "Prioritize museums, heritage sites, architecture, local traditions, performances, guided history and UNESCO places.",
-        "Beach Escape": "Prioritize beaches, suitable beachfront stays, sunset points, water activities, seafood/local dining and weather-aware relaxation.",
-        "Nature & Wildlife": "Prioritize scenic landscapes, national parks, wildlife experiences, nature stays, viewpoints and environmentally responsible activities.",
-        "Shopping": "Prioritize authentic markets, local crafts, shopping districts, malls when relevant, price-conscious buying tips and enough free time for browsing.",
-        "Nightlife": "Prioritize safe evening districts, live music, lounges, night markets, entertainment and late-evening transport planning appropriate to the traveler type."
-      };
-      const selectedStyleGuidance = styleGuidance[String(travelStyle)] || styleGuidance.Budget;
       prompt = `Create a highly comprehensive, personalized travel itinerary for TripBalancing.
 Target Details:
 - Destination: ${destination}
@@ -3051,6 +3055,10 @@ Return the response in strict JSON format.`;
     parsedItinerary.latitude = geoCoords.latitude;
     parsedItinerary.longitude = geoCoords.longitude;
     parsedItinerary.origin = origin || "";
+    // The form selection is authoritative. Gemini must never rewrite the selected
+    // travel style (especially AI Budget Planner trips) back to Budget.
+    parsedItinerary.travelStyle = travelStyle;
+    parsedItinerary.travelers = Number(travelers) || 1;
     // The user's submitted budget/currency is the single source of truth.
     // Gemini is not allowed to replace it with destination-local currency.
     parsedItinerary.budgetAmount = effectiveBudgetAmount;
