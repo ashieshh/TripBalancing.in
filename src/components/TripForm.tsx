@@ -90,7 +90,8 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   type BudgetCurrency = "INR" | "USD" | "AED" | "EUR" | "GBP" | "JPY";
   const [budgetCurrency, setBudgetCurrency] = useState<BudgetCurrency>("USD");
   const preferredCurrencyLoadedRef = useRef(false);
-  const [budgetVal, setBudgetVal] = useState("50000");
+  const defaultBudgetByCurrency: Record<BudgetCurrency, string> = { INR: "50000", USD: "1000", AED: "3500", EUR: "1000", GBP: "800", JPY: "150000" };
+  const [budgetVal, setBudgetVal] = useState(defaultBudgetByCurrency.USD);
   const currencySymbols: Record<BudgetCurrency, string> = { INR: "₹", USD: "$", AED: "AED ", EUR: "€", GBP: "£", JPY: "¥" };
   const budgetPrefix = currencySymbols[budgetCurrency];
   const fixedBudgetAmount = `${budgetCurrency} ${Number(budgetVal || 0).toLocaleString()}`;
@@ -142,7 +143,9 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
         const user = await db.getSessionUser();
         if (!user) return;
         const profile = await db.getUserProfile(user.id, user.email || undefined);
-        setBudgetCurrency(supportedCurrencyForCountry(profile?.country_code));
+        const preferredCurrency = supportedCurrencyForCountry(profile?.country_code);
+        setBudgetCurrency(preferredCurrency);
+        setBudgetVal(defaultBudgetByCurrency[preferredCurrency]);
       } catch {
         // USD remains the neutral fallback if the profile cannot be loaded.
       }
@@ -655,7 +658,10 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
 }
 
 function FieldLabel({ label, icon, children }: { label: string; icon?: ReactNode; children: ReactNode }) {
-  return <label className="block space-y-2"><span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">{icon}{label}</span>{children}</label>;
+  // This is intentionally a div rather than a <label>. Some fields contain multiple
+  // interactive controls (for example the traveler +/- buttons). Wrapping those in
+  // one label makes a click on empty space activate the first control automatically.
+  return <div className="block space-y-2"><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">{icon}{label}</div>{children}</div>;
 }
 
 function ChoiceButton({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: ReactNode }) {
