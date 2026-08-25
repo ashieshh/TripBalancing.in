@@ -1989,7 +1989,7 @@ function sanitizeItineraryStrings(itinerary: any) {
   return itinerary;
 }
 
-function validateGeneratedItinerary(itinerary: any): string[] {
+function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string): string[] {
   const errors: string[] = [];
   const dest = String(itinerary?.destination || '').toLowerCase();
   const generic = /(grand landmark|city center & central plaza|botanical & scenic gardens|local artisans market|budget inn|travelers cozy hostel|backpackers haven|central hotel|parkview residency|comfort suites|royal heritage resort|ritz sovereign|morning exploration & breakfast|guided landmark sightseeing|sunset vista & evening local dinner|main food street promenade|old town pastry shop|scenic overlook tea lounge)/i;
@@ -2011,6 +2011,36 @@ function validateGeneratedItinerary(itinerary: any): string[] {
   // Destination-only text such as "Mumbai" is not a useful attraction name.
   const core=dest.split(',')[0].trim();
   if (core && (itinerary?.placesToVisit||[]).some((p:any)=>String(p?.name||'').toLowerCase().trim()===core)) errors.push('destination name used as attraction placeholder');
+
+  // Selected-style quality gate. This prevents a valid-looking but generic itinerary
+  // from reaching the user when the requested style is strongly thematic.
+  const style = String(expectedTravelStyle || itinerary?.travelStyle || '').toLowerCase().trim();
+  const activityText = days.flatMap((d:any) => Array.isArray(d?.activities) ? d.activities : [])
+    .map((a:any) => `${a?.title||''} ${a?.location||''} ${a?.description||''}`.toLowerCase());
+  const allActivityText = activityText.join(' | ');
+  const themes = days.map((d:any) => String(d?.theme || '').toLowerCase());
+
+  if (style === 'luxury') {
+    const premiumSignals = /(five[- ]star|5[- ]star|luxury resort|luxury hotel|boutique luxury|suite|private transfer|chauffeur|private tour|private cruise|yacht|spa|wellness treatment|fine dining|chef|tasting menu|premium lounge|concierge|reserved|vip)/i;
+    const budgetSignals = /(hostel|budget guesthouse|budget stay|scooter rental|public bus|cheap eatery|budget shack|dhaba)/i;
+    const premiumCount = activityText.filter((t:string) => premiumSignals.test(t)).length;
+    if (premiumCount < 2) errors.push('Luxury style lacks enough genuinely premium daily experiences');
+    if (budgetSignals.test(allActivityText)) errors.push('Luxury style contains budget/backpacker primary choices');
+    if (themes.filter((t:string) => /local flavors?/.test(t)).length >= Math.max(2, Math.ceil(days.length / 2))) errors.push('Luxury style uses repetitive generic Local Flavors day themes');
+  }
+
+  if (style === 'food explorer') {
+    const foodSignals = /(breakfast|brunch|lunch|dinner|street food|food walk|food tour|market|cooking class|culinary|bakery|dessert|cafe|coffee|tea|brewery|winery|tasting|fish market|spice market|local dish|regional cuisine|restaurant)/i;
+    const themedDays = days.filter((d:any) => {
+      const text = `${d?.theme||''} ${(Array.isArray(d?.activities)?d.activities:[]).map((a:any)=>`${a?.title||''} ${a?.description||''}`).join(' ')}`;
+      return foodSignals.test(text);
+    }).length;
+    const foodActivityCount = activityText.filter((t:string) => foodSignals.test(t)).length;
+    if (themedDays < Math.max(1, Math.ceil(days.length * 0.75))) errors.push('Food Explorer style is not food-led on most days');
+    if (foodActivityCount < Math.max(3, days.length)) errors.push('Food Explorer style lacks enough distinct culinary experiences');
+    if (themes.filter((t:string) => /local flavors?/.test(t)).length >= Math.max(2, Math.ceil(days.length / 2))) errors.push('Food Explorer style uses repetitive generic Local Flavors day themes');
+  }
+
   return Array.from(new Set(errors));
 }
 
@@ -2681,10 +2711,10 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
     const styleGuidance: Record<string, string> = {
       "Budget": "Build a genuinely good low-cost trip, not a stripped-down trip. Favor clean well-reviewed budget stays, public transit or economical local transport, free/low-fee signature sights, authentic local eateries, markets and high-value experiences. Include at least one memorable signature experience when affordable. Never inflate real item prices and never recommend premium services merely to consume budget.",
       "Smart Luxury": "Build the strongest value-for-comfort itinerary. Favor distinctive boutique/heritage 3.5-4.5 star stays, comfortable rooms, selective private transfers only when they materially improve the day, one or two premium dining/experience moments, priority/skip-the-line options where useful, and local hidden gems. Avoid both backpacker choices and wasteful ultra-luxury. Every premium spend must have a clear experience or convenience benefit.",
-      "Luxury": "Create a visibly premium end-to-end trip, not a normal itinerary with inflated prices. The ACTUAL daily plan should use upscale or five-star lodging as the working stay, private chauffeur/airport transfer or premium transport where practical, destination-worthy fine dining or acclaimed upscale restaurants, reserved/premium cultural or leisure experiences, spa/wellness or yacht/private-tour style experiences when destination-appropriate, and concierge-like pacing with comfort buffers. Avoid hostels, scooters for primary transport, budget shacks/dhabas, generic souvenir stops and long unnecessary walks unless they are themselves iconic experiences. Keep all prices realistic and do not add luxury where the destination does not support it.",
+      "Luxury": "Create a visibly premium end-to-end trip, not a normal itinerary with inflated prices. On each full day, include at least one clearly premium service or experience and normally 3-5 meaningful blocks; across the trip include at least two elevated experiences beyond ordinary sightseeing. Never use repetitive day themes like Attraction + Local Flavors.  The ACTUAL daily plan should use upscale or five-star lodging as the working stay, private chauffeur/airport transfer or premium transport where practical, destination-worthy fine dining or acclaimed upscale restaurants, reserved/premium cultural or leisure experiences, spa/wellness or yacht/private-tour style experiences when destination-appropriate, and concierge-like pacing with comfort buffers. Avoid hostels, scooters for primary transport, budget shacks/dhabas, generic souvenir stops and long unnecessary walks unless they are themselves iconic experiences. Keep all prices realistic and do not add luxury where the destination does not support it.",
       "Adventure": "Make active experiences the spine of the itinerary. Prioritize destination-specific trekking, water sports, cycling, climbing, rafting, diving, wildlife/adventure excursions or equivalent activities, with realistic transfer time, difficulty, equipment, guide requirements, weather/season caveats and recovery time. Do not fill most days with passive sightseeing if meaningful adventure options exist.",
       "Backpacker": "Design for independent low-cost exploration and social travel. Favor reputable hostels/guesthouses, public transport, walkable neighborhoods, local buses/trains, inexpensive local eateries, free walking routes, social hostels/markets/community experiences and flexible plans. Avoid private drivers and premium venues unless necessary for safety or geography.",
-      "Food Explorer": "Make food the organizing theme of every day. Include distinct breakfast/local cafe, market/street-food, regional lunch/dinner, dessert/beverage and food-craft experiences such as cooking classes, spice/produce markets, winery/brewery/tea/coffee experiences where locally appropriate. Name specific dishes and plausible venues, label veg/non-veg, state price units clearly, and do not turn every food stop into an attraction with fabricated claims.",
+      "Food Explorer": "Make food the organizing theme of every day. On each full day, normally include 3-5 meaningful blocks with at least two culinary blocks (for example breakfast/cafe, market or food walk, regional lunch, cooking/tasting experience, dessert/beverage, signature dinner). Use a different culinary story each day and never repeat generic Attraction + Local Flavors themes.  Include distinct breakfast/local cafe, market/street-food, regional lunch/dinner, dessert/beverage and food-craft experiences such as cooking classes, spice/produce markets, winery/brewery/tea/coffee experiences where locally appropriate. Name specific dishes and plausible venues, label veg/non-veg, state price units clearly, and do not turn every food stop into an attraction with fabricated claims.",
       "Wellness & Spa": "Create a restorative low-rush itinerary. Favor wellness-focused or serene accommodation, reputable spa/ayurveda/onsen/hammam/thermal treatments where locally appropriate, yoga/meditation, healthy local food, nature, sleep-friendly timing, limited late nights, hydration/rest blocks and gentle transfers. Include at least one substantial wellness experience on most full days without fabricating medical benefits.",
       "Culture & History": "Make heritage and local culture the core narrative. Prioritize important museums, archaeological/heritage sites, historic districts, architecture, UNESCO places, local crafts, religious/cultural context, performances and guided interpretation. Organize days by historical/geographic theme and include context-rich experiences rather than merely listing monuments.",
       "Beach Escape": "Build the trip around coast time and water-oriented relaxation. Favor beachfront/near-beach stays where practical, distinct beaches rather than repetitive beach hopping, sunrise/sunset, swimming/water sports when safe, seafood/coastal cuisine, beach clubs or relaxed shacks appropriate to the selected budget tier, and weather/tide/monsoon-aware alternatives. Preserve downtime instead of over-scheduling.",
@@ -3068,7 +3098,7 @@ Return the response in strict JSON format.`;
     }
 
     const parsedItinerary = sanitizeItineraryStrings(JSON.parse(jsonText.trim()));
-    const qualityErrors = validateGeneratedItinerary(parsedItinerary);
+    const qualityErrors = validateGeneratedItinerary(parsedItinerary, travelStyle);
     if (qualityErrors.length) {
       throw new Error(`AI itinerary failed quality validation: ${qualityErrors.join('; ')}`);
     }
