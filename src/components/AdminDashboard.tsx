@@ -89,9 +89,11 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
     setTestEmailSending(true);
     setTestEmailStatus(null);
     try {
+      const token = await db.getAccessToken();
+      if (!token) throw new Error("Admin session expired.");
       const res = await fetch("/api/email/send-transactional", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify({
           templateType: testTemplateType,
           recipientEmail: testEmailRecipient,

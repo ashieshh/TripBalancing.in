@@ -1,3 +1,4 @@
+import { db } from "../lib/supabase";
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
@@ -216,9 +217,11 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
 
     setRecommendationLoading(true);
     try {
+      const accessToken = await db.getAccessToken();
+      if (!accessToken) throw new Error("Your session has expired. Please sign in again.");
       const response = await fetch("/api/recommend-destinations", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
         body: JSON.stringify({
           origin: origin.trim(),
           days: Number(travelDays),

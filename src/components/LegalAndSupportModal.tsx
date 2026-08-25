@@ -1,3 +1,4 @@
+import { db } from "../lib/supabase";
 import React, { useState, useEffect } from "react";
 import { 
   ShieldCheck, FileText, RefreshCw, Mail, 
@@ -55,9 +56,11 @@ export default function LegalAndSupportModal({
     setIsSubmitting(true);
 
     try {
+      const accessToken = await db.getAccessToken();
+      if (!accessToken) throw new Error("Your session has expired. Please sign in again.");
       const res = await fetch("/api/support-tickets", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
         body: JSON.stringify({
           contactName,
           contactEmail,

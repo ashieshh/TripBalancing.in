@@ -147,66 +147,65 @@ async function logFailedAdminAccess(attemptedUserId?: string, attemptedEmail?: s
   }
 }
 
+// Shared Supabase user authentication helper. All protected API routes derive identity
+// from the signed Supabase JWT instead of trusting userId/email fields from the browser.
+async function authenticateRequestUser(req: express.Request) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+  const token = authHeader.substring(7).trim();
+  if (!token || token === "null" || token === "undefined") return null;
+  const authClient = supabaseAuth || supabaseAdmin;
+  if (!authClient) return null;
+  const { data: { user }, error } = await authClient.auth.getUser(token);
+  if (error || !user) return null;
+  return user;
+}
+
+async function verifyUserAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  try {
+    const user = await authenticateRequestUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized: Please sign in again." });
+    (req as any).authenticatedUser = { id: user.id, email: user.email || "" };
+    next();
+  } catch (err) {
+    console.error("User auth middleware error:", err);
+    res.status(500).json({ error: "Internal server error during authentication" });
+  }
+}
+
+async function userHasAdminAccess(userId: string, email?: string | null) {
+  // Primary source of truth: admin_users table. The optional ADMIN_EMAIL env value is
+  // retained only as an explicit bootstrap fallback; there is no hard-coded owner email.
+  if (supabaseAdmin) {
+    try {
+      const { data } = await supabaseAdmin
+        .from("admin_users")
+        .select("role")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (data?.role === "admin" || data?.role === "super_admin") return true;
+    } catch (err) {
+      console.warn("[Admin Auth] admin_users lookup warning:", err);
+    }
+  }
+  const bootstrapEmail = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  return !!bootstrapEmail && String(email || "").trim().toLowerCase() === bootstrapEmail;
+}
+
 // Secure Admin Authorization Middleware
 async function verifyAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      logFailedAdminAccess(undefined, "Missing Token", req);
-      return res.status(401).json({ error: "Unauthorized: Missing authentication token" });
-    }
-
-    const token = authHeader.substring(7).trim();
-    if (!token || token === "null" || token === "undefined") {
-      logFailedAdminAccess(undefined, "Invalid Token String", req);
-      return res.status(401).json({ error: "Unauthorized: Invalid or expired token" });
-    }
-
-    let authenticatedUserId: string | null = null;
-    let authenticatedEmail: string | null = null;
-    let isAdminVerified = false;
-
-    // 1. Verify the signed-in user with Supabase Auth. This intentionally uses the
-    // anon-key auth client so the Admin Panel button still works even when the
-    // service-role key is missing/misconfigured. Privileged admin endpoints below
-    // continue to require supabaseAdmin.
-    const authClient = supabaseAuth || supabaseAdmin;
-    if (authClient) {
-      try {
-        const { data: { user }, error } = await authClient.auth.getUser(token);
-        if (user && !error) {
-          authenticatedUserId = user.id;
-          authenticatedEmail = user.email || null;
-
-          // Admin access is restricted to the configured owner email.
-          // Set ADMIN_EMAIL in Render. The default preserves the current owner account.
-          const adminEmail = (process.env.ADMIN_EMAIL || "yadavvashish@gmail.com").trim().toLowerCase();
-          if ((authenticatedEmail || "").trim().toLowerCase() === adminEmail) {
-            isAdminVerified = true;
-          }
-        }
-      } catch (err) {
-        console.warn("[Admin Auth] Supabase check exception:", err);
-      }
-    }
-
-    if (!authenticatedUserId && !isAdminVerified) {
+    const user = await authenticateRequestUser(req);
+    if (!user) {
       logFailedAdminAccess(undefined, "Unauthenticated Token", req);
       return res.status(401).json({ error: "Unauthorized: User session invalid or expired" });
     }
-
+    const isAdminVerified = await userHasAdminAccess(user.id, user.email);
     if (!isAdminVerified) {
-      logFailedAdminAccess(authenticatedUserId || "usr_unauthorized", authenticatedEmail || "non_admin_user", req);
+      logFailedAdminAccess(user.id, user.email || "non_admin_user", req);
       return res.status(403).json({ error: "Forbidden: Access denied. Admin permissions required." });
     }
-
-    // Attach admin context
-    (req as any).adminUser = {
-      id: authenticatedUserId,
-      email: authenticatedEmail || "",
-      role: "admin"
-    };
-
+    (req as any).adminUser = { id: user.id, email: user.email || "", role: "admin" };
     next();
   } catch (err: any) {
     console.error("Admin auth middleware error:", err);
@@ -728,6 +727,106 @@ const getRazorpayKeys = () => {
   return { keyId, keySecret };
 };
 
+type AuthoritativeEntitlement = {
+  plan: "free" | "pay_per_trip" | "yearly" | "lifetime";
+  freeTripsUsed: number;
+  paidTripsBalance: number;
+  isPremium: boolean;
+};
+
+async function loadAuthoritativeEntitlement(userId: string, email?: string): Promise<AuthoritativeEntitlement | null> {
+  if (!supabaseAdmin) return null;
+  const { data, error } = await supabaseAdmin
+    .from("user_profiles")
+    .select("plan, free_trips_used, paid_trips_balance")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    const { data: inserted, error: insertError } = await supabaseAdmin
+      .from("user_profiles")
+      .insert([{ id: userId, email: email || null, plan: "free", is_premium: false, free_trips_used: 0, paid_trips_balance: 0 }])
+      .select("plan, free_trips_used, paid_trips_balance")
+      .single();
+    if (insertError) throw insertError;
+    return { plan: "free", freeTripsUsed: 0, paidTripsBalance: 0, isPremium: false };
+  }
+  const plan = (["pay_per_trip", "yearly", "lifetime"].includes(String(data.plan)) ? data.plan : "free") as AuthoritativeEntitlement["plan"];
+  return {
+    plan,
+    freeTripsUsed: Math.max(0, Number(data.free_trips_used || 0)),
+    paidTripsBalance: Math.max(0, Number(data.paid_trips_balance || 0)),
+    isPremium: plan === "yearly" || plan === "lifetime"
+  };
+}
+
+function entitlementDeniedMessage(e: AuthoritativeEntitlement) {
+  if (e.plan === "pay_per_trip") {
+    return "Insufficient Balance: Please purchase an additional Pay-Per-Trip token (₹99) or upgrade to Premium to continue generating itineraries.";
+  }
+  return "Limit Reached: You have used all your free AI-generated trip plans. Please purchase an additional trip plan token (₹99) or upgrade to Premium to continue generating itineraries.";
+}
+
+function canGenerateFromEntitlement(e: AuthoritativeEntitlement) {
+  if (e.isPremium) return true;
+  if (e.plan === "pay_per_trip") return e.paidTripsBalance > 0;
+  return e.freeTripsUsed < 2 || e.paidTripsBalance > 0;
+}
+
+async function consumeTripEntitlement(userId: string, email?: string): Promise<{ ok: boolean; status: number; error?: string; entitlement?: AuthoritativeEntitlement }> {
+  if (!supabaseAdmin) return { ok: false, status: 503, error: "Secure entitlement service is not configured." };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await loadAuthoritativeEntitlement(userId, email);
+    if (!current) return { ok: false, status: 503, error: "Secure entitlement service is unavailable." };
+    if (current.isPremium) return { ok: true, status: 200, entitlement: current };
+
+    if (current.plan === "pay_per_trip") {
+      if (current.paidTripsBalance <= 0) return { ok: false, status: 403, error: entitlementDeniedMessage(current), entitlement: current };
+      const nextBalance = current.paidTripsBalance - 1;
+      const { data, error } = await supabaseAdmin
+        .from("user_profiles")
+        .update({ paid_trips_balance: nextBalance, updated_at: new Date().toISOString() })
+        .eq("id", userId)
+        .eq("paid_trips_balance", current.paidTripsBalance)
+        .select("plan, free_trips_used, paid_trips_balance")
+        .maybeSingle();
+      if (error) throw error;
+      if (data) return { ok: true, status: 200, entitlement: { ...current, paidTripsBalance: nextBalance } };
+      continue;
+    }
+
+    if (current.freeTripsUsed < 2) {
+      const nextUsed = current.freeTripsUsed + 1;
+      const { data, error } = await supabaseAdmin
+        .from("user_profiles")
+        .update({ free_trips_used: nextUsed, updated_at: new Date().toISOString() })
+        .eq("id", userId)
+        .eq("free_trips_used", current.freeTripsUsed)
+        .select("plan, free_trips_used, paid_trips_balance")
+        .maybeSingle();
+      if (error) throw error;
+      if (data) return { ok: true, status: 200, entitlement: { ...current, freeTripsUsed: nextUsed } };
+      continue;
+    }
+
+    if (current.paidTripsBalance > 0) {
+      const nextBalance = current.paidTripsBalance - 1;
+      const { data, error } = await supabaseAdmin
+        .from("user_profiles")
+        .update({ paid_trips_balance: nextBalance, updated_at: new Date().toISOString() })
+        .eq("id", userId)
+        .eq("paid_trips_balance", current.paidTripsBalance)
+        .select("plan, free_trips_used, paid_trips_balance")
+        .maybeSingle();
+      if (error) throw error;
+      if (data) return { ok: true, status: 200, entitlement: { ...current, paidTripsBalance: nextBalance } };
+      continue;
+    }
+    return { ok: false, status: 403, error: entitlementDeniedMessage(current), entitlement: current };
+  }
+  return { ok: false, status: 409, error: "Your trip allowance changed in another session. Please retry." };
+}
+
 // Require a real signed-in Supabase user for payment operations.
 async function verifyPaymentUser(req: express.Request, res: express.Response, next: express.NextFunction) {
   try {
@@ -1001,7 +1100,7 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
               current_plan: planType || "pay_per_trip",
               purchase_date: new Date().toISOString(),
               status: "active"
-            }]);
+            }], { onConflict: "user_id" });
 
             // Entitlement is granted server-side only after verified payment.
             const profileUpdate: any = {
@@ -1167,7 +1266,7 @@ app.get("/api/admin/users", verifyAdminAuth, async (req, res) => {
         full_name: profile.full_name || authUser.user_metadata?.full_name || authUser.user_metadata?.name || "",
         plan: profile.plan || "free",
         trips_count: Number(profile.trips_count || 0),
-        paid_trip_credits: Number(profile.paid_trip_credits || 0),
+        paid_trip_credits: Number(profile.paid_trips_balance ?? profile.paid_trip_credits ?? 0),
         status: profile.status || (authUser.banned_until ? "suspended" : "active"),
         created_at: authUser.created_at || profile.created_at || new Date(0).toISOString()
       } as UserProfileRecord;
@@ -1320,9 +1419,12 @@ app.get("/api/admin/security-audit", verifyAdminAuth, async (req, res) => {
 });
 
 // Public Form Submissions for Support & Refunds
-app.post("/api/support-tickets", async (req, res) => {
+app.post("/api/support-tickets", verifyUserAuth, async (req, res) => {
   try {
-    const { contactEmail, subject, message, paymentId, userId } = req.body;
+    const { subject, message, paymentId } = req.body;
+    const authUser = (req as any).authenticatedUser as { id: string; email: string };
+    const contactEmail = authUser.email;
+    const userId = authUser.id;
     if (!contactEmail || !message) {
       return res.status(400).json({ error: "Email and message are required." });
     }
@@ -1382,25 +1484,38 @@ app.post("/api/support-tickets", async (req, res) => {
   }
 });
 
-app.post("/api/refund-requests", async (req, res) => {
+app.post("/api/refund-requests", verifyUserAuth, async (req, res) => {
   try {
-    const { userEmail, paymentId, plan, purchaseDate, tripsUsedSincePurchase, userId } = req.body;
-    if (!userEmail || !paymentId) {
-      return res.status(400).json({ error: "User email and Payment ID are required." });
-    }
-
-    const purchaseTime = purchaseDate ? new Date(purchaseDate).getTime() : Date.now();
+    const { paymentId } = req.body;
+    if (!paymentId) return res.status(400).json({ error: "Payment ID is required." });
+    const authUser = (req as any).authenticatedUser as { id: string; email: string };
+    if (!supabaseAdmin) return res.status(503).json({ error: "Refund verification service is unavailable." });
+    const { data: ownedPayment, error: paymentLookupError } = await supabaseAdmin
+      .from("payments")
+      .select("user_id, user_email, plan_purchased, created_at, razorpay_payment_id")
+      .eq("razorpay_payment_id", paymentId)
+      .eq("user_id", authUser.id)
+      .maybeSingle();
+    if (paymentLookupError) throw paymentLookupError;
+    if (!ownedPayment) return res.status(403).json({ error: "This payment does not belong to the signed-in account." });
+    const purchaseDate = ownedPayment.created_at || new Date().toISOString();
+    const purchaseTime = new Date(purchaseDate).getTime();
     const daysSince = (Date.now() - purchaseTime) / (1000 * 60 * 60 * 24);
-    const tripsUsed = Number(tripsUsedSincePurchase) || 0;
-    const isEligible = daysSince <= 7 && tripsUsed === 0;
+    // Usage eligibility is reviewed by the admin against server-side entitlement history.
+    // Never trust a browser-supplied tripsUsedSincePurchase value.
+    const tripsUsed = 0;
+    const isEligible = daysSince <= 7;
+    const userEmail = authUser.email;
+    const userId = authUser.id;
+    const plan = ownedPayment.plan_purchased || "unknown";
 
     const newRequest: RefundRequestRecord = {
       id: `ref_${Date.now()}`,
       user_id: userId,
       user_email: userEmail,
       razorpay_payment_id: paymentId,
-      plan: plan || "unknown",
-      purchase_date: purchaseDate || new Date().toISOString(),
+      plan,
+      purchase_date: purchaseDate,
       trips_used_since_purchase: tripsUsed,
       refund_eligible: isEligible,
       status: "pending",
@@ -1452,11 +1567,15 @@ app.post("/api/refund-requests", async (req, res) => {
 // Dedicated Email API Endpoints
 
 // 1. Welcome Email Endpoint (Sent after email verification)
-app.post("/api/email/welcome", async (req, res) => {
+app.post("/api/email/welcome", verifyUserAuth, async (req, res) => {
   try {
     const { email, name, appUrl } = req.body;
     if (!email) {
       return res.status(400).json({ error: "User email is required." });
+    }
+    const authUser = (req as any).authenticatedUser as { id: string; email: string };
+    if (String(email).trim().toLowerCase() !== String(authUser.email).trim().toLowerCase()) {
+      return res.status(403).json({ error: "You may only send a welcome email to your own account." });
     }
 
     const emailData = generateWelcomeEmail(name || email.split("@")[0], appUrl || "https://tripbalancing.in");
@@ -1527,11 +1646,28 @@ app.post("/api/admin/refunds/action", verifyAdminAuth, async (req, res) => {
 });
 
 // Unified Transactional Email Dispatch Endpoint (Backend API)
-app.post("/api/email/send-transactional", async (req, res) => {
+app.post("/api/email/send-transactional", verifyUserAuth, async (req, res) => {
   try {
     const { templateType, recipientEmail, payload } = req.body;
     if (!templateType || !recipientEmail) {
       return res.status(400).json({ error: "templateType and recipientEmail are required." });
+    }
+    const authUser = (req as any).authenticatedUser as { id: string; email: string };
+    if (templateType === "buddy_invite") {
+      if (!supabaseAdmin) return res.status(503).json({ error: "Invitation verification service is unavailable." });
+      const { data: pendingInvite } = await supabaseAdmin
+        .from("buddy_invitations")
+        .select("id")
+        .eq("sender_email", authUser.email)
+        .eq("recipient_email", String(recipientEmail).trim().toLowerCase())
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!pendingInvite) return res.status(403).json({ error: "No matching pending buddy invitation was found." });
+      payload.senderEmail = authUser.email;
+    } else if (!(await userHasAdminAccess(authUser.id, authUser.email))) {
+      return res.status(403).json({ error: "Admin authorization required for this email template." });
     }
 
     let emailData: { subject: string; html: string };
@@ -1613,7 +1749,7 @@ app.post("/api/email/send-transactional", async (req, res) => {
 });
 
 // Destination Recommendation Endpoint
-app.post("/api/recommend-destinations", async (req, res) => {
+app.post("/api/recommend-destinations", verifyUserAuth, async (req, res) => {
   try {
     const {
       origin,
@@ -2330,7 +2466,7 @@ app.get('/api/travelpayouts/resolve-location', async (req, res) => {
   }
 });
 
-app.post("/api/generate-itinerary", async (req, res) => {
+app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;
   let diffDays = 3;
   try {
@@ -2340,11 +2476,26 @@ app.post("/api/generate-itinerary", async (req, res) => {
     // populates RATES_CACHE. Reuse that cache here so a slow FX provider can never
     // cause the main trip endpoint to time out or return a host-level HTML 502/504.
     if (RATES_CACHE.data?.rates) setLiveUsdRates(RATES_CACHE.data.rates);
-    const { destination, origin, startDate, endDate, tripDays, budgetAmount, travelers, travelerType, travelStyle, budgetMode, tripPurpose, preferredWeather, interests, visitedDestinations, revisitPreference, planningMode, plan, freeTripsUsed, paidTripsBalance, isAiBudgetPlanner } = req.body;
+    const { destination, origin, startDate, endDate, tripDays, budgetAmount, travelers, travelerType, travelStyle, budgetMode, tripPurpose, preferredWeather, interests, visitedDestinations, revisitPreference, planningMode, isAiBudgetPlanner } = req.body;
 
     if (!destination || !startDate || !endDate || !travelers || !travelStyle || (travelStyle !== "Smart Luxury" && !budgetAmount)) {
       return res.status(400).json({ error: "Missing required trip fields." });
     }
+
+    const authUser = (req as any).authenticatedUser as { id: string; email: string };
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Secure account entitlement service is not configured." });
+    }
+    const authoritativeEntitlement = await loadAuthoritativeEntitlement(authUser.id, authUser.email);
+    if (!authoritativeEntitlement) {
+      return res.status(503).json({ error: "Unable to load your account plan securely." });
+    }
+    if (!canGenerateFromEntitlement(authoritativeEntitlement)) {
+      return res.status(403).json({ error: entitlementDeniedMessage(authoritativeEntitlement) });
+    }
+    const plan = authoritativeEntitlement.plan;
+    const freeTripsUsed = authoritativeEntitlement.freeTripsUsed;
+    const paidTripsBalance = authoritativeEntitlement.paidTripsBalance;
 
     const effectiveBudgetAmount = budgetAmount || "INR AI Recommended";
 
@@ -2431,29 +2582,21 @@ app.post("/api/generate-itinerary", async (req, res) => {
       const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality(cachedPrepared)), diffDays));
       const cachedSource = cached.data?.generationSource || "gemini";
       cachedItinerary.generationSource = cachedSource;
+      let entitlementAfter = authoritativeEntitlement;
+      if (cachedSource === "gemini") {
+        const consumed = await consumeTripEntitlement(authUser.id, authUser.email);
+        if (!consumed.ok) return res.status(consumed.status).json({ error: consumed.error });
+        entitlementAfter = consumed.entitlement || entitlementAfter;
+      }
       return res.json({
         itinerary: cachedItinerary,
         generation: { source: cachedSource, degraded: cachedSource !== "gemini", cached: true },
-        billableGeneration: cachedSource === "gemini"
+        billableGeneration: cachedSource === "gemini",
+        entitlement: entitlementAfter
       });
     }
 
-    // Backend pricing and limit enforcement
-    const isPremium = plan === "yearly" || plan === "lifetime";
-    const remainingFree = Math.max(0, 2 - (freeTripsUsed || 0));
-
-    if (!isPremium) {
-      if ((!plan || plan === "free") && remainingFree <= 0 && (!paidTripsBalance || paidTripsBalance <= 0)) {
-        return res.status(403).json({ 
-          error: "Limit Reached: You have used all your free AI-generated trip plans. Please purchase an additional trip plan token (₹99) or upgrade to Premium to continue generating itineraries." 
-        });
-      }
-      if (plan === "pay_per_trip" && (!paidTripsBalance || paidTripsBalance <= 0)) {
-        return res.status(403).json({ 
-          error: "Insufficient Balance: Please purchase an additional Pay-Per-Trip token (₹99) or upgrade to Premium to continue generating itineraries." 
-        });
-      }
-    }
+    // Plan and quota were validated above from the authoritative server-side profile.
 
     const ai = getGeminiClient();
 
@@ -2858,10 +3001,13 @@ Return the response in strict JSON format.`;
     });
 
     reconciledItinerary.generationSource = "gemini";
+    const consumed = await consumeTripEntitlement(authUser.id, authUser.email);
+    if (!consumed.ok) return res.status(consumed.status).json({ error: consumed.error });
     return res.json({
       itinerary: reconciledItinerary,
       generation: { source: "gemini", degraded: false },
-      billableGeneration: true
+      billableGeneration: true,
+      entitlement: consumed.entitlement
     });
 
   } catch (error: any) {
@@ -3324,7 +3470,7 @@ app.post("/api/geocode", async (req, res) => {
 });
 
 // AI Travel Advisories and Tips Endpoint (with Google Search Grounding)
-app.post("/api/travel-tips", async (req, res) => {
+app.post("/api/travel-tips", verifyUserAuth, async (req, res) => {
   try {
     const { destinations } = req.body;
     
@@ -3768,7 +3914,7 @@ app.post("/api/open-weather", async (req, res) => {
 });
 
 // AI Itinerary Chat Follow-up Endpoint
-app.post("/api/itinerary-chat", async (req, res) => {
+app.post("/api/itinerary-chat", verifyUserAuth, async (req, res) => {
   try {
     const { itinerary, message, history } = req.body;
 

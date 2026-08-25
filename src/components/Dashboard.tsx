@@ -1,3 +1,4 @@
+import { db } from "../lib/supabase";
 import { useEffect, useMemo, useState, Suspense } from "react";
 import {
   Compass,
@@ -171,9 +172,11 @@ export default function Dashboard({
           }
         }
 
+        const accessToken = await db.getAccessToken();
+        if (!accessToken) throw new Error("Your session has expired. Please sign in again.");
         const response = await fetch("/api/travel-tips", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
           body: JSON.stringify({ destinations: allDestinations }),
         });
         if (!response.ok) throw new Error("Failed to retrieve live travel tips");

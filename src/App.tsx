@@ -462,17 +462,15 @@ export default function App() {
     setActiveTripId(null);
 
     try {
+      const accessToken = await db.getAccessToken();
+      if (!accessToken) throw new Error("Your session has expired. Please sign in again.");
       const response = await fetch("/api/generate-itinerary", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${accessToken}`
         },
-        body: JSON.stringify({
-          ...input,
-          plan,
-          freeTripsUsed,
-          paidTripsBalance
-        })
+        body: JSON.stringify({ ...input })
       });
 
       const contentType = response.headers.get("content-type") || "";
@@ -489,25 +487,12 @@ export default function App() {
       if (data.itinerary) {
         setActiveItinerary(data.itinerary);
         
-        // Only consume a trip allowance when a normal Gemini generation succeeded.
-        // Provider-failure fallbacks are deliberately non-billable so users do not
-        // lose a free trip or paid token because Gemini hit quota/overload.
-        if (data.billableGeneration !== false && user && !isPremium) {
-          if (plan === "free" && remainingFree > 0) {
-            const nextFreeUsed = freeTripsUsed + 1;
-            setFreeTripsUsed(nextFreeUsed);
-            db.upsertUserProfile({
-              id: user.id,
-              free_trips_used: nextFreeUsed
-            });
-          } else if (paidTripsBalance > 0) {
-            const nextPaidBalance = paidTripsBalance - 1;
-            setPaidTripsBalance(nextPaidBalance);
-            db.upsertUserProfile({
-              id: user.id,
-              paid_trips_balance: nextPaidBalance
-            });
-          }
+        // The server is the only authority that consumes free trips or paid credits.
+        // Refresh the UI from the entitlement returned after the server-side atomic update.
+        if (data.entitlement) {
+          setPlan(data.entitlement.plan || "free");
+          setFreeTripsUsed(Number(data.entitlement.freeTripsUsed || 0));
+          setPaidTripsBalance(Number(data.entitlement.paidTripsBalance || 0));
         }
       } else {
         throw new Error("No itinerary received from backend.");

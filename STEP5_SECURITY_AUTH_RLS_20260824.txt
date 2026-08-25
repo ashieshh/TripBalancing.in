@@ -1,0 +1,76 @@
+TripBalancing Step 5 — Security/Auth/RLS audit
+Date: 2026-08-24
+
+IMPORTANT DEPLOYMENT ORDER
+1. Deploy this project's code to Render.
+2. In Supabase -> SQL Editor, run STEP5_SECURITY_RLS_20260824.sql once.
+3. Confirm Render has VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY (build env), SUPABASE_SERVICE_ROLE_KEY (server only), and optionally ADMIN_EMAIL for bootstrap.
+4. Sign out and sign back in before testing.
+
+SECURITY FIXES
+- AI itinerary generation now requires a real Supabase bearer token.
+- Plan/free-trip/paid-credit data sent from the browser is ignored. Server reads user_profiles with service role.
+- Free-trip and paid-token consumption is server-side and optimistic-lock protected against double requests.
+- Cached Gemini itineraries still consume an allowance; curated Gemini-failure fallback does not.
+- Frontend no longer writes plan, premium, free trip usage, or paid trip balance to Supabase.
+- LocalStorage entitlement migration is disabled for real Supabase accounts.
+- Gemini-backed recommendation, travel-tips, and itinerary-chat endpoints now require authentication.
+- Admin access uses admin_users as primary authority. ADMIN_EMAIL is explicit bootstrap only; no hard-coded owner email remains.
+- Transactional email endpoint is no longer an unauthenticated Brevo relay. Buddy emails require a matching pending invitation; other templates require admin.
+- Refund requests require authentication and the Razorpay payment must belong to the signed-in user. Browser-provided plan/date/usage values are not trusted.
+- Razorpay payment IDs are protected by a unique DB index; subscriptions are one row per user.
+- RLS migration prevents browser writes to entitlement/payment/subscription/admin/refund/support tables.
+- Browser may update only user_profiles.global_packing_checked (plus updated_at).
+- Buddy invitation sender must own the trip; only recipient can change invitation status.
+- Accepted buddies gain shared-trip SELECT, and only accepted write buddies gain UPDATE.
+
+END-TO-END TEST CHECKLIST
+A. Auth isolation
+- User A cannot read User B profile/trips/payments/subscriptions.
+- Logged-out requests to /api/generate-itinerary, /api/recommend-destinations, /api/travel-tips, /api/itinerary-chat return 401.
+
+B. Entitlements
+- Free account: generation #1 -> free_trips_used 1; #2 -> 2; #3 -> 403 unless paid credit exists.
+- Editing request JSON plan='lifetime' or paidTripsBalance=999 must NOT bypass server limit.
+- Pay-per-trip purchase grants server-side credit; one billable generation decrements exactly one.
+- Yearly/lifetime generation does not consume free/paid counters.
+- Gemini quota/failure curated fallback leaves counters unchanged.
+
+C. Payment/auth
+- Payment continues to activate the server-authoritative plan from the Razorpay order.
+- Replaying the same payment ID does not grant entitlement twice.
+
+D. Buddy access
+- Owner can invite read/write buddy.
+- Unrelated user cannot create an invitation for another user's trip.
+- Recipient can accept/decline but cannot rewrite sender/recipient/access type.
+- Read buddy can view shared trip but cannot edit it.
+- Write buddy can view and edit shared trip.
+
+E. Email/refund/admin
+- Anonymous request to transactional email endpoint returns 401.
+- Normal user cannot send admin/payment/refund email templates.
+- Buddy invite email is only sent for a real pending invite.
+- Refund request using another user's Razorpay payment ID returns 403.
+- Non-admin /api/admin/* returns 403; admin_users member succeeds.
+
+F. Final product regression
+- Login/signup/password reset.
+- Generate -> save -> reload -> edit/delete own trip.
+- PDF generation and budget totals unchanged.
+- Razorpay checkout and verified entitlement refresh unchanged.
+- Gemini fallback behavior from Step 4 unchanged.
+
+CONSERVATIVE UNUSED-CODE CLEANUP
+- Removed server-fixed.ts (package scripts run server.ts only).
+- Removed duplicate root components/Dashboard.tsx (App imports src/components/Dashboard.tsx).
+- Removed unused src/components/DashboardOverview.tsx.
+- Removed unused src/components/LiveFlightSearch.tsx.
+- Removed unused src/db Drizzle/Postgres source tree and corresponding direct dependencies from package.json.
+- Removed stale assets/.aistudio metadata directory.
+No active React route/component import referenced these files.
+
+BUILD/TEST RESULT
+- 19/19 Step 5 static security checks pass via scripts/step5-security-static-test.mjs.
+- TypeScript parser reached the project without syntax errors introduced by Step 5; full type/build verification could not complete because dependencies are not included in the uploaded ZIP and npm install timed out in this environment.
+- A real Supabase RLS/auth end-to-end test cannot be executed from this sandbox because your production Supabase/Razorpay credentials are intentionally not available here. Use the checklist above after running the SQL migration.

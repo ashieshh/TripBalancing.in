@@ -1,3 +1,4 @@
+import { db } from "../lib/supabase";
 import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { 
   Download, Save, Trash, Calendar, Users, Briefcase, ChevronDown, ChevronUp, MapPin, Printer,
@@ -343,9 +344,11 @@ export default function ItineraryView({
     setChatMessages(updatedMessages);
 
     try {
+      const accessToken = await db.getAccessToken();
+      if (!accessToken) throw new Error("Your session has expired. Please sign in again.");
       const res = await fetch("/api/itinerary-chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
         body: JSON.stringify({
           itinerary,
           message: userMsg,

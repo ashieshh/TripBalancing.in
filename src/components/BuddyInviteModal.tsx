@@ -72,9 +72,11 @@ export default function BuddyInviteModal({
 
       // Send a real Brevo invitation email. The Join Trip link opens TripBalancing; after
       // signup/login with this same email, the pending invitation is already waiting.
+      const accessToken = await db.getAccessToken();
+      if (!accessToken) throw new Error("Your session has expired. Please sign in again.");
       const emailResponse = await fetch("/api/email/send-transactional", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${accessToken}` },
         body: JSON.stringify({
           templateType: "buddy_invite",
           recipientEmail,

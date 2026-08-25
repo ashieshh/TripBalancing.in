@@ -384,22 +384,19 @@ export const db = {
   async upsertUserProfile(profile: Partial<UserProfile> & { id: string }): Promise<UserProfile | null> {
     if (isRealSupabaseConfigured && supabase) {
       try {
-        const payload: any = {
-          id: profile.id,
-          updated_at: new Date().toISOString()
-        };
-        if (profile.email !== undefined) payload.email = profile.email;
-        if (profile.plan !== undefined) {
-          payload.plan = profile.plan;
-          payload.is_premium = profile.plan === "yearly" || profile.plan === "lifetime";
-        }
-        if (profile.free_trips_used !== undefined) payload.free_trips_used = profile.free_trips_used;
-        if (profile.paid_trips_balance !== undefined) payload.paid_trips_balance = profile.paid_trips_balance;
+        // Production entitlement fields (plan/premium/free-trip usage/paid credits) are
+        // server-owned. The browser may only persist non-financial preference data.
+        const payload: any = { updated_at: new Date().toISOString() };
         if (profile.global_packing_checked !== undefined) payload.global_packing_checked = profile.global_packing_checked;
+
+        if (Object.keys(payload).length === 1) {
+          return await this.getUserProfile(profile.id, profile.email);
+        }
 
         const { data, error } = await supabase
           .from('user_profiles')
-          .upsert(payload, { onConflict: 'id' })
+          .update(payload)
+          .eq('id', profile.id)
           .select();
 
         if (error) {
@@ -458,29 +455,11 @@ export const db = {
         let finalProfile: UserProfile | null = existing;
 
         if (!existing) {
-          const oldPlan = (localStorage.getItem(`tripbalancing_plan_${userId}`) || "free") as any;
-          const oldPremium = localStorage.getItem(`tripbalancing_premium_${userId}`);
-          const oldFreeUsedStr = localStorage.getItem(`tripbalancing_free_trips_used_${userId}`);
-          const oldPaidBalanceStr = localStorage.getItem(`tripbalancing_paid_trips_balance_${userId}`);
-          const oldGlobalPackingStr = localStorage.getItem("tripbalancing_global_packing_checked");
-
-          const plan = oldPlan === "lifetime" || oldPlan === "yearly" || oldPlan === "pay_per_trip" ? oldPlan : (oldPremium === "true" ? "lifetime" : "free");
-          const free_trips_used = oldFreeUsedStr ? parseInt(oldFreeUsedStr, 10) : 0;
-          const paid_trips_balance = oldPaidBalanceStr ? parseInt(oldPaidBalanceStr, 10) : 0;
-          let global_packing_checked = {};
-          if (oldGlobalPackingStr) {
-            try { global_packing_checked = JSON.parse(oldGlobalPackingStr); } catch (e) {}
-          }
-
-          finalProfile = await this.upsertUserProfile({
-            id: userId,
-            email,
-            plan,
-            is_premium: plan === "yearly" || plan === "lifetime",
-            free_trips_used,
-            paid_trips_balance,
-            global_packing_checked
-          });
+          // Do not restore plan/credits from browser LocalStorage. Those values are not
+          // trustworthy entitlement evidence. STEP5_SECURITY_RLS backfills existing users
+          // and the auth.users trigger creates new free profiles.
+          console.warn("User profile is not available yet; waiting for secure server-side profile creation.");
+          finalProfile = null;
         }
 
         const migrationFlag = `tripbalancing_migrated_trips_${userId}`;
