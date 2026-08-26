@@ -2446,7 +2446,13 @@ export const exportPremiumTravelPDF = async (
   // ==========================================
   const b = itinerary.estimatedBudgetBreakdown;
   if (b) {
-    startSectionPage("05", "FINANCIAL PLANNER & ALLOCATIONS", "Consolidated cost breakdowns, dining metrics, and detailed luxury investment summaries.");
+    const financialStyle = String(itinerary.travelStyle || "").toLowerCase().trim();
+    const financialSectionSubtitle = financialStyle === "luxury"
+      ? "Consolidated cost breakdowns, premium dining metrics, and luxury travel allocations."
+      : financialStyle === "food explorer"
+        ? "Consolidated cost breakdowns with food-led dining, activity, stay, and transport allocations."
+        : `Consolidated cost breakdowns and ${itinerary.travelStyle || "travel"}-appropriate trip allocations.`;
+    startSectionPage("05", "FINANCIAL PLANNER & ALLOCATIONS", financialSectionSubtitle);
 
     // Beautiful introduction on the Section Start page itself!
     doc.setFont("helvetica", "bold");
@@ -2468,11 +2474,91 @@ export const exportPremiumTravelPDF = async (
     y += 24;
 
     // Visual indicators of budget categories
+    const styleFinancialCopy: Record<string, { accommodation: string; food: string; activities: string; transit: string }> = {
+      "budget": {
+        accommodation: "Value stays, guesthouses & practical hotels",
+        food: "Affordable local meals, cafes & street-food allowance",
+        activities: "Low-cost sights, local experiences & entry fees",
+        transit: "Public transport, shared rides & practical local travel"
+      },
+      "smart luxury": {
+        accommodation: "High-value upscale stays & well-rated boutique hotels",
+        food: "Quality local dining with selected premium experiences",
+        activities: "Priority experiences balanced with strong value",
+        transit: "Comfortable transfers with value-conscious local travel"
+      },
+      "luxury": {
+        accommodation: "Upscale hotels, luxury resorts & premium stays",
+        food: "Acclaimed restaurants, fine dining & signature tastings",
+        activities: "Private, priority, spa & elevated experiences",
+        transit: "Private/chauffeured transfers & premium local transport"
+      },
+      "adventure": {
+        accommodation: "Practical stays positioned for active exploration",
+        food: "Fuel-and-recovery meals for active travel days",
+        activities: "Guided outdoor activities, gear & adventure fees",
+        transit: "Transfers to trailheads, activity zones & outdoor routes"
+      },
+      "backpacker": {
+        accommodation: "Hostels, guesthouses & low-cost social stays",
+        food: "Street food, local cafes & backpacker meal allowance",
+        activities: "Free/low-cost sights and social local experiences",
+        transit: "Public transport, walking & economical shared travel"
+      },
+      "food explorer": {
+        accommodation: "Comfortable stays near food districts & local neighborhoods",
+        food: "Regional meals, markets, tastings & culinary experiences",
+        activities: "Food walks, cooking/tasting experiences & supporting sights",
+        transit: "Local travel between markets, eateries & culinary districts"
+      },
+      "wellness & spa": {
+        accommodation: "Quiet wellness stays, resorts & restorative lodging",
+        food: "Balanced dining, wellness meals & relaxed restaurant allowance",
+        activities: "Spa, wellness, nature & restorative experiences",
+        transit: "Comfortable low-stress transfers and local travel"
+      },
+      "culture & history": {
+        accommodation: "Well-located stays near heritage and cultural districts",
+        food: "Traditional regional dining & culturally relevant food stops",
+        activities: "Museums, heritage sites, guides & cultural admissions",
+        transit: "Local transport linking heritage and cultural areas"
+      },
+      "beach escape": {
+        accommodation: "Beachside stays, resorts & coastal lodging",
+        food: "Coastal dining, local seafood/veg options & beachside meals",
+        activities: "Beach, water, sunset & coastal experiences",
+        transit: "Coastal transfers and practical beach-area transport"
+      },
+      "nature & wildlife": {
+        accommodation: "Nature-oriented stays with practical access to reserves",
+        food: "Local meals and provisions for nature-focused days",
+        activities: "Nature guides, wildlife visits, parks & outdoor admissions",
+        transit: "Transfers to reserves, parks & scenic nature areas"
+      },
+      "shopping": {
+        accommodation: "Convenient stays near markets and shopping districts",
+        food: "Local dining breaks around shopping and market routes",
+        activities: "Markets, artisan districts & shopping experiences",
+        transit: "Convenient transport between retail and market areas"
+      },
+      "nightlife": {
+        accommodation: "Well-located stays with safe late-night access",
+        food: "Brunch, evening dining & nightlife food allowance",
+        activities: "Evening entertainment, lounges & nightlife experiences",
+        transit: "Verified late-night taxis/rides and safe return transport"
+      }
+    };
+    const financialCopy = styleFinancialCopy[financialStyle] || {
+      accommodation: "Travel-style appropriate stays and lodging",
+      food: "Destination-appropriate meals and dining allowance",
+      activities: "Sightseeing, experiences and admission fees",
+      transit: "Local transport, transfers and tour travel"
+    };
     const financialOverviewCategories = [
-      { name: "ACCOMMODATION", desc: "Premium hotels, resorts, & home-stays", txt: [13, 148, 136] },
-      { name: "FOOD & DINING", desc: "Authentic local eateries & fine dining allowance", txt: [217, 119, 6] },
-      { name: "ACTIVITIES & SIGHTSEEING", desc: "Monument admission fees & guided group excursions", txt: [79, 70, 229] },
-      { name: "TRANSIT & TOURS", desc: "Intercity train tickets, local cab hires & fuel reserves", txt: [2, 132, 199] }
+      { name: "ACCOMMODATION", desc: financialCopy.accommodation, txt: [13, 148, 136] },
+      { name: "FOOD & DINING", desc: financialCopy.food, txt: [217, 119, 6] },
+      { name: "ACTIVITIES & SIGHTSEEING", desc: financialCopy.activities, txt: [79, 70, 229] },
+      { name: "TRANSIT & TOURS", desc: financialCopy.transit, txt: [2, 132, 199] }
     ];
     financialOverviewCategories.forEach((cat, idx) => {
       doc.setFillColor(248, 250, 252);

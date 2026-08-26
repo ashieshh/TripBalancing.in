@@ -1,0 +1,23 @@
+TripBalancing — Final Food Semantics + PDF Style Copy Fix (2026-08-26)
+
+Scope intentionally limited to itinerary/PDF quality. Page-position/scroll code was NOT changed.
+
+1) Added a shared final food-semantics guard in server.ts.
+   - Runs for BOTH Gemini output and curated fallback output.
+   - Runs after itinerary-quality cleanup and before route enrichment/budget reconciliation.
+   - Dessert/beverage items can remain tasting/snack activities.
+   - Dessert/beverage items cannot remain breakfast/brunch/lunch/dinner.
+   - If any downstream generation path misclassifies one, the meal is replaced with a savory/full-meal localFood recommendation.
+
+2) Updated Financial Planner copy in src/utils/pdfGenerator.ts.
+   - Removed global hard-coded wording such as "Premium hotels" and "fine dining allowance" for every style.
+   - Added style-aware category descriptions for all 12 travel styles.
+   - Financial Planner section subtitle is also style-aware.
+
+3) Preserved existing behavior.
+   - No page-position/scroll changes.
+   - No Razorpay/payment changes.
+   - No Supabase/RLS/auth changes.
+   - No pricing-plan changes.
+   - No PDF layout redesign.
+   - No traveler-type changes.

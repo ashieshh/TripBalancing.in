@@ -2112,6 +2112,71 @@ function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string
   return Array.from(new Set(errors));
 }
 
+
+/**
+ * Final shared food-semantics guard.
+ *
+ * This runs for BOTH Gemini output and curated fallback output immediately before
+ * route enrichment/budget reconciliation. It prevents any downstream code path
+ * from turning a dessert or beverage into breakfast/lunch/dinner.
+ */
+function normalizeFinalFoodSemantics(itinerary: any) {
+  if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+
+  const foods = Array.isArray(itinerary.localFood) ? itinerary.localFood : [];
+  const textOf = (f: any) => `${f?.name || ''} ${f?.description || ''} ${f?.type || ''}`.toLowerCase();
+  const isSnackOrDrink = (f: any) => {
+    const kind = String(f?.type || '').toLowerCase().trim();
+    if (kind === 'dessert' || kind === 'beverage') return true;
+    return /(dessert|sweet|cake|pastry|ice cream|pudding|cookie|macaron|bebinca|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni)/i.test(textOf(f));
+  };
+  const savoryFoods = foods.filter((f: any) => !isSnackOrDrink(f));
+  if (!savoryFoods.length) return itinerary;
+
+  const mealTitle = /(breakfast|brunch|lunch|dinner)/i;
+  const tastingTitle = /(tasting|dessert|snack|beverage|drink|after[- ]?dinner|coffee|tea)/i;
+  const findMentionedFood = (activity: any) => {
+    const hay = `${activity?.title || ''} ${activity?.description || ''}`.toLowerCase();
+    return foods.find((f: any) => {
+      const name = String(f?.name || '').trim().toLowerCase();
+      return name.length > 2 && hay.includes(name);
+    });
+  };
+
+  let savoryCursor = 0;
+  itinerary.days = itinerary.days.map((day: any, dayIndex: number) => {
+    const activities = Array.isArray(day?.activities) ? day.activities : [];
+    const nextActivities = activities.map((activity: any, activityIndex: number) => {
+      const title = String(activity?.title || '');
+      // Explicit tasting/snack blocks are allowed to contain desserts/beverages.
+      if (!mealTitle.test(title) || tastingTitle.test(title)) return activity;
+
+      const mentioned = findMentionedFood(activity);
+      const activityText = `${title} ${activity?.description || ''}`;
+      const semanticallySnack = mentioned ? isSnackOrDrink(mentioned) : /(bebinca|feni|dessert|pastry|cake|sweet|cocktail|wine|beer|spirit|liqueur|beverage)/i.test(activityText);
+      if (!semanticallySnack) return activity;
+
+      const replacement = savoryFoods[(dayIndex + activityIndex + savoryCursor++) % savoryFoods.length];
+      const mealLabel = /breakfast/i.test(title) ? 'Regional Breakfast' : /brunch/i.test(title) ? 'Regional Brunch' : /lunch/i.test(title) ? 'Regional Lunch' : 'Signature Dinner';
+      const oldName = String(mentioned?.name || '').trim();
+      const newTitle = oldName && title.toLowerCase().includes(oldName.toLowerCase())
+        ? title.replace(new RegExp(oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), String(replacement.name || 'Regional Meal'))
+        : `${mealLabel}: ${replacement.name || 'Regional Meal'}`;
+
+      return {
+        ...activity,
+        title: newTitle,
+        description: `${replacement.description || 'Choose a complete savory destination-specific meal.'} This is a complete meal; desserts and beverages may be added only as separate tasting/snack stops.`,
+        location: replacement.mustTryAt || activity?.location || itinerary.destination,
+        cost: activity?.cost || 'Per person - verify menu'
+      };
+    });
+    return { ...day, activities: nextActivities };
+  });
+
+  return itinerary;
+}
+
 function improveItineraryQuality(itinerary: any) {
   if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
 
@@ -3221,7 +3286,7 @@ Return the response in strict JSON format.`;
     const pricedItinerary = await attachMarketFlightEstimate(parsedItinerary, origin || "", destination, startDate, endDate, travelers);
 
     // Store in cache for future identical requests
-    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality(pricedItinerary)), diffDays));
+    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(normalizeFinalFoodSemantics(improveItineraryQuality(pricedItinerary))), diffDays));
 
     ITINERARY_CACHE.set(cacheKey, {
       data: reconciledItinerary,
@@ -3741,7 +3806,7 @@ Return the response in strict JSON format.`;
     const fallbackCacheKey = crypto.createHash("sha256").update(fallbackIdentity).digest("hex");
     fallbackItinerary.budgetAmount = budgetAmount;
     const pricedFallback = await attachMarketFlightEstimate({ ...fallbackItinerary, plannedBudget: budgetAmount }, origin || "", destination, startDate, endDate, travelers);
-    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality(pricedFallback)), diffDays));
+    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(normalizeFinalFoodSemantics(improveItineraryQuality(pricedFallback))), diffDays));
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,
