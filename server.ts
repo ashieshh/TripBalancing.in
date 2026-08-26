@@ -2370,6 +2370,91 @@ function enforceFinalItineraryIntelligence(itinerary: any) {
   return itinerary;
 }
 
+
+/**
+ * Deterministic last-mile cleanup. This is intentionally NOT another Gemini prompt:
+ * it repairs common model failures in code so duplicate meals, hollow Food Explorer
+ * mornings and internal prompt wording cannot reach the UI/PDF.
+ */
+function normalizeCustomerFacingItinerary(itinerary: any) {
+  if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+  const style = String(itinerary.travelStyle || '').toLowerCase().trim();
+  const destination = String(itinerary.destination || 'the destination');
+  const foods = Array.isArray(itinerary.localFood) ? itinerary.localFood : [];
+  const places = Array.isArray(itinerary.placesToVisit) ? itinerary.placesToVisit : [];
+  const norm = (v:any) => String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(regional|signature|upscale|local|meal|lunch|dinner|breakfast|brunch|tasting|food|dining|at|the|a|an|private|priority|visit|experience)\b/g,' ').replace(/\s+/g,' ').trim();
+  const parseTime=(v:any,idx=0)=>{ const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/); if(!m)return 9*60+idx*150; let h=Number(m[1])%12; if(m[3]==='PM')h+=12; return h*60+Number(m[2]||0); };
+  const isSnack=(f:any)=>/(dessert|beverage|drink|cocktail|wine|beer|spirit|liqueur|feni|cake|pastry|sweet|bebinca)/i.test(`${f?.name||''} ${f?.type||''} ${f?.description||''}`);
+  const savory=foods.filter((f:any)=>f?.name && !isSnack(f));
+  const tastings=foods.filter((f:any)=>f?.name && isSnack(f));
+  const usedMeals=new Set<string>(), usedVenues=new Set<string>(), usedPlaces=new Set<string>(), usedTastings=new Set<string>();
+
+  const polished = (v:any) => {
+    let t=String(v||'').trim();
+    const replacements:[RegExp,string][]=[
+      [/do not invent[^.]*\.?/ig,''], [/must be a complete[^.]*\.?/ig,'Enjoy this as a complete savory meal.'],
+      [/treat desserts? and beverages? as tastings\/snacks only\.?/ig,'Desserts and drinks work best as separate tasting stops.'],
+      [/treat this only as a dessert\/beverage tasting after the meal,? never as the meal itself\.?/ig,'Enjoy this as an optional after-meal tasting.'],
+      [/use a reputable venue[^.]*\.?/ig,'Choose a well-reviewed venue.'], [/verify live rate/ig,'check current price'],
+      [/verify menu/ig,'check current menu'], [/validation failure[^.]*\.?/ig,''], [/internal rule[^.]*\.?/ig,'']
+    ];
+    for(const [re,r] of replacements)t=t.replace(re,r);
+    return t.replace(/\s+/g,' ').replace(/\s+([,.])/g,'$1').trim();
+  };
+  const nextUnused=(pool:any[], used:Set<string>)=>{ const f=pool.find(x=>!used.has(norm(x?.name))); if(f)used.add(norm(f.name)); return f||null; };
+  const freshPlace=()=>{ const p=places.find((x:any)=>x?.name&&!usedPlaces.has(norm(x.name))); if(p)usedPlaces.add(norm(p.name)); return p||null; };
+  const foodActivity=(time:string, f:any, mealType:string)=>({ time, title:`${mealType}: ${f.name}`, description:polished(f.description||`Enjoy ${f.name} as part of the local culinary route.`), location:f.mustTryAt||destination, cost:'Check current menu' });
+
+  itinerary.days=itinerary.days.map((day:any,di:number)=>{
+    let acts=(Array.isArray(day?.activities)?day.activities:[]).map((a:any)=>({...a,title:polished(a?.title),description:polished(a?.description),location:polished(a?.location)}));
+    acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
+
+    // Food Explorer must be a real full-day culinary plan, not a 1 PM start.
+    if(style==='food explorer' && (!acts.length || parseTime(acts[0]?.time)>10*60+30)) {
+      acts.unshift({time:'08:30 AM',title:'Local Breakfast & Cafe Discovery',description:`Start the day with a destination-specific breakfast and seasonal local specialties in ${destination}.`,location:destination,cost:'Check current menu'});
+      acts.splice(1,0,{time:'10:30 AM',title:'Market / Food District Walk',description:`Explore an established public market or culinary district, focusing on ingredients, vendors and everyday food culture.`,location:destination,cost:'Low-cost tasting allowance'});
+    }
+
+    // Replace repeated main meals/venues across days with unused local-food choices.
+    acts=acts.filter((a:any)=>{
+      const title=String(a?.title||'');
+      const isMain=/(breakfast|brunch|lunch|dinner|regional meal|signature dining)/i.test(title);
+      const mk=norm(title), vk=norm(a?.location);
+      if(isMain && mk && usedMeals.has(mk)) {
+        const f=nextUnused(savory,usedMeals);
+        if(f){ Object.assign(a,foodActivity(a.time||'01:00 PM',f,/dinner/i.test(title)?'Signature Dinner':/breakfast|brunch/i.test(title)?'Regional Breakfast':'Regional Lunch')); }
+        else return false;
+      }
+      const finalMeal=norm(a?.title); if(isMain&&finalMeal)usedMeals.add(finalMeal);
+      const finalVenue=norm(a?.location);
+      if(finalVenue && finalVenue!==norm(destination) && usedVenues.has(finalVenue)) {
+        const f=isMain?nextUnused(savory,usedMeals):null;
+        if(f) Object.assign(a,foodActivity(a.time||'01:00 PM',f,/dinner/i.test(title)?'Signature Dinner':'Regional Lunch'));
+        else if(style==='food explorer') a.location=destination;
+      }
+      const v2=norm(a?.location); if(v2&&v2!==norm(destination))usedVenues.add(v2);
+      return true;
+    });
+
+    // Remove exact/near duplicate blocks inside a day (e.g. same curry at 7:30 and 8:00).
+    const seenDay=new Set<string>();
+    acts=acts.filter((a:any)=>{ const k=`${norm(a?.title)}|${norm(a?.location)}`; if(k!=='|'&&seenDay.has(k))return false; if(k!=='|')seenDay.add(k); return true; });
+
+    // Keep Food Explorer days substantial after de-duplication using fresh, non-repeated blocks.
+    if(style==='food explorer') {
+      while(acts.length<4) {
+        const f=nextUnused(acts.some((a:any)=>/(dessert|tasting|snack)/i.test(a?.title))?savory:tastings, acts.some((a:any)=>/(dessert|tasting|snack)/i.test(a?.title))?usedMeals:usedTastings);
+        if(f) acts.push(foodActivity(acts.length<3?'04:00 PM':'07:30 PM',f,acts.length<3?'Tasting / Food Craft':'Signature Dinner'));
+        else { const p=freshPlace(); acts.push({time:acts.length<3?'04:30 PM':'07:30 PM',title:p?`Neighborhood Discovery: ${p.name}`:'Culinary Neighborhood Walk',description:polished(p?.description||`Explore a different neighborhood in ${destination} between meal stops.`),location:p?.name||destination,cost:p?.entryFee||'Free / low cost'}); }
+        if(acts.length>6)break;
+      }
+    }
+    acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
+    return {...day,theme:polished(day?.theme),activities:acts};
+  });
+  return itinerary;
+}
+
 function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const errors:string[] = [];
   const days = Array.isArray(itinerary?.days) ? itinerary.days : [];
@@ -2989,7 +3074,7 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
             )))
           : undefined
       }, origin || "", destination, startDate, endDate, travelers);
-      const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(cachedPrepared)))), diffDays));
+      const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(normalizeCustomerFacingItinerary(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(cachedPrepared))))), diffDays));
       cachedItinerary.travelStyle = travelStyle;
       cachedItinerary.travelers = Number(travelers) || 1;
       const cachedSource = cached.data?.generationSource || "gemini";
@@ -3471,7 +3556,7 @@ Return the response in strict JSON format.`;
     const pricedItinerary = await attachMarketFlightEstimate(parsedItinerary, origin || "", destination, startDate, endDate, travelers);
 
     // Store in cache for future identical requests
-    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(pricedItinerary)))), diffDays));
+    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(normalizeCustomerFacingItinerary(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(pricedItinerary))))), diffDays));
     const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
     if (finalUserFacingErrors.length) console.warn(`[FINAL_ITINERARY_QUALITY] ${finalUserFacingErrors.join('; ')}`);
 
@@ -3993,7 +4078,7 @@ Return the response in strict JSON format.`;
     const fallbackCacheKey = crypto.createHash("sha256").update(fallbackIdentity).digest("hex");
     fallbackItinerary.budgetAmount = budgetAmount;
     const pricedFallback = await attachMarketFlightEstimate({ ...fallbackItinerary, plannedBudget: budgetAmount }, origin || "", destination, startDate, endDate, travelers);
-    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(pricedFallback)))), diffDays));
+    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(normalizeCustomerFacingItinerary(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(pricedFallback))))), diffDays));
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,

@@ -535,15 +535,10 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
   // AI may suggest names/descriptions, but it must not control currency or raw price scale.
   const fmtMoney = (value: number) => `${currencySym}${Math.max(0, Math.round(value)).toLocaleString()}`;
 
-  // Day activity line items MUST use the same reconciled trip currency as the
-  // grand total.  AI/fallback activity strings can contain INR-looking values
-  // (for example "₹150 - ₹500").  Merely replacing the symbol caused the same
-  // numeric value to appear as AED 150 and INR 150.  Instead, use the original
-  // numbers only as RELATIVE WEIGHTS and allocate the authoritative sightseeing
-  // pool across the paid activities.  This keeps every displayed line item
-  // economically identical when the user switches currency.
+  // Day activity line items: keep attraction admission separate from premium
+  // guide/transfer/service spend. Previously the full sightseeing pool could be
+  // assigned to one paid attraction (e.g. a $34 entry becoming $671).
   if (Array.isArray(itinerary.days) && itinerary.days.length > 0) {
-    const activityRows: Array<{ activity: any; weight: number }> = [];
     const firstMoneyNumber = (value: any): number => {
       if (typeof value === "number") return Number.isFinite(value) ? Math.max(0, value) : 0;
       const text = String(value ?? "").replace(/,/g, "");
@@ -553,29 +548,36 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       const n = Number(match[0]);
       return Number.isFinite(n) ? Math.max(0, n) : 0;
     };
+    const key = (v:any) => String(v||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").replace(/\b(the|a|an|private|priority|visit|experience|tour|guided|at|to|of|and)\b/g," ").replace(/\s+/g," ").trim();
+    const places = Array.isArray(itinerary.placesToVisit) ? itinerary.placesToVisit : [];
+    const placeFees = places.map((p:any)=>({ key:key(p?.name), fee:firstMoneyNumber(p?.entryFee), free:/\bfree\b/i.test(String(p?.entryFee||"")) })).filter((p:any)=>p.key);
+    const serviceRows:Array<{activity:any;weight:number}>=[];
+    let fixedAdmissionTotal=0;
 
-    itinerary.days.forEach((day: any) => {
-      const activities = Array.isArray(day?.activities) ? day.activities : [];
-      activities.forEach((activity: any) => {
-        const raw = String(activity?.cost ?? "");
-        if (/\bfree\b|included/i.test(raw) || firstMoneyNumber(raw) <= 0) {
-          if (!raw.trim() || /\bfree\b|included/i.test(raw)) activity.cost = "Free";
-          return;
+    itinerary.days.forEach((day:any)=>{
+      for (const activity of Array.isArray(day?.activities)?day.activities:[]) {
+        const raw=String(activity?.cost??"");
+        const activityKey=key(`${activity?.title||""} ${activity?.location||""}`);
+        const matched=placeFees.find((p:any)=>activityKey.includes(p.key) || p.key.includes(activityKey));
+        if (matched) {
+          if (matched.free) activity.cost="Free";
+          else if (matched.fee>0) { const admission=Math.max(1,Math.round(matched.fee)); activity.cost=fmtMoney(admission); fixedAdmissionTotal+=admission; }
+          continue;
         }
-        activityRows.push({ activity, weight: firstMoneyNumber(raw) });
-      });
+        const weight=firstMoneyNumber(raw);
+        if (/\bfree\b|included/i.test(raw) || weight<=0) { if(!raw.trim()||/\bfree\b|included/i.test(raw))activity.cost="Free"; continue; }
+        serviceRows.push({activity,weight});
+      }
     });
 
-    if (activityRows.length > 0) {
-      const totalWeight = activityRows.reduce((sum, row) => sum + row.weight, 0) || activityRows.length;
-      let allocated = 0;
-      activityRows.forEach((row, index) => {
-        const isLast = index === activityRows.length - 1;
-        const amount = isLast
-          ? Math.max(0, Math.round(calculated.sightseeing - allocated))
-          : Math.max(0, Math.round(calculated.sightseeing * row.weight / totalWeight));
-        allocated += amount;
-        row.activity.cost = amount > 0 ? fmtMoney(amount) : "Free / Included";
+    const remainingPool=Math.max(0,Math.round(calculated.sightseeing-fixedAdmissionTotal));
+    if(serviceRows.length){
+      const totalWeight=serviceRows.reduce((sum,row)=>sum+row.weight,0)||serviceRows.length;
+      let allocated=0;
+      serviceRows.forEach((row,index)=>{
+        const amount=index===serviceRows.length-1 ? Math.max(0,remainingPool-allocated) : Math.max(0,Math.round(remainingPool*row.weight/totalWeight));
+        allocated+=amount;
+        row.activity.cost=amount>0?fmtMoney(amount):"Free / Included";
       });
     }
   }
@@ -625,11 +627,14 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
 
   // Attraction cards: preserve free attractions; normalize paid fees into the trip currency.
   if (Array.isArray(itinerary.placesToVisit) && itinerary.placesToVisit.length) {
-    const paidPlaces = itinerary.placesToVisit.filter((p: any) => !/\bfree\b/i.test(String(p.entryFee || "")));
-    const perPaidPlace = paidPlaces.length ? calculated.sightseeing / travelers / paidPlaces.length : 0;
     itinerary.placesToVisit.forEach((place: any) => {
-      if (/\bfree\b/i.test(String(place.entryFee || ""))) place.entryFee = "Free";
-      else place.entryFee = fmtMoney(perPaidPlace);
+      const raw = String(place.entryFee || "");
+      if (/\bfree\b/i.test(raw)) place.entryFee = "Free";
+      else {
+        const original = Number((raw.replace(/,/g, "").match(/[0-9]+(?:\.[0-9]+)?/) || [0])[0]);
+        const sensibleAdmission = Number.isFinite(original) && original > 0 ? original : 0;
+        place.entryFee = sensibleAdmission > 0 ? fmtMoney(sensibleAdmission) : "Check current admission";
+      }
     });
     itinerary.attractionCosts = itinerary.placesToVisit.map((p: any) => ({ name: p.name, fee: p.entryFee }));
   }

@@ -696,49 +696,25 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
   // AI may suggest names/descriptions, but it must not control currency or raw price scale.
   const fmtMoney = (value: number) => `${currencySym}${Math.max(0, Math.round(value)).toLocaleString()}`;
 
-  // Day activity line items MUST use the same reconciled trip currency as the
-  // grand total.  AI/fallback activity strings can contain INR-looking values
-  // (for example "₹150 - ₹500").  Merely replacing the symbol caused the same
-  // numeric value to appear as AED 150 and INR 150.  Instead, use the original
-  // numbers only as RELATIVE WEIGHTS and allocate the authoritative sightseeing
-  // pool across the paid activities.  This keeps every displayed line item
-  // economically identical when the user switches currency.
+  // Keep standard attraction admission separate from premium tour/service spend.
+  // This prevents a small entry ticket from inheriting the whole sightseeing pool.
   if (Array.isArray(itinerary.days) && itinerary.days.length > 0) {
-    const activityRows: Array<{ activity: any; weight: number }> = [];
-    const firstMoneyNumber = (value: any): number => {
-      if (typeof value === "number") return Number.isFinite(value) ? Math.max(0, value) : 0;
-      const text = String(value ?? "").replace(/,/g, "");
-      if (/\bfree\b|included/i.test(text)) return 0;
-      const match = text.match(/[0-9]+(?:\.[0-9]+)?/);
-      if (!match) return 0;
-      const n = Number(match[0]);
-      return Number.isFinite(n) ? Math.max(0, n) : 0;
-    };
-
-    itinerary.days.forEach((day: any) => {
-      const activities = Array.isArray(day?.activities) ? day.activities : [];
-      activities.forEach((activity: any) => {
-        const raw = String(activity?.cost ?? "");
-        if (/\bfree\b|included/i.test(raw) || firstMoneyNumber(raw) <= 0) {
-          if (!raw.trim() || /\bfree\b|included/i.test(raw)) activity.cost = "Free";
-          return;
-        }
-        activityRows.push({ activity, weight: firstMoneyNumber(raw) });
-      });
-    });
-
-    if (activityRows.length > 0) {
-      const totalWeight = activityRows.reduce((sum, row) => sum + row.weight, 0) || activityRows.length;
-      let allocated = 0;
-      activityRows.forEach((row, index) => {
-        const isLast = index === activityRows.length - 1;
-        const amount = isLast
-          ? Math.max(0, Math.round(calculated.sightseeing - allocated))
-          : Math.max(0, Math.round(calculated.sightseeing * row.weight / totalWeight));
-        allocated += amount;
-        row.activity.cost = amount > 0 ? fmtMoney(amount) : "Free / Included";
-      });
-    }
+    const firstMoneyNumber = (value:any):number => { const text=String(value??"").replace(/,/g,""); if(/\bfree\b|included/i.test(text))return 0; const m=text.match(/[0-9]+(?:\.[0-9]+)?/); return m?Math.max(0,Number(m[0])||0):0; };
+    const key=(v:any)=>String(v||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").replace(/\b(the|a|an|private|priority|visit|experience|tour|guided|at|to|of|and)\b/g," ").replace(/\s+/g," ").trim();
+    const neutralAdmissionBudget = calculateRealWorldBudget({ destination, origin, travelers, days, travelStyle:'Budget', userBudgetInput, flightEstimateInr:Number(itinerary.flightEstimateInr)||undefined, startDate:itinerary.startDate, endDate:itinerary.endDate });
+    const places=Array.isArray(itinerary.placesToVisit)?itinerary.placesToVisit:[];
+    const paidCount=Math.max(1,places.filter((p:any)=>!/\bfree\b/i.test(String(p?.entryFee||""))).length);
+    const standardAdmission=Math.max(0,neutralAdmissionBudget.sightseeing/travelers/paidCount);
+    const placeFees=places.map((p:any)=>({key:key(p?.name),free:/\bfree\b/i.test(String(p?.entryFee||"")),fee:/\bfree\b/i.test(String(p?.entryFee||""))?0:standardAdmission})).filter((p:any)=>p.key);
+    const serviceRows:Array<{activity:any;weight:number}>=[]; let fixedAdmissionTotal=0;
+    itinerary.days.forEach((day:any)=>{ (Array.isArray(day?.activities)?day.activities:[]).forEach((activity:any)=>{
+      const raw=String(activity?.cost??""); const ak=key(`${activity?.title||""} ${activity?.location||""}`);
+      const matched=placeFees.find((p:any)=>ak.includes(p.key)||p.key.includes(ak));
+      if(matched){ if(matched.free)activity.cost="Free"; else { const fee=Math.max(1,Math.round(matched.fee)); activity.cost=fmtMoney(fee); fixedAdmissionTotal+=fee; } return; }
+      const weight=firstMoneyNumber(raw); if(/\bfree\b|included/i.test(raw)||weight<=0){ if(!raw.trim()||/\bfree\b|included/i.test(raw))activity.cost="Free"; return; } serviceRows.push({activity,weight});
+    }); });
+    const remaining=Math.max(0,Math.round(calculated.sightseeing-fixedAdmissionTotal));
+    if(serviceRows.length){ const totalWeight=serviceRows.reduce((n,r)=>n+r.weight,0)||serviceRows.length; let allocated=0; serviceRows.forEach((r,i)=>{ const amount=i===serviceRows.length-1?Math.max(0,remaining-allocated):Math.max(0,Math.round(remaining*r.weight/totalWeight)); allocated+=amount; r.activity.cost=amount>0?fmtMoney(amount):"Free / Included"; }); }
   }
   const dayCountForRates = Math.max(1, days);
   const nightsForRates = Math.max(1, days - 1);
