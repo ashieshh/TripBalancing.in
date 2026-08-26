@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { 
   Globe, LogOut, ArrowLeft, Sparkles, Database, WifiOff, MapPin, 
   ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users, ShieldCheck
@@ -213,6 +213,9 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  // Only auto-scroll after a newly generated itinerary. Opening a saved/shared trip
+  // should preserve the user's normal navigation behavior.
+  const pendingGeneratedResultScroll = useRef(false);
 
   // Always bring a generation error into view. This is especially important
   // on the long trip form where the user may be several screens below it.
@@ -225,6 +228,23 @@ export default function App() {
       });
     });
   }, [apiError]);
+
+  // The result replaces a long planner form. Without an explicit reset the browser
+  // keeps the old scroll offset, which made a fresh trip open halfway down the result.
+  useEffect(() => {
+    if (generating || !activeItinerary || !pendingGeneratedResultScroll.current) return;
+    pendingGeneratedResultScroll.current = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const target = document.getElementById("generated-trip-result-top");
+        if (!target) return;
+        const headerOffset = 96;
+        const top = target.getBoundingClientRect().top + window.scrollY - headerOffset;
+        window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+        target.focus({ preventScroll: true });
+      });
+    });
+  }, [generating, activeItinerary]);
 
   // Share mode state
   const [isSharedMode, setIsSharedMode] = useState(false);
@@ -457,6 +477,7 @@ export default function App() {
     }
 
     setGenerating(true);
+    pendingGeneratedResultScroll.current = true;
     setApiError(null);
     setActiveItinerary(null);
     setActiveTripId(null);
@@ -498,6 +519,7 @@ export default function App() {
         throw new Error("No itinerary received from backend.");
       }
     } catch (err: any) {
+      pendingGeneratedResultScroll.current = false;
       console.error("Generation failed:", err);
       setApiError(err.message || "An unexpected error occurred during trip generation.");
     } finally {
@@ -907,7 +929,7 @@ export default function App() {
 
         {/* ACTIVE ITINERARY DISPLAY */}
         {!generating && activeItinerary && (
-          <div className="space-y-6">
+          <div id="generated-trip-result-top" tabIndex={-1} className="space-y-6 scroll-mt-24 outline-none">
             <button
               id="back-to-dashboard-btn"
               onClick={() => { setActiveItinerary(null); setActiveTripId(null); }}

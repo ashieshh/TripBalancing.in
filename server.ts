@@ -2002,8 +2002,8 @@ async function repairItineraryForStyle(
   try {
     const style = String(travelStyle || 'Budget');
     const styleRules: Record<string, string> = {
-      'Luxury': 'Make the ACTUAL daily plan visibly premium: upscale/five-star or equivalent stay as the working base, private/chauffeured transfers where useful, acclaimed upscale dining, spa/wellness, private/priority cultural experiences, sunset cruise/yacht or other destination-appropriate elevated experiences. Do not merely multiply prices. Avoid scooters, hostels, budget shacks and repetitive Attraction + Local Flavors days.',
-      'Food Explorer': 'Make food the backbone of every full day. Use 3-5 meaningful blocks with at least two culinary blocks on most days: local breakfast/cafe, produce/fish/spice market or food walk, regional lunch, cooking/tasting experience, dessert/beverage stop, and signature dinner. Sightseeing should support the food story, not dominate it. Never repeat Attraction + Local Flavors.',
+      'Luxury': 'Make the ACTUAL daily plan visibly premium: upscale/five-star or equivalent stay as the working base, private/chauffeured transfers where useful, acclaimed upscale dining, spa/wellness, private/priority cultural experiences, sunset cruise/yacht or other destination-appropriate elevated experiences. Every full day needs 3-5 meaningful blocks. A dessert or alcoholic/local beverage is never a lunch or dinner by itself. A casual shack/stall cannot be described as fine dining unless it is genuinely an upscale destination venue. Do not merely multiply prices. Avoid scooters, hostels, budget shacks and repetitive Attraction + Local Flavors days.',
+      'Food Explorer': 'Make food the backbone of EVERY day. Use 3-5 meaningful blocks per day, normally including a breakfast/cafe or market/food walk, a real savory regional lunch, a culinary/tasting/cooking/producer experience or dessert/beverage stop, and a signature dinner when timing allows. Desserts and beverages are snack/tasting blocks, never substitutes for lunch or dinner. Sightseeing should support the food story, not dominate it. Never repeat Attraction + Local Flavors and never leave later days with only one or two activities.',
       'Adventure': 'Center most days on real active experiences such as trekking, rafting, kayaking, cycling, climbing, diving or other destination-appropriate activities, with realistic safety and recovery time.',
       'Nightlife': 'Use later starts, sunset venues, live music, lounges, clubs, entertainment and safe late-evening transport, balanced with recovery time.',
       'Wellness & Spa': 'Use calm pacing, spa/wellness treatments, yoga/meditation, healthy dining and restorative nature time.',
@@ -2074,9 +2074,17 @@ function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string
   if (style === 'luxury') {
     const premiumSignals = /(five[- ]star|5[- ]star|luxury resort|luxury hotel|boutique luxury|suite|private transfer|chauffeur|private tour|private cruise|yacht|spa|wellness treatment|fine dining|chef|tasting menu|premium lounge|concierge|reserved|vip)/i;
     const budgetSignals = /(hostel|budget guesthouse|budget stay|scooter rental|public bus|cheap eatery|budget shack|dhaba)/i;
+    const fakeMealSignals = /(lunch|dinner).*(dessert|cake|pastry|sweet|ice cream|cocktail|wine|beer|spirit|liqueur|feni)|(dessert|cake|pastry|sweet|ice cream|cocktail|wine|beer|spirit|liqueur|feni).*(lunch|dinner)/i;
+    const fakeFineDiningSignals = /(fine dining|upscale dining|luxury dining).*(shack|stall|street cart)|(shack|stall|street cart).*(fine dining|upscale dining|luxury dining)/i;
+    days.forEach((d:any, i:number) => {
+      const acts = Array.isArray(d?.activities) ? d.activities : [];
+      if (acts.length < 3) errors.push(`Luxury day ${i+1} is under-filled; expected at least three meaningful blocks`);
+    });
     const premiumCount = activityText.filter((t:string) => premiumSignals.test(t)).length;
     if (premiumCount < 2) errors.push('Luxury style lacks enough genuinely premium daily experiences');
     if (budgetSignals.test(allActivityText)) errors.push('Luxury style contains budget/backpacker primary choices');
+    if (activityText.some((t:string) => fakeMealSignals.test(t))) errors.push('Luxury style misclassifies a dessert or beverage as a full meal');
+    if (activityText.some((t:string) => fakeFineDiningSignals.test(t))) errors.push('Luxury style labels a casual shack/stall as fine dining');
     if (themes.filter((t:string) => /local flavors?/.test(t)).length >= Math.max(2, Math.ceil(days.length / 2))) errors.push('Luxury style uses repetitive generic Local Flavors day themes');
   }
 
@@ -2087,6 +2095,15 @@ function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string
       return foodSignals.test(text);
     }).length;
     const foodActivityCount = activityText.filter((t:string) => foodSignals.test(t)).length;
+    const mealSignals = /(breakfast|brunch|lunch|dinner|meal|regional cuisine|restaurant)/i;
+    const snackOnlySignals = /(dessert|cake|pastry|sweet|ice cream|cocktail|wine|beer|spirit|liqueur|feni|coffee|tea)/i;
+    days.forEach((d:any, i:number) => {
+      const acts = Array.isArray(d?.activities) ? d.activities : [];
+      if (acts.length < 3) errors.push(`Food Explorer day ${i+1} is under-filled; expected at least three meaningful blocks`);
+      const texts = acts.map((a:any) => `${a?.title||''} ${a?.description||''}`);
+      const hasRealMeal = texts.some((t:string) => mealSignals.test(t) && !snackOnlySignals.test(t));
+      if (!hasRealMeal) errors.push(`Food Explorer day ${i+1} lacks a clearly identified real meal`);
+    });
     if (themedDays < Math.max(1, Math.ceil(days.length * 0.75))) errors.push('Food Explorer style is not food-led on most days');
     if (foodActivityCount < Math.max(3, days.length)) errors.push('Food Explorer style lacks enough distinct culinary experiences');
     if (themes.filter((t:string) => /local flavors?/.test(t)).length >= Math.max(2, Math.ceil(days.length / 2))) errors.push('Food Explorer style uses repetitive generic Local Flavors day themes');
@@ -2116,7 +2133,9 @@ function improveItineraryQuality(itinerary: any) {
   const seenKeys: string[] = [];
   const days = itinerary.days.map((day: any) => {
     const activities = Array.isArray(day.activities) ? day.activities : [];
-    const uniqueActivities = activities.filter((activity: any) => {
+    const protectedStyle = ['luxury', 'food explorer'].includes(String(itinerary?.travelStyle || '').toLowerCase().trim());
+    let keptCount = 0;
+    const uniqueActivities = activities.filter((activity: any, activityIndex: number) => {
       const key = placeKey(activity);
       if (!key) return true;
       const keyTokens = new Set(key.split(" "));
@@ -2126,8 +2145,12 @@ function improveItineraryQuality(itinerary: any) {
         const smaller = Math.min(keyTokens.size, prevTokens.size);
         return smaller >= 2 && shared / smaller >= 0.75;
       });
-      if (duplicate) return false;
+      // Do not let de-duplication hollow out a thematic day after it already passed
+      // style validation. Keep enough blocks for a complete user-facing schedule.
+      const remaining = activities.length - activityIndex;
+      if (duplicate && !(protectedStyle && keptCount + remaining <= 3)) return false;
       seenKeys.push(key);
+      keptCount += 1;
       return true;
     });
     return { ...day, activities: uniqueActivities };

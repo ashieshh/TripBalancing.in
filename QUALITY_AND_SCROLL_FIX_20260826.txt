@@ -1,0 +1,23 @@
+TripBalancing - Itinerary Quality + Result Scroll Fix (2026-08-26)
+
+1. Luxury quality
+- Requires at least 3 meaningful blocks per day.
+- Repair prompt explicitly forbids dessert/beverage-only lunch or dinner.
+- Flags casual shacks/stalls mislabeled as fine/upscale dining.
+- Keeps premium service-level rules and blocks budget/backpacker primary choices.
+
+2. Food Explorer quality
+- Requires at least 3 meaningful blocks on every day.
+- Requires a clearly identified real meal each day.
+- Dessert/beverage tastings remain snack/tasting experiences, not meal substitutes.
+- Repair prompt requires food-led morning-to-evening structure and prevents thin later days.
+
+3. Post-processing protection
+- Semantic duplicate cleanup can no longer reduce Luxury/Food Explorer days below 3 blocks.
+
+4. Post-generation scroll
+- A newly generated itinerary now scrolls to the top of the generated result after it mounts.
+- Uses a fixed-header offset so the result header is visible.
+- Does not force this behavior when merely opening saved/shared trips.
+
+No changes to payments, Supabase/RLS, plan pricing, country/currency flow, PDF layout, or existing destination-cover logic.
