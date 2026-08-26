@@ -638,14 +638,31 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     const stayNights = Math.min(dayCount, calculateHotelNights(itinerary.startDate, itinerary.endDate, dayCount));
     const hotelWeights = itinerary.days.map((_: any, idx: number) => idx < stayNights ? 1 : 0);
     const evenWeights = itinerary.days.map(() => 1);
+    // Weight day-level allocations by the itinerary actually shown to the user.
+    // This avoids mechanically identical day budgets when one day contains substantially
+    // more meals, transfers or paid experiences than another.
+    const foodWeights = itinerary.days.map((day: any) => {
+      const activities = Array.isArray(day.activities) ? day.activities : [];
+      const mealCount = activities.filter((a:any)=>/(breakfast|brunch|lunch|dinner|restaurant|meal)/i.test(`${a?.title||''} ${a?.description||''}`)).length;
+      const tastingCount = activities.filter((a:any)=>/(tasting|dessert|cafe|coffee|tea|market|food walk|culinary)/i.test(`${a?.title||''} ${a?.description||''}`)).length;
+      return Math.max(0.5, mealCount * 1.0 + tastingCount * 0.35);
+    });
+    const transportWeights = itinerary.days.map((day:any)=>{
+      const activities = Array.isArray(day.activities) ? day.activities : [];
+      const km = activities.reduce((sum:number,a:any)=>sum + (Number(a?.distanceFromPreviousKm)||0),0);
+      const transferBlocks = activities.filter((a:any)=>/(transfer|chauffeur|taxi|rideshare|private car|tour vehicle)/i.test(`${a?.title||''} ${a?.transportFromPrevious||''}`)).length;
+      return Math.max(0.5, km + transferBlocks * 4);
+    });
     const activityWeights = itinerary.days.map((day: any) => {
       const activities = Array.isArray(day.activities) ? day.activities : [];
-      return activities.reduce((sum: number, activity: any) => sum + parseMoney(activity?.cost), 0);
+      const paid = activities.reduce((sum: number, activity: any) => sum + parseMoney(activity?.cost), 0);
+      const experienceCount = activities.filter((a:any)=>!/(breakfast|brunch|lunch|dinner|restaurant|meal|transfer|check[- ]?in|check[- ]?out)/i.test(`${a?.title||''}`)).length;
+      return Math.max(0.5, paid + experienceCount * 10);
     });
 
     const hotelByDay = distributeExact(calculated.hotel, hotelWeights);
-    const foodByDay = distributeExact(calculated.food, evenWeights);
-    const transportByDay = distributeExact(calculated.localTransport, evenWeights);
+    const foodByDay = distributeExact(calculated.food, foodWeights);
+    const transportByDay = distributeExact(calculated.localTransport, transportWeights);
     const miscByDay = distributeExact(calculated.miscellaneous, evenWeights);
     const activitiesByDay = distributeExact(calculated.sightseeing, activityWeights);
 
@@ -767,15 +784,21 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     airportTransfer: fmtMoney(perPersonTransportDay * 1.5),
   };
 
-  // Attraction cards: preserve free attractions; normalize paid fees into the trip currency.
+  // Attraction cards show STANDARD ENTRY estimates and must not become more expensive merely
+  // because the user selected Luxury. Premium/private tours remain separate itinerary activities.
   if (Array.isArray(itinerary.placesToVisit) && itinerary.placesToVisit.length) {
+    const neutralAdmissionBudget = calculateRealWorldBudget({
+      destination, origin, travelers, days, travelStyle: 'Budget', userBudgetInput,
+      flightEstimateInr: Number(itinerary.flightEstimateInr) || undefined, startDate: itinerary.startDate, endDate: itinerary.endDate
+    });
     const paidPlaces = itinerary.placesToVisit.filter((p: any) => !/\bfree\b/i.test(String(p.entryFee || "")));
-    const perPaidPlace = paidPlaces.length ? calculated.sightseeing / travelers / paidPlaces.length : 0;
+    const perPaidPlace = paidPlaces.length ? neutralAdmissionBudget.sightseeing / travelers / paidPlaces.length : 0;
     itinerary.placesToVisit.forEach((place: any) => {
       if (/\bfree\b/i.test(String(place.entryFee || ""))) place.entryFee = "Free";
       else place.entryFee = fmtMoney(perPaidPlace);
+      place.entryFeeBasis = 'Standard entry estimate';
     });
-    itinerary.attractionCosts = itinerary.placesToVisit.map((p: any) => ({ name: p.name, fee: p.entryFee }));
+    itinerary.attractionCosts = itinerary.placesToVisit.map((p: any) => ({ name: p.name, fee: p.entryFee, basis: p.entryFeeBasis }));
   }
 
   // Local food price hints (used by PDF/UI when present) are derived from the reconciled food pool.

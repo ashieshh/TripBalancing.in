@@ -1846,7 +1846,7 @@ export const exportPremiumTravelPDF = async (
         drawCenteredBadge(doc, contentX, detailY, 63, 4.5, `Best Time: ${place.bestTimeToVisit}`, undefined, [240, 249, 255], [2, 132, 199], "calendar");
 
         // Badge 2: Entry Fee (using dynamically-sized drawPriceBadge helper, wider for full visibility)
-        drawPriceBadge(doc, contentX + 67, detailY, 63, 4.5, `Fee: ${place.entryFee}`);
+        drawPriceBadge(doc, contentX + 67, detailY, 63, 4.5, `Entry: ${place.entryFee}`);
 
         y += heightNeeded + 4;
       });
@@ -2346,16 +2346,20 @@ export const exportPremiumTravelPDF = async (
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9.5);
   doc.setTextColor(51, 65, 85);
-  const lodgingIntro = `Finding the ideal sanctuary is essential for restoring your energy between active travel days. This catalog presents three distinct comfort profiles: Budget, Mid-Range, and Ultra-Luxury Retreats. Each recommendation includes estimated pricing guidance, distance estimates to the city center, star ratings, and booking hyperlinks.`;
+  const lodgingStyle = String(itinerary.travelStyle || '').toLowerCase().trim();
+  const preferredLodging = lodgingStyle === 'luxury' ? 'Luxury Retreats' : lodgingStyle === 'smart luxury' ? 'Mid-Range / Boutique Suites' : (lodgingStyle === 'budget' || lodgingStyle === 'backpacker') ? 'Budget Stays' : 'style-appropriate stays';
+  const lodgingIntro = `Finding the right stay is essential to the itinerary. For your selected ${itinerary.travelStyle || 'travel'} style, TripBalancing prioritizes ${preferredLodging} first, then shows other tiers only as reference alternatives. Each recommendation includes estimated pricing guidance, distance context, ratings, and booking/search links.`;
   doc.text(doc.splitTextToSize(lodgingIntro, 180), marginX, y);
   y += 24;
 
   // Render tiny teaser preview boxes for hotel classes on cover page
-  const hotelTiers = [
-    { name: "BUDGET STAYS", comfort: "Value Comfort", price: "Best rates", txt: [13, 148, 136] },
-    { name: "MID-RANGE SUITES", comfort: "Premium Comfort", price: "Top quality suites", txt: [79, 70, 229] },
-    { name: "LUXURY RETREATS", comfort: "Ultra Luxury", price: "Five-star premium", txt: [217, 119, 6] }
+  const allHotelTiers = [
+    { key: 'budget', name: "BUDGET STAYS", comfort: "Value Comfort", price: "Best rates", txt: [13, 148, 136] },
+    { key: 'midRange', name: "MID-RANGE SUITES", comfort: "Premium Comfort", price: "Top quality suites", txt: [79, 70, 229] },
+    { key: 'luxury', name: "LUXURY RETREATS", comfort: "Ultra Luxury", price: "Five-star premium", txt: [217, 119, 6] }
   ];
+  const preferredTierKey = lodgingStyle === 'luxury' ? 'luxury' : lodgingStyle === 'smart luxury' ? 'midRange' : (lodgingStyle === 'budget' || lodgingStyle === 'backpacker') ? 'budget' : 'midRange';
+  const hotelTiers = [...allHotelTiers].sort((a,b)=>Number(b.key===preferredTierKey)-Number(a.key===preferredTierKey));
   hotelTiers.forEach((tier, idx) => {
     doc.setFillColor(248, 250, 252);
     doc.roundedRect(marginX, y, 180, 11, 1, 1, "F");
@@ -2437,9 +2441,12 @@ export const exportPremiumTravelPDF = async (
     y += 2;
   };
 
-  renderTier("Budget Stays", hotelData.budget || [], [13, 148, 136], "Value Comfort");
-  renderTier("Mid-Range Suites", hotelData.midRange || [], [79, 70, 229], "Premium Comfort");
-  renderTier("Luxury Retreats", hotelData.luxury || [], [217, 119, 6], "Ultra Luxury");
+  const tierRenderers: Record<string, () => void> = {
+    budget: () => renderTier("Budget Stays", hotelData.budget || [], [13, 148, 136], preferredTierKey === 'budget' ? "Recommended for your style" : "Value Comfort"),
+    midRange: () => renderTier("Mid-Range Suites", hotelData.midRange || [], [79, 70, 229], preferredTierKey === 'midRange' ? "Recommended for your style" : "Premium Comfort"),
+    luxury: () => renderTier("Luxury Retreats", hotelData.luxury || [], [217, 119, 6], preferredTierKey === 'luxury' ? "Recommended for your style" : "Ultra Luxury")
+  };
+  [preferredTierKey, ...['budget','midRange','luxury'].filter(k => k !== preferredTierKey)].forEach(k => tierRenderers[k]());
 
   // ==========================================
   // PAGE: BUDGET & FINANCIAL PLANNER

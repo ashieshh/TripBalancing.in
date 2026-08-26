@@ -2223,6 +2223,157 @@ function improveItineraryQuality(itinerary: any) {
   return { ...itinerary, days };
 }
 
+
+
+/**
+ * Final user-facing itinerary intelligence pass.
+ * Runs after model/fallback generation and food normalization, before route and budget reconciliation.
+ * It prevents hollow days, repeated day templates, very large unexplained schedule gaps,
+ * and transfer-only activities that never include the actual destination experience.
+ */
+function enforceFinalItineraryIntelligence(itinerary: any) {
+  if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+
+  const style = String(itinerary.travelStyle || '').toLowerCase().trim();
+  const destination = String(itinerary.destination || 'the destination');
+  const places = Array.isArray(itinerary.placesToVisit) ? itinerary.placesToVisit : [];
+  const foods = Array.isArray(itinerary.localFood) ? itinerary.localFood : [];
+
+  const parseTime = (v: any, idx: number) => {
+    const m = String(v || '').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);
+    if (!m) return 9 * 60 + idx * 150;
+    let h = Number(m[1]) % 12;
+    if (m[3] === 'PM') h += 12;
+    return h * 60 + Number(m[2] || 0);
+  };
+  const fmtTime = (mins: number) => {
+    mins = Math.max(6*60, Math.min(22*60+30, Math.round(mins/15)*15));
+    const h24 = Math.floor(mins/60), mm = mins % 60;
+    const ap = h24 >= 12 ? 'PM' : 'AM';
+    const h = h24 % 12 || 12;
+    return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`;
+  };
+  const key = (v: any) => String(v || '').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|a|an|visit|experience|tour|private|premium|regional|local|signature|guided|at|to|of|and)\b/g,' ').replace(/\s+/g,' ').trim();
+  const usedPlaceKeys = new Set<string>();
+  const usedFoodKeys = new Set<string>();
+  const daySignatures = new Set<string>();
+
+  const placePool = places.filter((p:any)=>p?.name);
+  const savoryFoods = foods.filter((f:any)=>{
+    const t=`${f?.name||''} ${f?.type||''} ${f?.description||''}`.toLowerCase();
+    return !/(dessert|beverage|drink|cocktail|wine|beer|spirit|liqueur|feni|cake|pastry|sweet)/i.test(t);
+  });
+  const tastingFoods = foods.filter((f:any)=>!savoryFoods.includes(f));
+
+  const nextUnusedPlace = () => {
+    const found = placePool.find((p:any)=>!usedPlaceKeys.has(key(p.name)));
+    if (found) usedPlaceKeys.add(key(found.name));
+    return found || placePool[0];
+  };
+  const nextUnusedFood = (savory=true) => {
+    const pool = savory ? savoryFoods : tastingFoods;
+    const found = pool.find((f:any)=>!usedFoodKeys.has(key(f.name)));
+    if (found) usedFoodKeys.add(key(found.name));
+    return found || pool[0] || foods[0];
+  };
+
+  const mkActivity = (time:string, title:string, description:string, location:string, cost='Verify live rate') => ({
+    time, title, description, location, cost
+  });
+
+  const styleFiller = (day:any, slot:number) => {
+    const p = nextUnusedPlace();
+    const meal = nextUnusedFood(true);
+    const taste = nextUnusedFood(false);
+    const t = ['10:30 AM','02:30 PM','05:30 PM','08:00 PM'][Math.min(slot,3)];
+    if (style === 'food explorer') {
+      if (slot % 3 === 0) return mkActivity(t, 'Local Market / Food District Walk', `Explore a real public market, established food street or culinary district in ${destination}. Focus on ingredients, vendors and local food culture; do not invent a named venue when it is not verified.`, destination, 'Low-cost tasting allowance');
+      if (slot % 3 === 1 && meal) return mkActivity(t, `Regional Meal: ${meal.name}`, `${meal.description || 'Choose a complete destination-specific savory meal.'} Use a reputable venue and keep this meal distinct from other days.`, meal.mustTryAt || destination, 'Per person - verify menu');
+      if (taste) return mkActivity(t, `Tasting / Food Craft: ${taste.name}`, `${taste.description || 'Add a destination-specific tasting or food-craft experience.'} Treat dessert/beverage items as tastings only, not full meals.`, taste.mustTryAt || destination, 'Per person - verify live rate');
+      return mkActivity(t, 'Cooking / Producer Experience', `Choose a real cooking class, bakery, producer visit, spice/produce tasting or other authentic food-craft experience in ${destination}.`, destination);
+    }
+    if (style === 'luxury') {
+      if (slot % 3 === 0 && p) return mkActivity(t, `Private / Priority Experience: ${p.name}`, `${p.description || 'Enjoy this destination highlight'} with a private guide, reserved timing or the best available premium access where the destination supports it.`, p.name, p.entryFee || 'Premium service - verify live rate');
+      if (slot % 3 === 1) return mkActivity(t, 'Premium Leisure / Spa Experience', `Add an unhurried, reputable spa, resort, cruise, private cultural or other destination-appropriate elevated experience in ${destination}.`, destination, 'Premium experience - verify live rate');
+      if (meal) return mkActivity(t, `Upscale Regional Dining: ${meal.name}`, `${meal.description || 'Choose a complete regional meal.'} Use an acclaimed upscale restaurant or hotel dining room and reserve ahead where useful.`, meal.mustTryAt || destination, 'Premium dining - per person');
+    }
+    if (p) return mkActivity(t, p.name, p.description || `Explore ${p.name} with enough time to enjoy the experience.`, p.name, p.entryFee || 'Verify rate');
+    return mkActivity(t, 'Destination Experience', `Add a meaningful, destination-specific activity in ${destination} appropriate to the selected travel style.`, destination);
+  };
+
+  itinerary.days = itinerary.days.map((day:any, dayIndex:number) => {
+    let acts = Array.isArray(day?.activities) ? day.activities.map((a:any)=>({...a})) : [];
+    acts.sort((a:any,b:any)=>parseTime(a?.time,0)-parseTime(b?.time,0));
+
+    // Track already-used content before adding replacements.
+    for (const a of acts) {
+      const lk = key(a?.location || a?.title); if (lk) usedPlaceKeys.add(lk);
+    }
+
+    // If a day starts with a transfer to a named sight but never contains the actual visit, add it.
+    const transfer = acts.find((a:any)=>/transfer|chauffeur|drive|travel to/i.test(String(a?.title||'')));
+    if (transfer) {
+      const target = String(transfer.location || '').trim();
+      const hasVisit = target && acts.some((a:any)=>a!==transfer && key(`${a?.title} ${a?.location}`).includes(key(target)));
+      if (target && !hasVisit && !/airport|station|hotel district/i.test(target)) {
+        const p = places.find((x:any)=>key(x?.name)===key(target) || key(target).includes(key(x?.name)));
+        const start = parseTime(transfer.time,0) + 120;
+        acts.push(mkActivity(fmtTime(start), `${style==='luxury'?'Private / Priority Visit':'Experience'}: ${target}`, p?.description || `Spend meaningful time experiencing ${target}; the transfer itself is not the activity.`, target, p?.entryFee || 'Verify rate'));
+      }
+    }
+
+    acts.sort((a:any,b:any)=>parseTime(a?.time,0)-parseTime(b?.time,0));
+
+    // Fill unexplained gaps on non-departure-style days. A gap > 4h means the itinerary is visibly hollow.
+    for (let i=0; i<acts.length-1; i++) {
+      const a = parseTime(acts[i]?.time,i), b = parseTime(acts[i+1]?.time,i+1);
+      if (b-a > 270) {
+        acts.push(styleFiller(day, i+1));
+        break;
+      }
+    }
+
+    // Full user-facing days need at least three meaningful blocks. Arrival/departure days may be lighter only
+    // when they explicitly contain airport/station/departure wording.
+    const dayText = `${day?.theme||''} ${acts.map((a:any)=>`${a?.title||''} ${a?.description||''}`).join(' ')}`.toLowerCase();
+    const lightDayAllowed = /(arrival|departure|airport|station|check[- ]?out|check[- ]?in)/i.test(dayText);
+    const minimum = lightDayAllowed ? 3 : 3;
+    while (acts.length < minimum) acts.push(styleFiller(day, acts.length));
+
+    // Detect copy-pasted day structures. If the same three semantic blocks recur, replace the middle block
+    // with a fresh style-specific experience so each day has its own story.
+    acts.sort((a:any,b:any)=>parseTime(a?.time,0)-parseTime(b?.time,0));
+    let signature = acts.slice(0,4).map((a:any)=>key(a?.title)).join('|');
+    if (daySignatures.has(signature) && acts.length >= 3) {
+      acts[Math.min(1, acts.length-1)] = styleFiller(day, dayIndex + 1);
+      acts.sort((a:any,b:any)=>parseTime(a?.time,0)-parseTime(b?.time,0));
+      signature = acts.slice(0,4).map((a:any)=>key(a?.title)).join('|');
+    }
+    daySignatures.add(signature);
+
+    return { ...day, activities: acts };
+  });
+
+  return itinerary;
+}
+
+function validateFinalUserFacingItinerary(itinerary:any): string[] {
+  const errors:string[] = [];
+  const days = Array.isArray(itinerary?.days) ? itinerary.days : [];
+  const parseTime=(v:any,idx:number)=>{ const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/); if(!m)return 9*60+idx*150; let h=Number(m[1])%12; if(m[3]==='PM')h+=12; return h*60+Number(m[2]||0); };
+  const sigs = new Set<string>();
+  days.forEach((d:any,i:number)=>{
+    const acts=Array.isArray(d?.activities)?d.activities:[];
+    if(acts.length<3) errors.push(`day ${i+1} has fewer than three user-facing blocks`);
+    const times=acts.map((a:any,j:number)=>parseTime(a?.time,j)).sort((a:number,b:number)=>a-b);
+    for(let j=0;j<times.length-1;j++) if(times[j+1]-times[j]>300) errors.push(`day ${i+1} has an unexplained schedule gap over five hours`);
+    const sig=acts.slice(0,4).map((a:any)=>String(a?.title||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim()).join('|');
+    if(sig && sigs.has(sig)) errors.push(`day ${i+1} repeats a previous day template`);
+    sigs.add(sig);
+  });
+  return Array.from(new Set(errors));
+}
+
 function applySmartRouteAndTransport(itinerary: any) {
   if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
   const rad = (n: number) => n * Math.PI / 180;
@@ -2285,7 +2436,11 @@ function applySmartRouteAndTransport(itinerary: any) {
       .map(({__order,__mins,...a}:any)=>a);
     const activities=ordered.map((a:any,i:number)=>{
       if(i===0) return {...a,visitDuration:a.visitDuration||visitDuration(a),transportFromPrevious:'Start of day',travelTimeFromPrevious:'—',distanceFromPreviousKm:undefined};
-      const km=distanceKm(ordered[i-1],a); const r=routeMode(ordered[i-1],a,km);
+      let km=distanceKm(ordered[i-1],a);
+      // Remote excursions are often returned by the model with missing or city-centre coordinates.
+      // Never let a waterfall/national-park/day-trip leg collapse to an impossible 1-3 km total.
+      if ((isRemote(ordered[i-1]) || isRemote(a)) && (km == null || km < 8)) km = 25;
+      const r=routeMode(ordered[i-1],a,km);
       return {...a,visitDuration:a.visitDuration||visitDuration(a),transportFromPrevious:r.mode,travelTimeFromPrevious:fmt(r.minutes),distanceFromPreviousKm:km==null?undefined:Math.round(km*10)/10};
     });
     const tips=activities.slice(1).map((a:any)=>`${a.transportFromPrevious}: about ${a.travelTimeFromPrevious} from the previous stop${a.distanceFromPreviousKm!=null?` (${a.distanceFromPreviousKm} km)`:''}.`);
@@ -2809,7 +2964,7 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
             )))
           : undefined
       }, origin || "", destination, startDate, endDate, travelers);
-      const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(improveItineraryQuality(cachedPrepared)), diffDays));
+      const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(cachedPrepared)))), diffDays));
       cachedItinerary.travelStyle = travelStyle;
       cachedItinerary.travelers = Number(travelers) || 1;
       const cachedSource = cached.data?.generationSource || "gemini";
@@ -3286,7 +3441,9 @@ Return the response in strict JSON format.`;
     const pricedItinerary = await attachMarketFlightEstimate(parsedItinerary, origin || "", destination, startDate, endDate, travelers);
 
     // Store in cache for future identical requests
-    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(normalizeFinalFoodSemantics(improveItineraryQuality(pricedItinerary))), diffDays));
+    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(pricedItinerary)))), diffDays));
+    const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
+    if (finalUserFacingErrors.length) console.warn(`[FINAL_ITINERARY_QUALITY] ${finalUserFacingErrors.join('; ')}`);
 
     ITINERARY_CACHE.set(cacheKey, {
       data: reconciledItinerary,
@@ -3806,7 +3963,7 @@ Return the response in strict JSON format.`;
     const fallbackCacheKey = crypto.createHash("sha256").update(fallbackIdentity).digest("hex");
     fallbackItinerary.budgetAmount = budgetAmount;
     const pricedFallback = await attachMarketFlightEstimate({ ...fallbackItinerary, plannedBudget: budgetAmount }, origin || "", destination, startDate, endDate, travelers);
-    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(normalizeFinalFoodSemantics(improveItineraryQuality(pricedFallback))), diffDays));
+    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(pricedFallback)))), diffDays));
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,
