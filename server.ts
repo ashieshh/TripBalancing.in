@@ -2382,75 +2382,183 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
   const destination = String(itinerary.destination || 'the destination');
   const foods = Array.isArray(itinerary.localFood) ? itinerary.localFood : [];
   const places = Array.isArray(itinerary.placesToVisit) ? itinerary.placesToVisit : [];
-  const norm = (v:any) => String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(regional|signature|upscale|local|meal|lunch|dinner|breakfast|brunch|tasting|food|dining|at|the|a|an|private|priority|visit|experience)\b/g,' ').replace(/\s+/g,' ').trim();
+
+  const norm = (v:any) => String(v||'').toLowerCase()
+    .replace(/[^a-z0-9 ]/g,' ')
+    .replace(/\b(regional|signature|upscale|local|meal|lunch|dinner|breakfast|brunch|tasting|food|dining|at|the|a|an|private|priority|visit|experience|tour|guided|discovery)\b/g,' ')
+    .replace(/\s+/g,' ').trim();
   const parseTime=(v:any,idx=0)=>{ const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/); if(!m)return 9*60+idx*150; let h=Number(m[1])%12; if(m[3]==='PM')h+=12; return h*60+Number(m[2]||0); };
+  const fmtTime=(mins:number)=>{ mins=Math.max(7*60,Math.min(21*60+30,Math.round(mins/15)*15)); const h24=Math.floor(mins/60), mm=mins%60, ap=h24>=12?'PM':'AM', h=h24%12||12; return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`; };
   const isSnack=(f:any)=>/(dessert|beverage|drink|cocktail|wine|beer|spirit|liqueur|feni|cake|pastry|sweet|bebinca)/i.test(`${f?.name||''} ${f?.type||''} ${f?.description||''}`);
   const savory=foods.filter((f:any)=>f?.name && !isSnack(f));
   const tastings=foods.filter((f:any)=>f?.name && isSnack(f));
-  const usedMeals=new Set<string>(), usedVenues=new Set<string>(), usedPlaces=new Set<string>(), usedTastings=new Set<string>();
+  const usedMeals=new Set<string>(), usedVenues=new Set<string>(), usedTastings=new Set<string>();
 
   const polished = (v:any) => {
     let t=String(v||'').trim();
     const replacements:[RegExp,string][]=[
-      [/do not invent[^.]*\.?/ig,''], [/must be a complete[^.]*\.?/ig,'Enjoy this as a complete savory meal.'],
-      [/treat desserts? and beverages? as tastings\/snacks only\.?/ig,'Desserts and drinks work best as separate tasting stops.'],
+      [/do not invent[^.]*\.?/ig,''],
+      [/must be a complete[^.]*\.?/ig,''],
+      [/this must be a complete[^.]*\.?/ig,''],
+      [/treat desserts? and beverages? as tastings\/snacks only\.?/ig,''],
       [/treat this only as a dessert\/beverage tasting after the meal,? never as the meal itself\.?/ig,'Enjoy this as an optional after-meal tasting.'],
-      [/use a reputable venue[^.]*\.?/ig,'Choose a well-reviewed venue.'], [/verify live rate/ig,'check current price'],
-      [/verify menu/ig,'check current menu'], [/validation failure[^.]*\.?/ig,''], [/internal rule[^.]*\.?/ig,'']
+      [/do not use a casual shack\/stall[^.]*\.?/ig,''],
+      [/use a reputable venue[^.]*\.?/ig,''],
+      [/use an acclaimed[^.]*\.?/ig,''],
+      [/keep this meal distinct[^.]*\.?/ig,''],
+      [/pair (?:this|them) with[^.]*\.?/ig,''],
+      [/verify live rate/ig,'check current price'],
+      [/verify menu/ig,'check current menu'],
+      [/validation failure[^.]*\.?/ig,''],
+      [/internal rule[^.]*\.?/ig,''],
+      [/\bThis\s+Enjoy\b/ig,'Enjoy'],
+      [/\bThis\s+Plan\b/ig,'Plan'],
+      [/taxiPremium/ig,'taxi • Premium'],
+      [/vehicleTasting/ig,'vehicle • Tasting'],
+      [/transitFine/ig,'transit • Fine']
     ];
     for(const [re,r] of replacements)t=t.replace(re,r);
-    return t.replace(/\s+/g,' ').replace(/\s+([,.])/g,'$1').trim();
+    t=t.replace(/\s+/g,' ').replace(/\s+([,.])/g,'$1').replace(/\.\s*\./g,'.').trim();
+    return t;
   };
-  const nextUnused=(pool:any[], used:Set<string>)=>{ const f=pool.find(x=>!used.has(norm(x?.name))); if(f)used.add(norm(f.name)); return f||null; };
-  const freshPlace=()=>{ const p=places.find((x:any)=>x?.name&&!usedPlaces.has(norm(x.name))); if(p)usedPlaces.add(norm(p.name)); return p||null; };
-  const foodActivity=(time:string, f:any, mealType:string)=>({ time, title:`${mealType}: ${f.name}`, description:polished(f.description||`Enjoy ${f.name} as part of the local culinary route.`), location:f.mustTryAt||destination, cost:'Check current menu' });
+
+  const nextUnused=(pool:any[], used:Set<string>)=>{ const f=pool.find(x=>x?.name&&!used.has(norm(x.name))); if(f)used.add(norm(f.name)); return f||null; };
+  const foodActivity=(time:string, f:any, mealType:string)=>({
+    time,
+    title:`${mealType}: ${f.name}`,
+    description:polished(f.description||`Enjoy ${f.name} as part of the local culinary route.`),
+    location:f.mustTryAt||destination,
+    cost:'Check current menu'
+  });
+
+  // Reserve a named headline attraction for the day whose theme is explicitly built around it.
+  // This prevents an earlier filler block from stealing Dudhsagar from a dedicated Dudhsagar day.
+  const reservedPlaceDay = new Map<string, number>();
+  itinerary.days.forEach((day:any,di:number)=>{
+    const theme=String(day?.theme||'').toLowerCase();
+    for(const p of places){ const pk=norm(p?.name); if(pk && theme.includes(String(p?.name||'').toLowerCase())) reservedPlaceDay.set(pk,di); }
+  });
+  const seenPlaceDay = new Map<string, number>();
+
+  const matchedPlace=(a:any)=>{
+    const text=norm(`${a?.title||''} ${a?.location||''}`);
+    return places.find((p:any)=>{ const pk=norm(p?.name); return pk && (text.includes(pk)||pk.includes(text)); }) || null;
+  };
+  const preferredMinutes=(p:any,current:number)=>{
+    const bt=String(p?.bestTimeToVisit||'').toLowerCase();
+    const range=bt.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+    const toM=(h:string,m:string|undefined,ap:string)=>{ let n=Number(h)%12; if(ap.toLowerCase()==='pm')n+=12; return n*60+Number(m||0); };
+    if(range){ const lo=toM(range[1],range[2],range[3]), hi=toM(range[4],range[5],range[6]); if(current<lo||current>hi-45) return Math.min(hi-90,Math.max(lo+30,11*60+30)); return current; }
+    if(/early morning/.test(bt)) return current>11*60 ? 8*60+30 : current;
+    if(/morning/.test(bt) && current>12*60) return 9*60+30;
+    if(/late afternoon/.test(bt) && (current<15*60||current>18*60+30)) return 16*60+30;
+    if(/sunset/.test(bt) && (current<16*60||current>20*60)) return 17*60+30;
+    if(/evening/.test(bt) && current<17*60) return 18*60;
+    return current;
+  };
 
   itinerary.days=itinerary.days.map((day:any,di:number)=>{
-    let acts=(Array.isArray(day?.activities)?day.activities:[]).map((a:any)=>({...a,title:polished(a?.title),description:polished(a?.description),location:polished(a?.location)}));
+    let acts=(Array.isArray(day?.activities)?day.activities:[]).map((a:any)=>({...a,title:polished(a?.title),description:polished(a?.description),location:polished(a?.location),cost:polished(a?.cost)}));
     acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
 
-    // Food Explorer must be a real full-day culinary plan, not a 1 PM start.
-    if(style==='food explorer' && (!acts.length || parseTime(acts[0]?.time)>10*60+30)) {
-      acts.unshift({time:'08:30 AM',title:'Local Breakfast & Cafe Discovery',description:`Start the day with a destination-specific breakfast and seasonal local specialties in ${destination}.`,location:destination,cost:'Check current menu'});
-      acts.splice(1,0,{time:'10:30 AM',title:'Market / Food District Walk',description:`Explore an established public market or culinary district, focusing on ingredients, vendors and everyday food culture.`,location:destination,cost:'Low-cost tasting allowance'});
-    }
+    // Remove cross-day duplicate headline attractions, while allowing transfer + visit on the same day.
+    acts=acts.filter((a:any)=>{
+      const p=matchedPlace(a); if(!p) return true;
+      const pk=norm(p.name); const reserved=reservedPlaceDay.get(pk);
+      const isTransfer=/(transfer|chauffeur|drive|travel to)/i.test(String(a?.title||''));
+      if(reserved!=null && reserved!==di && !String(day?.theme||'').toLowerCase().includes(String(p.name||'').toLowerCase())) return false;
+      const prev=seenPlaceDay.get(pk);
+      if(prev!=null && prev!==di && !isTransfer) return false;
+      if(!isTransfer) seenPlaceDay.set(pk,di);
+      return true;
+    });
 
-    // Replace repeated main meals/venues across days with unused local-food choices.
+    // Replace repeated main meals/venues across the whole trip with unused local-food choices.
     acts=acts.filter((a:any)=>{
       const title=String(a?.title||'');
-      const isMain=/(breakfast|brunch|lunch|dinner|regional meal|signature dining)/i.test(title);
+      const isMain=/(breakfast|brunch|lunch|dinner|regional meal|signature dining|upscale regional dining)/i.test(title);
       const mk=norm(title), vk=norm(a?.location);
       if(isMain && mk && usedMeals.has(mk)) {
         const f=nextUnused(savory,usedMeals);
-        if(f){ Object.assign(a,foodActivity(a.time||'01:00 PM',f,/dinner/i.test(title)?'Signature Dinner':/breakfast|brunch/i.test(title)?'Regional Breakfast':'Regional Lunch')); }
+        if(f) Object.assign(a,foodActivity(a.time||'01:00 PM',f,/dinner|evening/i.test(title)?'Signature Dinner':/breakfast|brunch/i.test(title)?'Regional Breakfast':'Regional Lunch'));
         else return false;
       }
       const finalMeal=norm(a?.title); if(isMain&&finalMeal)usedMeals.add(finalMeal);
       const finalVenue=norm(a?.location);
-      if(finalVenue && finalVenue!==norm(destination) && usedVenues.has(finalVenue)) {
-        const f=isMain?nextUnused(savory,usedMeals):null;
+      if(finalVenue && finalVenue!==norm(destination) && usedVenues.has(finalVenue) && isMain) {
+        const f=nextUnused(savory,usedMeals);
         if(f) Object.assign(a,foodActivity(a.time||'01:00 PM',f,/dinner/i.test(title)?'Signature Dinner':'Regional Lunch'));
-        else if(style==='food explorer') a.location=destination;
+        else a.location=destination;
       }
-      const v2=norm(a?.location); if(v2&&v2!==norm(destination))usedVenues.add(v2);
+      const v2=norm(a?.location); if(v2&&v2!==norm(destination)&&isMain)usedVenues.add(v2);
       return true;
     });
 
-    // Remove exact/near duplicate blocks inside a day (e.g. same curry at 7:30 and 8:00).
+    // Food Explorer: enforce a complete culinary day. Sightseeing may support the day, but it cannot replace meals.
+    if(style==='food explorer') {
+      const hasBreakfast=acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||'')) && parseTime(a?.time)<=11*60);
+      if(!hasBreakfast){
+        const f=nextUnused(savory,usedMeals);
+        if(f && /poi|breakfast|omelette/i.test(String(f.name))) acts.push(foodActivity('08:30 AM',f,'Local Breakfast'));
+        else acts.push({time:'08:30 AM',title:'Goan Breakfast & Bakery Stop',description:`Begin with a local breakfast and bakery stop featuring fresh bread, a savoury accompaniment and a regional beverage.`,location:destination,cost:'Check current menu'});
+      }
+      if(!acts.some((a:any)=>/market|food district|culinary walk|bakery|producer/i.test(String(a?.title||''))))
+        acts.push({time:'10:30 AM',title:'Market / Food District Walk',description:`Explore an established market or culinary district with a focus on ingredients, vendors and everyday food culture.`,location:destination,cost:'Low-cost tasting allowance'});
+
+      const hasLunch=acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||'')) && parseTime(a?.time)>=11*60 && parseTime(a?.time)<=16*60);
+      if(!hasLunch){ const f=nextUnused(savory,usedMeals); if(f) acts.push(foodActivity('01:00 PM',f,'Regional Lunch')); }
+      const hasTasting=acts.some((a:any)=>/tasting|dessert|feni|bakery|food craft/i.test(String(a?.title||'')));
+      if(!hasTasting){ const f=nextUnused(tastings,usedTastings); if(f) acts.push(foodActivity('04:00 PM',f,'Tasting / Food Craft')); }
+      const hasDinner=acts.some((a:any)=>/dinner|evening meal|signature dining/i.test(String(a?.title||'')) && parseTime(a?.time)>=18*60);
+      if(!hasDinner){ const f=nextUnused(savory,usedMeals); if(f) acts.push(foodActivity('07:30 PM',f,'Signature Dinner')); }
+
+      // Do not use major remote sightseeing as a late-night filler in a Food Explorer day.
+      acts=acts.filter((a:any)=>{
+        const p=matchedPlace(a); if(!p) return true;
+        const t=parseTime(a?.time); const bt=String(p?.bestTimeToVisit||'').toLowerCase();
+        if(/early morning/.test(bt) && t>13*60) return false;
+        return true;
+      });
+    }
+
+    // For Luxury, replace removed duplicate attractions with an elevated non-duplicate experience.
+    if(style==='luxury' && acts.length<4){
+      const fillers=[
+        {time:'04:30 PM',title:'Private Heritage / Design Experience',description:`Use this block for a private, reservation-led heritage, art, architecture or design experience appropriate to ${destination}.`,location:destination,cost:'Premium experience - check current price'},
+        {time:'06:00 PM',title:'Premium Sunset / Leisure Experience',description:`Keep the pace unhurried with a premium sunset, resort, cruise or wellness experience suited to the destination.`,location:destination,cost:'Premium experience - check current price'}
+      ];
+      for(const f of fillers){ if(acts.length>=4)break; acts.push(f); }
+    }
+
+    // Remove exact/near duplicate blocks inside a day.
     const seenDay=new Set<string>();
     acts=acts.filter((a:any)=>{ const k=`${norm(a?.title)}|${norm(a?.location)}`; if(k!=='|'&&seenDay.has(k))return false; if(k!=='|')seenDay.add(k); return true; });
 
-    // Keep Food Explorer days substantial after de-duplication using fresh, non-repeated blocks.
-    if(style==='food explorer') {
-      while(acts.length<4) {
-        const f=nextUnused(acts.some((a:any)=>/(dessert|tasting|snack)/i.test(a?.title))?savory:tastings, acts.some((a:any)=>/(dessert|tasting|snack)/i.test(a?.title))?usedMeals:usedTastings);
-        if(f) acts.push(foodActivity(acts.length<3?'04:00 PM':'07:30 PM',f,acts.length<3?'Tasting / Food Craft':'Signature Dinner'));
-        else { const p=freshPlace(); acts.push({time:acts.length<3?'04:30 PM':'07:30 PM',title:p?`Neighborhood Discovery: ${p.name}`:'Culinary Neighborhood Walk',description:polished(p?.description||`Explore a different neighborhood in ${destination} between meal stops.`),location:p?.name||destination,cost:p?.entryFee||'Free / low cost'}); }
-        if(acts.length>6)break;
-      }
-    }
+    // Move named attractions into the destination's own recommended time window.
+    acts.forEach((a:any,idx:number)=>{
+      if(/transfer|chauffeur|drive|travel to/i.test(String(a?.title||''))) return;
+      const p=matchedPlace(a); if(!p) return;
+      const current=parseTime(a?.time,idx); const preferred=preferredMinutes(p,current);
+      if(preferred!==current) a.time=fmtTime(preferred);
+    });
+
     acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
-    return {...day,theme:polished(day?.theme),activities:acts};
+    // Resolve collisions/overlaps after time-window repair by leaving at least 75 minutes between activity starts.
+    for(let i=1;i<acts.length;i++){
+      const prev=parseTime(acts[i-1]?.time,i-1), cur=parseTime(acts[i]?.time,i);
+      if(cur-prev<75) acts[i].time=fmtTime(prev+90);
+    }
+
+    // Give Food Explorer days customer-facing themes that reflect the actual day's unique content.
+    let theme=polished(day?.theme);
+    if(style==='food explorer'){
+      const meal=acts.find((a:any)=>/lunch|dinner|regional meal/i.test(String(a?.title||'')));
+      const exp=acts.find((a:any)=>/market|bakery|tasting|food craft/i.test(String(a?.title||'')));
+      const mealName=String(meal?.title||'Goan Flavors').replace(/^[^:]+:\s*/,'');
+      const expName=/market/i.test(String(exp?.title||''))?'Market & Culinary Culture':/bakery/i.test(String(exp?.title||''))?'Bakery & Local Bites':'Tastings & Local Food Culture';
+      theme=`Culinary Day ${di+1}: ${mealName} • ${expName}`;
+    }
+    return {...day,theme,activities:acts.map((a:any)=>({...a,title:polished(a.title),description:polished(a.description),location:polished(a.location),cost:polished(a.cost)}))};
   });
   return itinerary;
 }
@@ -2458,30 +2566,54 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
 function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const errors:string[] = [];
   const days = Array.isArray(itinerary?.days) ? itinerary.days : [];
+  const places = Array.isArray(itinerary?.placesToVisit) ? itinerary.placesToVisit : [];
   const parseTime=(v:any,idx:number)=>{ const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/); if(!m)return 9*60+idx*150; let h=Number(m[1])%12; if(m[3]==='PM')h+=12; return h*60+Number(m[2]||0); };
+  const norm=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|a|an|private|priority|visit|experience|tour|regional|signature|local|at|to|of|and)\b/g,' ').replace(/\s+/g,' ').trim();
+  const placeMatch=(a:any)=>{ const t=norm(`${a?.title||''} ${a?.location||''}`); return places.find((p:any)=>{const k=norm(p?.name); return k&&(t.includes(k)||k.includes(t));})||null; };
   const sigs = new Set<string>();
+  const seenPlaces = new Map<string,number>();
+  const seenMeals = new Map<string,number>();
   days.forEach((d:any,i:number)=>{
     const acts=Array.isArray(d?.activities)?d.activities:[];
     if(acts.length<3) errors.push(`day ${i+1} has fewer than three user-facing blocks`);
     const times=acts.map((a:any,j:number)=>parseTime(a?.time,j)).sort((a:number,b:number)=>a-b);
     for(let j=0;j<times.length-1;j++) if(times[j+1]-times[j]>300) errors.push(`day ${i+1} has an unexplained schedule gap over five hours`);
-    const sig=acts.slice(0,4).map((a:any)=>String(a?.title||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim()).join('|');
+    const sig=acts.slice(0,4).map((a:any)=>norm(a?.title)).join('|');
     if(sig && sigs.has(sig)) errors.push(`day ${i+1} repeats a previous day template`);
     sigs.add(sig);
-  });
-  const forbiddenCopy = /(do not invent|must be a complete|treat desserts|treat dessert|use a reputable venue|keep this meal distinct|internal rule|validation failure)/i;
-  const allActs = days.flatMap((d:any)=>Array.isArray(d?.activities)?d.activities:[]);
-  if (allActs.some((a:any)=>forbiddenCopy.test(`${a?.title||''} ${a?.description||''}`))) errors.push('internal AI instruction leaked into customer-facing itinerary');
 
-  const normalizedFood = (v:any) => String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(regional|signature|upscale|local|meal|lunch|dinner|breakfast|tasting|food|dining|at|the|a|an)\b/g,' ').replace(/\s+/g,' ').trim();
-  const seenMealKeys = new Map<string, number>();
-  days.forEach((d:any,di:number)=> (Array.isArray(d?.activities)?d.activities:[]).forEach((a:any)=>{
-    if (!/(breakfast|brunch|lunch|dinner|regional meal|signature dining)/i.test(String(a?.title||''))) return;
-    const k=normalizedFood(a?.title);
-    if(k && seenMealKeys.has(k) && seenMealKeys.get(k)!==di) errors.push(`day ${di+1} repeats a main meal from an earlier day`);
-    if(k) seenMealKeys.set(k,di);
-  }));
+    acts.forEach((a:any,ai:number)=>{
+      const isTransfer=/(transfer|chauffeur|drive|travel to)/i.test(String(a?.title||''));
+      const p=placeMatch(a);
+      if(p&&!isTransfer){
+        const pk=norm(p.name); const prev=seenPlaces.get(pk); if(prev!=null&&prev!==i) errors.push(`day ${i+1} repeats attraction ${p.name} from day ${prev+1}`); else seenPlaces.set(pk,i);
+        const bt=String(p?.bestTimeToVisit||'').toLowerCase(); const t=parseTime(a?.time,ai);
+        if(/early morning/.test(bt)&&t>12*60) errors.push(`day ${i+1} schedules ${p.name} too late for its recommended early-morning window`);
+        if(/late afternoon/.test(bt)&&(t<14*60||t>19*60)) errors.push(`day ${i+1} schedules ${p.name} outside its recommended late-afternoon window`);
+        const r=bt.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+        if(r){ const cv=(h:string,m:string|undefined,ap:string)=>{let n=Number(h)%12;if(ap.toLowerCase()==='pm')n+=12;return n*60+Number(m||0)}; const lo=cv(r[1],r[2],r[3]),hi=cv(r[4],r[5],r[6]); if(t<lo||t>hi) errors.push(`day ${i+1} schedules ${p.name} outside the stated visit window`); }
+      }
+      if(/breakfast|brunch|lunch|dinner|regional meal|signature dining|upscale regional dining/i.test(String(a?.title||''))){ const k=norm(a?.title); const prev=seenMeals.get(k); if(k&&prev!=null&&prev!==i) errors.push(`day ${i+1} repeats a main meal from day ${prev+1}`); if(k)seenMeals.set(k,i); }
+    });
+  });
+  const forbiddenCopy = /(do not invent|must be a complete|treat desserts|treat dessert|use a reputable venue|keep this meal distinct|internal rule|validation failure|do not use a casual|verify live rate|this enjoy)/i;
+  const allActs = days.flatMap((d:any)=>Array.isArray(d?.activities)?d.activities:[]);
+  if (allActs.some((a:any)=>forbiddenCopy.test(`${a?.title||''} ${a?.description||''} ${a?.cost||''}`))) errors.push('internal AI instruction leaked into customer-facing itinerary');
+  if(String(itinerary?.travelStyle||'').toLowerCase().trim()==='food explorer'){
+    days.forEach((d:any,i:number)=>{ const acts=Array.isArray(d?.activities)?d.activities:[]; if(!acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks breakfast/brunch`); if(!acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks lunch`); if(!acts.some((a:any)=>/dinner|signature dining/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks dinner`); });
+  }
   return Array.from(new Set(errors));
+}
+
+function finalizeItineraryForUser(itinerary:any, exactDays:number) {
+  const quality = improveItineraryQuality(itinerary);
+  const foodSafe = normalizeFinalFoodSemantics(quality);
+  const intelligent = enforceFinalItineraryIntelligence(foodSafe);
+  const customerPass1 = normalizeCustomerFacingItinerary(intelligent);
+  const routedPass1 = applySmartRouteAndTransport(customerPass1);
+  const customerPass2 = normalizeCustomerFacingItinerary(routedPass1);
+  const routedPass2 = applySmartRouteAndTransport(customerPass2);
+  return reconcileItineraryBudget(enforceExactTripDays(routedPass2, exactDays));
 }
 
 function applySmartRouteAndTransport(itinerary: any) {
@@ -3074,7 +3206,7 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
             )))
           : undefined
       }, origin || "", destination, startDate, endDate, travelers);
-      const cachedItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(normalizeCustomerFacingItinerary(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(cachedPrepared))))), diffDays));
+      const cachedItinerary = finalizeItineraryForUser(cachedPrepared, diffDays);
       cachedItinerary.travelStyle = travelStyle;
       cachedItinerary.travelers = Number(travelers) || 1;
       const cachedSource = cached.data?.generationSource || "gemini";
@@ -3556,7 +3688,7 @@ Return the response in strict JSON format.`;
     const pricedItinerary = await attachMarketFlightEstimate(parsedItinerary, origin || "", destination, startDate, endDate, travelers);
 
     // Store in cache for future identical requests
-    const reconciledItinerary = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(normalizeCustomerFacingItinerary(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(pricedItinerary))))), diffDays));
+    const reconciledItinerary = finalizeItineraryForUser(pricedItinerary, diffDays);
     const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
     if (finalUserFacingErrors.length) console.warn(`[FINAL_ITINERARY_QUALITY] ${finalUserFacingErrors.join('; ')}`);
 
@@ -3604,16 +3736,22 @@ Return the response in strict JSON format.`;
     }> = {
       goa: {
         places: [
-          { name: "Calangute Beach", description: "The famous 'Queen of Beaches', perfect for water sports and shacks.", bestTimeToVisit: "Morning / Sunset", entryFee: "Free" },
-          { name: "Basilica of Bom Jesus", description: "UNESCO World Heritage site containing mortal remains of St. Francis Xavier.", bestTimeToVisit: "10:00 AM - 04:00 PM", entryFee: "Free" },
-          { name: "Dudhsagar Waterfalls", description: "Four-tiered waterfall on Mandovi River with dramatic white spray vistas.", bestTimeToVisit: "Early Morning", entryFee: "₹400 for Jeep safari" },
-          { name: "Fort Aguada", description: "Seventeenth-century Portuguese fort and lighthouse overlooking the Arabian Sea.", bestTimeToVisit: "Late Afternoon", entryFee: "Free" }
+          { name: "Calangute Beach", description: "The famous 'Queen of Beaches', popular for a broad sandy shoreline, water activities and beachside dining.", bestTimeToVisit: "Morning / Sunset", entryFee: "Free" },
+          { name: "Basilica of Bom Jesus", description: "UNESCO World Heritage church in Old Goa containing the relics of St. Francis Xavier.", bestTimeToVisit: "10:00 AM - 04:00 PM", entryFee: "Free" },
+          { name: "Dudhsagar Waterfalls", description: "Four-tiered waterfall on the Mandovi River, best approached as a dedicated daytime excursion.", bestTimeToVisit: "Early Morning", entryFee: "₹400 planning estimate for local jeep/shared access; verify current rules" },
+          { name: "Fort Aguada", description: "Seventeenth-century Portuguese fort and lighthouse complex overlooking the Arabian Sea.", bestTimeToVisit: "Late Afternoon", entryFee: "Free" },
+          { name: "Fontainhas, Panjim", description: "Goa's Latin Quarter, known for colourful Portuguese-era houses, narrow lanes and heritage character.", bestTimeToVisit: "Morning / Late Afternoon", entryFee: "Free to walk" },
+          { name: "Mapusa Market", description: "Long-established local market with produce, spices, household goods and Goan food products.", bestTimeToVisit: "Morning", entryFee: "Free" }
         ],
         food: [
           { name: "Goan Fish Curry", description: "Tangy coconut-based curry seasoned with spices and kokum.", type: "non-veg", mustTryAt: "Fisherman's Wharf, Cavelossim" },
-          { name: "Bebinca", description: "Multi-layered traditional Portuguese-Goan dessert made of eggs, coconut milk, and ghee.", type: "dessert", mustTryAt: "Martin's Corner" },
-          { name: "Vegetarian Xacuti", description: "A rich spicy curry featuring roasted grated coconut and local spices, tailored for vegetarians.", type: "veg", mustTryAt: "Viva Panjim" },
-          { name: "Feni", description: "Traditional cashew or coconut fermented spirit with unique tropical aroma.", type: "beverage", mustTryAt: "Local beach shacks" }
+          { name: "Chicken Cafreal", description: "Goan chicken preparation marinated with coriander, green chilli, herbs and spices.", type: "non-veg", mustTryAt: "A well-reviewed Goan restaurant in Panjim" },
+          { name: "Prawn Balchao", description: "Spicy, tangy Goan prawn preparation with vinegar and aromatic spices.", type: "non-veg", mustTryAt: "A traditional Goan restaurant" },
+          { name: "Vegetarian Xacuti", description: "Rich curry built around roasted coconut and local spices, adapted with vegetables.", type: "veg", mustTryAt: "Viva Panjim" },
+          { name: "Goan Poi with Bhaji", description: "Local bread paired with a savoury Goan vegetable preparation, suitable for breakfast or a light meal.", type: "veg", mustTryAt: "A local bakery and nearby cafe in Panjim" },
+          { name: "Ros Omelette", description: "Popular Goan street-food style omelette served with a spiced gravy and bread.", type: "non-veg", mustTryAt: "A busy local evening food stall in Panjim" },
+          { name: "Bebinca", description: "Multi-layered traditional Portuguese-Goan dessert made with eggs, coconut milk and ghee.", type: "dessert", mustTryAt: "Martin's Corner" },
+          { name: "Feni", description: "Traditional cashew or coconut spirit associated with Goa.", type: "beverage", mustTryAt: "A licensed, well-reviewed Goan restaurant or tasting venue" }
         ],
         packing: ["Comfortable swimwear", "High SPF Sunscreen", "Flip-flops & beach towels", "Sunglasses & hats", "Breathable linen clothing", "Waterproof dry bag"],
         tips: [
@@ -4006,6 +4144,23 @@ Return the response in strict JSON format.`;
               { name: "Maya Ubud Resort & Spa", rating: 4.7, distanceFromCenter: "Ubud", description: "Upscale Ubud resort blending a natural setting with convenient access to the cultural centre." }
             ]
           },
+          goa: {
+            budget: [
+              { name: "The Hosteller Goa, Candolim", distanceFromCenter: "Candolim / North Goa", description: "Budget-focused social stay near North Goa beaches; verify the exact room type, branch details and current availability." },
+              { name: "Zostel Goa, Morjim", distanceFromCenter: "Morjim / North Goa", description: "Hostel-style option suited to value-focused travellers; confirm current room category and operating details before booking." },
+              { name: "goSTOPS Goa", distanceFromCenter: "Goa", description: "Budget-oriented hostel brand option; verify the currently operating Goa property, location and room type before booking." }
+            ],
+            midRange: [
+              { name: "WelcomHeritage Panjim Inn", distanceFromCenter: "Fontainhas, Panjim", description: "Heritage-style stay in the Latin Quarter, especially convenient for Panjim food and culture routes." },
+              { name: "Fairfield by Marriott Goa Anjuna", distanceFromCenter: "Anjuna / North Goa", description: "Full-service mid-range property with practical access to Anjuna and nearby North Goa areas." },
+              { name: "The Fern Kadamba Hotel and Spa, Goa", distanceFromCenter: "Old Goa / Panjim side", description: "Comfort-focused hotel useful for Old Goa heritage sights and road access toward central Goa." }
+            ],
+            luxury: [
+              { name: "Taj Exotica Resort & Spa, Goa", distanceFromCenter: "Benaulim / South Goa", description: "Established luxury beach resort suited to travellers prioritising resort time, service and South Goa access." },
+              { name: "W Goa", distanceFromCenter: "Vagator / North Goa", description: "High-end resort in Vagator with a strong lifestyle focus and convenient North Goa positioning." },
+              { name: "ITC Grand Goa, a Luxury Collection Resort & Spa", distanceFromCenter: "Arossim / South Goa", description: "Large luxury resort and spa close to the South Goa coast, suited to premium leisure-focused stays." }
+            ]
+          },
           baku: {
             budget: [
               { name: "Sahil Hostel & Hotel", rating: 4.2, distanceFromCenter: "Central Baku", description: "Budget-oriented central option; verify current room category and operating details." },
@@ -4078,7 +4233,7 @@ Return the response in strict JSON format.`;
     const fallbackCacheKey = crypto.createHash("sha256").update(fallbackIdentity).digest("hex");
     fallbackItinerary.budgetAmount = budgetAmount;
     const pricedFallback = await attachMarketFlightEstimate({ ...fallbackItinerary, plannedBudget: budgetAmount }, origin || "", destination, startDate, endDate, travelers);
-    const reconciledFallback = reconcileItineraryBudget(enforceExactTripDays(applySmartRouteAndTransport(normalizeCustomerFacingItinerary(enforceFinalItineraryIntelligence(normalizeFinalFoodSemantics(improveItineraryQuality(pricedFallback))))), diffDays));
+    const reconciledFallback = finalizeItineraryForUser(pricedFallback, diffDays);
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,

@@ -2348,7 +2348,11 @@ export const exportPremiumTravelPDF = async (
   doc.setTextColor(51, 65, 85);
   const lodgingStyle = String(itinerary.travelStyle || '').toLowerCase().trim();
   const preferredLodging = lodgingStyle === 'luxury' ? 'Luxury Retreats' : lodgingStyle === 'smart luxury' ? 'Mid-Range / Boutique Suites' : (lodgingStyle === 'budget' || lodgingStyle === 'backpacker') ? 'Budget Stays' : 'style-appropriate stays';
-  const lodgingIntro = `Finding the right stay is essential to the itinerary. For your selected ${itinerary.travelStyle || 'travel'} style, TripBalancing prioritizes ${preferredLodging} first, then shows other tiers only as reference alternatives. Each recommendation includes estimated pricing guidance, distance context, ratings, and booking/search links.`;
+  const hotelData = itinerary.hotelRecommendations || { budget: [], midRange: [], luxury: [] };
+  const hasHotelCards = ['budget','midRange','luxury'].some((k) => Array.isArray((hotelData as any)[k]) && (hotelData as any)[k].length > 0);
+  const lodgingIntro = hasHotelCards
+    ? `Finding the right stay is essential to the itinerary. For your selected ${itinerary.travelStyle || 'travel'} style, TripBalancing prioritizes ${preferredLodging} first, then shows other tiers as reference alternatives. The properties below are planning references with estimated nightly guidance; verify live rates, availability, taxes, reviews and cancellation terms before booking.`
+    : `TripBalancing has calculated an accommodation allowance for this trip, but no sufficiently reliable property-level recommendations were available for this destination. Use the style-appropriate tiers below as a planning guide and verify live hotel options before booking.`;
   doc.text(doc.splitTextToSize(lodgingIntro, 180), marginX, y);
   y += 24;
 
@@ -2376,7 +2380,6 @@ export const exportPremiumTravelPDF = async (
     y += 14;
   });
 
-  const hotelData = itinerary.hotelRecommendations || { budget: [], midRange: [], luxury: [] };
   const accommodationAllowance = parseVal(itinerary.estimatedBudgetBreakdown?.accommodation || "0");
   const startMs = itinerary.startDate ? new Date(`${itinerary.startDate}T00:00:00`).getTime() : NaN;
   const endMs = itinerary.endDate ? new Date(`${itinerary.endDate}T00:00:00`).getTime() : NaN;
@@ -2414,10 +2417,18 @@ export const exportPremiumTravelPDF = async (
       doc.setTextColor(15, 23, 42);
       doc.text(String(hotel.name || ""), contentX, y + 6.5);
 
-      const stars = Math.round(hotel.rating || 4);
-      for (let s = 0; s < 5; s++) {
-        doc.setFillColor(s < stars ? 245 : 226, s < stars ? 158 : 232, s < stars ? 11 : 240);
-        drawStar(doc, contentX + (s * 4.5), y + 10.5, 1.6);
+      const ratingValue = Number(hotel.rating);
+      if (Number.isFinite(ratingValue) && ratingValue > 0) {
+        const stars = Math.max(1, Math.min(5, Math.round(ratingValue)));
+        for (let s = 0; s < 5; s++) {
+          doc.setFillColor(s < stars ? 245 : 226, s < stars ? 158 : 232, s < stars ? 11 : 240);
+          drawStar(doc, contentX + (s * 4.5), y + 10.5, 1.6);
+        }
+      } else {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6.8);
+        doc.setTextColor(100, 116, 139);
+        doc.text('RATING: CHECK LIVE', contentX, y + 11);
       }
 
       // Badges (spacious & mathematically centered layout using full 130mm available width)
@@ -2770,7 +2781,7 @@ export const exportPremiumTravelPDF = async (
       { label: "Accommodations Cumulative Ratios", val: invoiceData.accommodationTotal },
       { label: "Food & Dining Allowances", val: invoiceData.foodTotal },
       { label: "Transit & Vehicle Rentals", val: invoiceData.localTransportTotal },
-      { label: "Attraction Entry Portals", val: invoiceData.attractionTotal },
+      { label: "Activities & Experiences", val: invoiceData.attractionTotal },
       ...(hasTransitCost ? [{ label: `Travel Transit from ${itinerary.origin}`, val: invoiceData.originToDestinationCost }] : []),
       ...(hasVisaInsurance ? [{ label: "Visa & Travel Insurance", val: (invoiceData as any).visaAndInsurance }] : []),
       ...(hasMiscCost ? [{ label: "Miscellaneous & Contingency", val: invoiceData.miscellaneousExpenses }] : []),

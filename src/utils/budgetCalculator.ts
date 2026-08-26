@@ -527,6 +527,67 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
   });
 
   const currencySym = calculated.currencySymbol;
+
+  // Itinerary-informed activity costing. The destination/style baseline remains a guardrail,
+  // but the visible Activities & Experiences category is now derived from the actual blocks
+  // in the itinerary instead of blindly charging a fixed per-day sightseeing allowance.
+  // Admission, private service and premium experience costs are estimated separately.
+  if (Array.isArray(itinerary.days) && itinerary.days.length > 0) {
+    const tripCurrency = detectCurrencyCode(userBudgetInput, destination);
+    const toTrip = (inr:number) => Math.max(0, Math.round(convertInrToTripCurrency(inr, tripCurrency)));
+    const parseSourceMoneyToTrip = (raw:any):number => {
+      const text=String(raw??'').trim();
+      if(!text || /\bfree\b|included|n\/?a/i.test(text)) return 0;
+      const m=text.replace(/,/g,'').match(/[0-9]+(?:\.[0-9]+)?/);
+      if(!m) return 0;
+      const n=Math.max(0,Number(m[0])||0);
+      const source=detectCurrencyCode(text,destination);
+      const inr=n*getLiveCrossRate(source,'INR');
+      return Math.max(0,Math.round(inr*getLiveCrossRate('INR',tripCurrency)));
+    };
+    const placeRows=Array.isArray(itinerary.placesToVisit)?itinerary.placesToVisit:[];
+    const norm=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|a|an|private|priority|visit|experience|tour|guided|at|to|of|and)\b/g,' ').replace(/\s+/g,' ').trim();
+    const styleKey=String(travelStyle||'').toLowerCase();
+    const premiumBlockInr=/luxury/.test(styleKey)?5500:/smart luxury/.test(styleKey)?3200:1400;
+    const standardExperienceInr=/luxury/.test(styleKey)?1800:800;
+    let componentActivityTotal=0;
+    const chargedPlaces=new Set<string>();
+    for(const day of itinerary.days){
+      for(const a of (Array.isArray(day?.activities)?day.activities:[])){
+        const text=`${a?.title||''} ${a?.description||''} ${a?.location||''}`;
+        if(/breakfast|brunch|lunch|dinner|meal|restaurant|cafe|tasting|dessert|food craft|market \/ food|transfer|chauffeur|airport|check[- ]?in|check[- ]?out/i.test(text)) continue;
+        const ak=norm(`${a?.title||''} ${a?.location||''}`);
+        const place=placeRows.find((p:any)=>{const pk=norm(p?.name);return pk&&(ak.includes(pk)||pk.includes(ak));});
+        if(place){
+          const pk=norm(place?.name);
+          if(!chargedPlaces.has(pk)){ componentActivityTotal+=parseSourceMoneyToTrip(place?.entryFee); chargedPlaces.add(pk); }
+          if(/private|priority|reserved|guide|premium/i.test(text)) componentActivityTotal+=toTrip(premiumBlockInr);
+          continue;
+        }
+        if(/spa|wellness|private|priority|cruise|yacht|premium|chef-led|workshop|class|producer/i.test(text)) componentActivityTotal+=toTrip(premiumBlockInr);
+        else if(!/walk|beach|promenade|neighborhood|neighbourhood|free time/i.test(text)) componentActivityTotal+=toTrip(standardExperienceInr);
+      }
+    }
+    // Keep a small floor for incidental paid sights, but never let a generic style multiplier
+    // overwhelm the activities that are actually listed.
+    const activityFloor=toTrip(Math.max(800, travelers*days*250));
+    const componentEstimate=Math.max(activityFloor,componentActivityTotal);
+    if(componentEstimate>0){
+      calculated.sightseeing=Math.min(calculated.sightseeing,componentEstimate);
+      calculated.miscellaneous=Math.round((calculated.hotel+calculated.food+calculated.localTransport+calculated.sightseeing)*0.06);
+      calculated.grandTotal=calculated.flight+calculated.hotel+calculated.food+calculated.localTransport+calculated.sightseeing+calculated.visaAndInsurance+calculated.miscellaneous;
+      calculated.expectedMin=Math.round(calculated.grandTotal*0.92);
+      calculated.expectedMax=Math.round(calculated.grandTotal*1.08);
+      calculated.averageDailyBudgetNum=Math.round(calculated.grandTotal/days);
+      const f=(n:number)=>`${currencySym}${Math.max(0,Math.round(n)).toLocaleString()}`;
+      calculated.formatted.sightseeing=f(calculated.sightseeing);
+      calculated.formatted.miscellaneous=f(calculated.miscellaneous);
+      calculated.formatted.grandTotal=f(calculated.grandTotal);
+      calculated.formatted.expectedRange=`${f(calculated.expectedMin)} - ${f(calculated.expectedMax)}`;
+      calculated.formatted.averageDailyBudget=f(calculated.averageDailyBudgetNum);
+    }
+  }
+
   const grandTotalNum = calculated.grandTotal;
   const rawPlannedBudgetNum = parseNumericValue(userBudgetInput);
   const isRecommendedMode = Boolean(itinerary.isAiBudgetPlanner);
