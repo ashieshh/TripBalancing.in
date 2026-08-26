@@ -2006,7 +2006,7 @@ export const exportPremiumTravelPDF = async (
       const dist = routeDistance > 0 ? routeDistance.toFixed(1) : "N/A";
       const travTime = routeMinutes > 0 ? `${Math.floor(routeMinutes/60)}h ${routeMinutes%60}m` : "Route based";
 
-      let weatherLabel = "Sunny, 24°C";
+      let weatherLabel = "Season-aware planning";
       if (headerWeather && headerWeather[dIdx]) {
         let cond = headerWeather[dIdx].condition || "Clear";
         if (cond.length > 24) {
@@ -2017,7 +2017,7 @@ export const exportPremiumTravelPDF = async (
 
       const dStats = [
         { label: "EST. DAILY REQUIREMENT", value: displayBudget, bg: [236, 253, 245], border: [13, 148, 136], txt: [13, 148, 136], icon: "budget" },
-        { label: "WEATHER FORECAST", value: weatherLabel, bg: [240, 249, 255], border: [2, 132, 199], txt: [2, 132, 199], icon: "weather" },
+        { label: headerWeather && headerWeather[dIdx] ? "WEATHER FORECAST" : "WEATHER GUIDANCE", value: weatherLabel, bg: [240, 249, 255], border: [2, 132, 199], txt: [2, 132, 199], icon: "weather" },
         { label: "ROUTE DISTANCE", value: dist === "N/A" ? "N/A" : `${dist} km`, bg: [255, 241, 242], border: [225, 29, 72], txt: [225, 29, 72], icon: "distance" },
         { label: "TRANSIT TIME", value: travTime, bg: [238, 242, 255], border: [79, 70, 229], txt: [79, 70, 229], icon: "time" }
       ];
@@ -2186,7 +2186,7 @@ export const exportPremiumTravelPDF = async (
         doc.text(costVal, cardX + 63, badgeY2 - 0.1, { align: "center" });
 
         // Row 2 - Badge 6: Weather (Proportional Center Grouping based on forecast length)
-        let weatherVal = ["Sunny", "Clear", "Mild", "Warm"][actIdx % 4];
+        let weatherVal = "Season-aware";
         if (headerWeather && headerWeather[dIdx]) {
           const cond = headerWeather[dIdx].condition || "Clear";
           const temp = headerWeather[dIdx].tempMax || "24";
