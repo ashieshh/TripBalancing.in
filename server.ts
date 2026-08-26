@@ -2415,9 +2415,17 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
       [/\bThis\s+Plan\b/ig,'Plan'],
       [/taxiPremium/ig,'taxi • Premium'],
       [/vehicleTasting/ig,'vehicle • Tasting'],
-      [/transitFine/ig,'transit • Fine']
+      [/transitFine/ig,'transit • Fine'],
+      [/dayPremium/ig,'day • Premium'],
+      [/vehicleCheck/ig,'vehicle • Check'],
+      [/transitCheck/ig,'transit • Check'],
+      [/taxiCheck/ig,'taxi • Check'],
+      [/\bThis\s+(?=$|[.!?,])/ig,''],
+      [/\bThis\s*$/ig,'']
     ];
     for(const [re,r] of replacements)t=t.replace(re,r);
+    // Remove orphan model fragments left after internal-instruction cleanup.
+    t=t.replace(/(?:^|[.!?]\s+)This\s*(?=$|[.!?])/ig,' ');
     t=t.replace(/\s+/g,' ').replace(/\s+([,.])/g,'$1').replace(/\.\s*\./g,'.').trim();
     return t;
   };
@@ -2494,6 +2502,26 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
       return true;
     });
 
+    // Food Explorer: keep named tastings unique across the full trip as well.
+    if(style==='food explorer') {
+      for(const a of acts){
+        if(!/tasting|dessert|food craft|beverage/i.test(String(a?.title||''))) continue;
+        const recognized=foods.find((f:any)=>{ const fk=norm(f?.name); const ak=norm(`${a?.title||''} ${a?.description||''}`); return fk && ak.includes(fk); }) || null;
+        const key=recognized ? norm(recognized.name) : norm(a?.title);
+        if(key && usedTastings.has(key)){
+          const replacement=nextUnused(tastings,usedTastings);
+          if(replacement) Object.assign(a,foodActivity(a.time||'04:00 PM',replacement,'Tasting / Food Craft'));
+          else {
+            const variants=['Bakery & Confectionery Tasting','Local Producer / Spice Tasting','Regional Beverage & Snack Tasting','Seasonal Food Craft Experience'];
+            a.title=variants[di % variants.length];
+            a.description=`Explore a different local producer, bakery, spice, snack or beverage experience that has not already appeared earlier in the trip.`;
+            a.location=destination;
+            a.cost='Check current price';
+          }
+        } else if(key) usedTastings.add(key);
+      }
+    }
+
     // Food Explorer: enforce a complete culinary day. Sightseeing may support the day, but it cannot replace meals.
     if(style==='food explorer') {
       const hasBreakfast=acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||'')) && parseTime(a?.time)<=11*60);
@@ -2506,11 +2534,23 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
         acts.push({time:'10:30 AM',title:'Market / Food District Walk',description:`Explore an established market or culinary district with a focus on ingredients, vendors and everyday food culture.`,location:destination,cost:'Low-cost tasting allowance'});
 
       const hasLunch=acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||'')) && parseTime(a?.time)>=11*60 && parseTime(a?.time)<=16*60);
-      if(!hasLunch){ const f=nextUnused(savory,usedMeals); if(f) acts.push(foodActivity('01:00 PM',f,'Regional Lunch')); }
+      if(!hasLunch){
+        const f=nextUnused(savory,usedMeals);
+        if(f) acts.push(foodActivity('01:00 PM',f,'Regional Lunch'));
+        else acts.push({time:'01:00 PM',title:[`Regional Lunch: Seasonal Special`,`Regional Lunch: Local Kitchen Selection`,`Regional Lunch: Chef's Daily Regional Plate`,`Regional Lunch: Market-to-Table Special`][di%4],description:`Choose a well-reviewed local restaurant and order a complete savory regional meal that has not already been featured earlier in the trip.`,location:destination,cost:'Check current menu'});
+      }
       const hasTasting=acts.some((a:any)=>/tasting|dessert|feni|bakery|food craft/i.test(String(a?.title||'')));
-      if(!hasTasting){ const f=nextUnused(tastings,usedTastings); if(f) acts.push(foodActivity('04:00 PM',f,'Tasting / Food Craft')); }
+      if(!hasTasting){
+        const f=nextUnused(tastings,usedTastings);
+        if(f) acts.push(foodActivity('04:00 PM',f,'Tasting / Food Craft'));
+        else acts.push({time:'04:00 PM',title:`Local Food Craft / Tasting`,description:`Use the afternoon for a bakery, producer, spice, dessert or beverage tasting that is different from earlier days.`,location:destination,cost:'Check current price'});
+      }
       const hasDinner=acts.some((a:any)=>/dinner|evening meal|signature dining/i.test(String(a?.title||'')) && parseTime(a?.time)>=18*60);
-      if(!hasDinner){ const f=nextUnused(savory,usedMeals); if(f) acts.push(foodActivity('07:30 PM',f,'Signature Dinner')); }
+      if(!hasDinner){
+        const f=nextUnused(savory,usedMeals);
+        if(f) acts.push(foodActivity('07:30 PM',f,'Signature Dinner'));
+        else acts.push({time:'07:30 PM',title:[`Regional Dinner: Chef's Seasonal Specials`,`Regional Dinner: Local Tasting Menu`,`Regional Dinner: House Regional Specialties`,`Regional Dinner: Seasonal Culinary Finale`][di%4],description:`Finish with a complete savory dinner at a well-reviewed local restaurant, choosing dishes and a venue not already used earlier in the trip.`,location:destination,cost:'Check current menu'});
+      }
 
       // Do not use major remote sightseeing as a late-night filler in a Food Explorer day.
       acts=acts.filter((a:any)=>{
@@ -2519,6 +2559,29 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
         if(/early morning/.test(bt) && t>13*60) return false;
         return true;
       });
+    }
+
+    // Luxury meal semantics: a signature dinner cannot be a breakfast/light/street-food item.
+    if(style==='luxury') {
+      const foodForActivity=(a:any)=>foods.find((f:any)=>{ const fk=norm(f?.name); const ak=norm(`${a?.title||''} ${a?.description||''}`); return fk && ak.includes(fk); }) || null;
+      for(const a of acts){
+        if(!/dinner|signature dining/i.test(String(a?.title||''))) continue;
+        const f=foodForActivity(a);
+        const light=/breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette/i.test(`${f?.description||''} ${f?.name||''} ${a?.description||''}`) || (f && isSnack(f));
+        if(light){
+          const replacement=savory.find((x:any)=>!usedMeals.has(norm(x?.name)) && !/breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette/i.test(`${x?.description||''} ${x?.name||''}`));
+          if(replacement){
+            usedMeals.add(norm(replacement.name));
+            Object.assign(a,foodActivity(a.time||'08:00 PM',replacement,'Signature Dinner'));
+            a.description=`Enjoy ${replacement.name} as a complete upscale regional dinner with comfortable service and advance reservations where useful.`;
+          } else {
+            a.title='Signature Dinner: Seasonal Regional Tasting Menu';
+            a.description=`Choose an acclaimed upscale restaurant or hotel dining room for a complete multi-course regional dinner featuring seasonal specialties.`;
+            a.location=destination;
+            a.cost='Fine dining - check current menu';
+          }
+        }
+      }
     }
 
     // For Luxury, replace removed duplicate attractions with an elevated non-duplicate experience.
@@ -2543,11 +2606,38 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
     });
 
     acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
-    // Resolve collisions/overlaps after time-window repair by leaving at least 75 minutes between activity starts.
+    // Resolve ordinary collisions first. Named transfers are aligned to their visit afterwards.
     for(let i=1;i<acts.length;i++){
       const prev=parseTime(acts[i-1]?.time,i-1), cur=parseTime(acts[i]?.time,i);
-      if(cur-prev<75) acts[i].time=fmtTime(prev+90);
+      const prevTransfer=/(transfer|chauffeur|drive|travel to)/i.test(String(acts[i-1]?.title||''));
+      const curVisit=matchedPlace(acts[i]);
+      const prevPlace=matchedPlace(acts[i-1]);
+      const sameTransferPair=prevTransfer && curVisit && prevPlace && norm(curVisit.name)===norm(prevPlace.name);
+      const minGap=sameTransferPair?45:75;
+      if(cur-prev<minGap) acts[i].time=fmtTime(prev+(sameTransferPair?60:90));
     }
+
+    // Semantic dependency: a transfer to a named attraction must occur BEFORE the visit,
+    // close enough to the visit to make chronological sense. Attraction admission never
+    // becomes the transport price.
+    for(const visit of acts){
+      if(/transfer|chauffeur|drive|travel to/i.test(String(visit?.title||''))) continue;
+      const p=matchedPlace(visit); if(!p) continue;
+      const pk=norm(p.name);
+      const transfer=acts.find((a:any)=>/(transfer|chauffeur|drive|travel to)/i.test(String(a?.title||'')) && matchedPlace(a) && norm(matchedPlace(a)?.name)===pk);
+      if(!transfer) continue;
+      const visitMin=parseTime(visit?.time);
+      let transferMin=parseTime(transfer?.time);
+      if(transferMin>=visitMin || visitMin-transferMin>180) {
+        transferMin=Math.max(7*60,visitMin-75);
+        transfer.time=fmtTime(transferMin);
+      }
+      const rawCost=String(transfer?.cost||'').trim();
+      const entry=String(p?.entryFee||'').trim();
+      const looksLikeAdmission=rawCost && (rawCost===entry || /^[₹$€£¥]?\s*[0-9][0-9,]*(?:\.[0-9]+)?$/.test(rawCost) || /^free$/i.test(rawCost));
+      if(looksLikeAdmission) transfer.cost=style==='luxury'?'Private transfer - check current price':'Transport - check current price';
+    }
+    acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
 
     // Give Food Explorer days customer-facing themes that reflect the actual day's unique content.
     let theme=polished(day?.theme);
@@ -2585,6 +2675,13 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
     acts.forEach((a:any,ai:number)=>{
       const isTransfer=/(transfer|chauffeur|drive|travel to)/i.test(String(a?.title||''));
       const p=placeMatch(a);
+      if(p&&isTransfer){
+        const pk=norm(p.name);
+        const visit=acts.find((x:any)=>!/(transfer|chauffeur|drive|travel to)/i.test(String(x?.title||'')) && placeMatch(x) && norm(placeMatch(x)?.name)===pk);
+        if(visit && parseTime(a?.time,ai)>=parseTime(visit?.time,ai)) errors.push(`day ${i+1} has transfer to ${p.name} after or at the visit time`);
+        const raw=String(a?.cost||'').trim(), entry=String(p?.entryFee||'').trim();
+        if(raw && entry && raw===entry) errors.push(`day ${i+1} copies ${p.name} admission into transfer cost`);
+      }
       if(p&&!isTransfer){
         const pk=norm(p.name); const prev=seenPlaces.get(pk); if(prev!=null&&prev!==i) errors.push(`day ${i+1} repeats attraction ${p.name} from day ${prev+1}`); else seenPlaces.set(pk,i);
         const bt=String(p?.bestTimeToVisit||'').toLowerCase(); const t=parseTime(a?.time,ai);
@@ -2600,7 +2697,10 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const allActs = days.flatMap((d:any)=>Array.isArray(d?.activities)?d.activities:[]);
   if (allActs.some((a:any)=>forbiddenCopy.test(`${a?.title||''} ${a?.description||''} ${a?.cost||''}`))) errors.push('internal AI instruction leaked into customer-facing itinerary');
   if(String(itinerary?.travelStyle||'').toLowerCase().trim()==='food explorer'){
-    days.forEach((d:any,i:number)=>{ const acts=Array.isArray(d?.activities)?d.activities:[]; if(!acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks breakfast/brunch`); if(!acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks lunch`); if(!acts.some((a:any)=>/dinner|signature dining/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks dinner`); });
+    days.forEach((d:any,i:number)=>{ const acts=Array.isArray(d?.activities)?d.activities:[]; if(!acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks breakfast/brunch`); if(!acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks lunch`); if(!acts.some((a:any)=>/dinner|signature dining/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks dinner`); if(acts.length<4)errors.push(`Food Explorer day ${i+1} has fewer than four meaningful culinary blocks`); });
+  }
+  if(String(itinerary?.travelStyle||'').toLowerCase().trim()==='luxury'){
+    days.forEach((d:any,i:number)=>{ for(const a of (Array.isArray(d?.activities)?d.activities:[])){ if(/dinner|signature dining/i.test(String(a?.title||'')) && /breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette/i.test(`${a?.title||''} ${a?.description||''}`)) errors.push(`Luxury day ${i+1} uses a breakfast/light/snack item as dinner`); } });
   }
   return Array.from(new Set(errors));
 }

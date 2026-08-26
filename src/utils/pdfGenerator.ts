@@ -896,7 +896,10 @@ const sanitizeLocation = (loc: string): string => {
     const parts = clean.split(",");
     if (parts.length > 1) {
       const firstPart = parts[0].trim();
-      if (firstPart.length <= 40) {
+      // Keep real named venues compact (e.g. "Fisherman's Wharf, Cavelossim"),
+      // but do not collapse descriptive fallback locations to meaningless text such
+      // as "A licensed" or "A traditional".
+      if (firstPart.length <= 40 && !/^(a|an|the)\s+(licensed|traditional|well[- ]reviewed|local|busy|reputable|upscale|premium)\b/i.test(firstPart)) {
         return firstPart;
       }
     }
