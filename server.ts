@@ -1989,6 +1989,57 @@ function sanitizeItineraryStrings(itinerary: any) {
   return itinerary;
 }
 
+
+async function repairItineraryForStyle(
+  ai: any,
+  itinerary: any,
+  destination: string,
+  travelStyle: string,
+  travelerType: string,
+  expectedDays: number,
+  validationErrors: string[]
+): Promise<any | null> {
+  try {
+    const style = String(travelStyle || 'Budget');
+    const styleRules: Record<string, string> = {
+      'Luxury': 'Make the ACTUAL daily plan visibly premium: upscale/five-star or equivalent stay as the working base, private/chauffeured transfers where useful, acclaimed upscale dining, spa/wellness, private/priority cultural experiences, sunset cruise/yacht or other destination-appropriate elevated experiences. Do not merely multiply prices. Avoid scooters, hostels, budget shacks and repetitive Attraction + Local Flavors days.',
+      'Food Explorer': 'Make food the backbone of every full day. Use 3-5 meaningful blocks with at least two culinary blocks on most days: local breakfast/cafe, produce/fish/spice market or food walk, regional lunch, cooking/tasting experience, dessert/beverage stop, and signature dinner. Sightseeing should support the food story, not dominate it. Never repeat Attraction + Local Flavors.',
+      'Adventure': 'Center most days on real active experiences such as trekking, rafting, kayaking, cycling, climbing, diving or other destination-appropriate activities, with realistic safety and recovery time.',
+      'Nightlife': 'Use later starts, sunset venues, live music, lounges, clubs, entertainment and safe late-evening transport, balanced with recovery time.',
+      'Wellness & Spa': 'Use calm pacing, spa/wellness treatments, yoga/meditation, healthy dining and restorative nature time.',
+      'Culture & History': 'Prioritize heritage sites, museums, architecture, guided cultural context and traditional neighborhoods.',
+      'Beach Escape': 'Prioritize beach time, coastal activities, waterfront dining, sunset and adequate unstructured relaxation.',
+      'Nature & Wildlife': 'Prioritize real nature reserves, wildlife, forests, viewpoints, eco-experiences and responsible guiding.',
+      'Shopping': 'Prioritize markets, artisan districts, malls/boutiques appropriate to the destination, shopping time and practical carrying/transport logistics.',
+      'Backpacker': 'Prioritize hostels/value stays, public transport, walking, free/low-cost attractions and social local experiences.',
+      'Smart Luxury': 'Use boutique/heritage or high-comfort stays, selective private transfers and a few high-value premium experiences without wasteful overspending.',
+      'Budget': 'Keep the trip value-focused with realistic low-cost stays, transport, food and memorable free/low-cost attractions.'
+    };
+    const rule = styleRules[style] || styleRules['Budget'];
+    const prompt = `You are repairing a TripBalancing itinerary that failed style-quality validation.\n\nDestination: ${destination}\nSelected travel style: ${style}\nTraveler type: ${travelerType || 'General traveler'}\nRequired trip days: ${expectedDays}\nValidation failures: ${validationErrors.join('; ')}\n\nMANDATORY STYLE RULE:\n${rule}\n\nReturn ONLY valid JSON. Preserve the same top-level JSON structure and factual destination, dates, travelers and budget fields. Rewrite days, placesToVisit/localFood only when needed so the selected style is obvious from the content. Keep real-world prices plausible; change service/venue level rather than multiplying the same item price. Use destination-specific or clearly generic-but-honest service descriptions instead of inventing fake businesses. Ensure each full day normally has 3-5 meaningful activity blocks and do not repeat the same day template.\n\nCURRENT ITINERARY JSON:\n${JSON.stringify(itinerary)}`;
+    const repairedResponse = await generateContentWithRetry(ai, {
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: { responseMimeType: 'application/json', temperature: 0.45 }
+    }, { timeoutMs: 45000, maxAttempts: 2 });
+    const text = repairedResponse?.text;
+    if (!text) return null;
+    const repaired = sanitizeItineraryStrings(JSON.parse(String(text).trim()));
+    repaired.destination = itinerary.destination;
+    repaired.origin = itinerary.origin;
+    repaired.startDate = itinerary.startDate;
+    repaired.endDate = itinerary.endDate;
+    repaired.travelers = itinerary.travelers;
+    repaired.travelStyle = travelStyle;
+    repaired.budgetAmount = itinerary.budgetAmount;
+    repaired.plannedBudget = itinerary.plannedBudget;
+    return repaired;
+  } catch (repairError: any) {
+    console.warn('[STYLE_REPAIR_FAILED]', repairError?.message || repairError);
+    return null;
+  }
+}
+
 function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string): string[] {
   const errors: string[] = [];
   const dest = String(itinerary?.destination || '').toLowerCase();
@@ -3097,10 +3148,23 @@ Return the response in strict JSON format.`;
       throw new Error("No response generated from the AI model.");
     }
 
-    const parsedItinerary = sanitizeItineraryStrings(JSON.parse(jsonText.trim()));
-    const qualityErrors = validateGeneratedItinerary(parsedItinerary, travelStyle);
+    let parsedItinerary = sanitizeItineraryStrings(JSON.parse(jsonText.trim()));
+    let qualityErrors = validateGeneratedItinerary(parsedItinerary, travelStyle);
     if (qualityErrors.length) {
-      throw new Error(`AI itinerary failed quality validation: ${qualityErrors.join('; ')}`);
+      console.warn(`[STYLE_QUALITY_REPAIR] ${travelStyle}: ${qualityErrors.join('; ')}`);
+      const repaired = await repairItineraryForStyle(ai, parsedItinerary, destination, travelStyle, travelerType, diffDays, qualityErrors);
+      if (repaired) {
+        const repairedErrors = validateGeneratedItinerary(repaired, travelStyle);
+        if (!repairedErrors.length) {
+          parsedItinerary = repaired;
+          qualityErrors = [];
+        } else {
+          qualityErrors = repairedErrors;
+        }
+      }
+      if (qualityErrors.length) {
+        throw new Error(`AI itinerary failed quality validation after repair: ${qualityErrors.join('; ')}`);
+      }
     }
     
     // Inject accurate geocoded coordinates
@@ -3351,63 +3415,136 @@ Return the response in strict JSON format.`;
       total: `₹${totalMin.toLocaleString("en-IN")} - ₹${totalMax.toLocaleString("en-IN")}`
     };
 
-    // Day activity lists (daily schedules)
-    const themes = [
-      "Arrival & City Orientation Walk",
-      "Historical Landmarks & Architecture Exploration",
-      "Scenic Nature Walks & Landmark Sights",
-      "Art Galleries, Local Culture & Leisure Walk",
-      "Culinary Food Tours & Old Town Neighborhoods",
-      "Off-the-Beaten-Path Treasures & Local Markets",
-      "Final Souvenir Shopping & Departure Preparation"
-    ];
+    // Style-aware curated fallback schedules. This path is used only when Gemini is unavailable
+    // or a generated itinerary still fails validation. It MUST preserve the selected travel style
+    // instead of falling back to the old generic "Attraction & Local Flavors" template.
+    const daysList: any[] = [];
+    const fallbackStyle = String(travelStyle || 'Budget').toLowerCase().trim();
+    const mkActivity = (time: string, title: string, description: string, location: string, cost: string, dayIdx: number, slot: number) => ({
+      time, title, description, location, cost,
+      latitude: Number((baseLat + Math.sin(dayIdx * 10 + slot) * 0.015).toFixed(4)),
+      longitude: Number((baseLon + Math.cos(dayIdx * 10 + slot) * 0.015).toFixed(4))
+    });
 
-    const daysList = [];
     for (let dayIdx = 0; dayIdx < diffDays; dayIdx++) {
-      const currentTheme = themes[dayIdx % themes.length];
-      
-      const dayLatOffset1 = Math.sin(dayIdx * 10 + 1) * 0.015;
-      const dayLonOffset1 = Math.cos(dayIdx * 10 + 1) * 0.015;
-      const dayLatOffset2 = Math.sin(dayIdx * 10 + 2) * 0.015;
-      const dayLonOffset2 = Math.cos(dayIdx * 10 + 2) * 0.015;
-      const dayLatOffset3 = Math.sin(dayIdx * 10 + 3) * 0.015;
-      const dayLonOffset3 = Math.cos(dayIdx * 10 + 3) * 0.015;
+      const primary = details.places[dayIdx % details.places.length];
+      const secondary = details.places[(dayIdx + 1) % details.places.length];
+      const meal1 = details.food[dayIdx % details.food.length];
+      const meal2 = details.food[(dayIdx + 1) % details.food.length];
+      let theme = `${primary.name} & Local Discovery`;
+      let activities: any[] = [];
+      let transportTips = ['Use the most practical verified local transport for the route.'];
 
-      const primaryPlace = details.places[dayIdx % details.places.length];
-      const meal = details.food[dayIdx % details.food.length];
+      if (fallbackStyle === 'luxury') {
+        theme = dayIdx === 0 ? 'Premium Arrival, Private Touring & Signature Dining' : `Private ${primary.name} Experience & Elevated Leisure`;
+        activities = [
+          mkActivity('09:30 AM', dayIdx === 0 ? 'Private Airport Transfer & Premium Stay Check-in' : `Chauffeured Transfer to ${primary.name}`, dayIdx === 0 ? `Begin with a pre-arranged private transfer and check in to a well-reviewed upscale or luxury property in ${destination}.` : `Travel comfortably by private car with timing optimized for ${primary.name}.`, dayIdx === 0 ? `${destination} premium hotel district` : primary.name, 'Premium service - verify live rate', dayIdx, 1),
+          mkActivity('11:30 AM', `Private / Priority Visit: ${primary.name}`, `${primary.description} Experience it with a private guide, reserved timing or the best available premium access where the destination supports it.`, primary.name, primary.entryFee || 'Verify live rate', dayIdx, 2),
+          mkActivity('02:30 PM', `Upscale Regional Lunch: ${meal1.name}`, `${meal1.description} Choose an acclaimed, high-comfort restaurant and reserve ahead where appropriate.`, meal1.mustTryAt || `${destination} acclaimed dining district`, 'Premium dining - per person', dayIdx, 3),
+          mkActivity('05:30 PM', dayIdx % 2 === 0 ? 'Spa / Wellness Recovery' : `Private Scenic Experience near ${secondary.name}`, dayIdx % 2 === 0 ? `Schedule a reputable spa or wellness treatment with unhurried recovery time.` : `Use a private guide/vehicle or premium reserved experience for a comfortable scenic visit.`, dayIdx % 2 === 0 ? `${destination} luxury spa / resort` : secondary.name, 'Premium experience - verify live rate', dayIdx, 4),
+          mkActivity('08:00 PM', `Signature Dinner & Evening`, `End with destination-worthy fine dining or a chef-led tasting experience; keep return transport pre-arranged.`, meal2.mustTryAt || `${destination} fine-dining area`, 'Fine dining - per person', dayIdx, 5)
+        ];
+        transportTips = ['Use pre-arranged private/chauffeured transfers for comfort and reliable evening return.'];
+      } else if (fallbackStyle === 'food explorer') {
+        theme = `Culinary Trail: ${meal1.name}, Markets & Regional Flavors`;
+        activities = [
+          mkActivity('08:30 AM', 'Local Breakfast & Cafe Tasting', `Start with a destination-specific breakfast and beverage tasting. Ask for regional specialties and seasonal items.`, `${destination} established breakfast/cafe district`, 'Per person - verify menu', dayIdx, 1),
+          mkActivity('10:30 AM', 'Produce / Spice / Fish Market Food Walk', `Explore a real public market or established food district with an emphasis on ingredients, vendors and local food culture. Do not invent a named market if none is verified.`, `${destination} central market / food district`, 'Low-cost tasting allowance', dayIdx, 2),
+          mkActivity('01:00 PM', `Regional Lunch: ${meal1.name}`, `${meal1.description} Try it at ${meal1.mustTryAt || 'a well-reviewed local restaurant'} and note whether pricing is per plate or per person.`, meal1.mustTryAt || `${destination} local restaurant`, 'Per plate/person', dayIdx, 3),
+          mkActivity('04:00 PM', `Food Craft / Tasting Experience`, `Choose a cooking demonstration, spice/produce tasting, bakery visit, beverage tasting or other authentic food-craft experience appropriate to ${destination}.`, `${destination} culinary workshop / specialty shop`, 'Per person - verify live rate', dayIdx, 4),
+          mkActivity('07:30 PM', `Signature Dinner: ${meal2.name}`, `${meal2.description} Finish with a different regional dish and a reputable venue to create a distinct culinary story from lunch.`, meal2.mustTryAt || `${destination} dinner district`, 'Per person - verify menu', dayIdx, 5)
+        ];
+      } else if (fallbackStyle === 'adventure') {
+        theme = `Active Exploration: ${primary.name} & Outdoor Challenge`;
+        activities = [
+          mkActivity('08:30 AM', `Active Route to ${primary.name}`, `Use a guided trek, cycle, kayak, rafting, water-sport or other destination-appropriate active approach where available; otherwise use the most active safe route.`, primary.name, primary.entryFee || 'Verify rate', dayIdx, 1),
+          mkActivity('12:30 PM', `Recovery Lunch: ${meal1.name}`, meal1.description, meal1.mustTryAt, 'Per person', dayIdx, 2),
+          mkActivity('03:30 PM', `Second Outdoor Experience near ${secondary.name}`, `Add a distinct active experience with appropriate safety gear, guide and weather checks.`, secondary.name, 'Verify live rate', dayIdx, 3),
+          mkActivity('07:30 PM', 'Recovery Dinner & Rest', `Refuel, hydrate and allow recovery time before the next active day.`, meal2.mustTryAt || destination, 'Per person', dayIdx, 4)
+        ];
+      } else if (fallbackStyle === 'nightlife') {
+        theme = `Late Start, Sunset & Nightlife around ${primary.name}`;
+        activities = [
+          mkActivity('11:30 AM', 'Late Brunch & Easy Start', `Keep the morning light after a late night and use a well-reviewed cafe or brunch venue.`, meal1.mustTryAt || destination, 'Per person', dayIdx, 1),
+          mkActivity('04:30 PM', `Sunset / Pre-evening Visit: ${primary.name}`, primary.description, primary.name, primary.entryFee || 'Free / verify', dayIdx, 2),
+          mkActivity('07:30 PM', 'Dinner & Live Entertainment', `Choose a reputable venue with music, performance or an energetic evening atmosphere appropriate to ${destination}.`, `${destination} established entertainment district`, 'Per person', dayIdx, 3),
+          mkActivity('10:30 PM', 'Nightlife Venue & Safe Return', `Use a reputable club, lounge, casino or night venue where legal and appropriate, then return by verified taxi/rideshare/private transfer.`, `${destination} nightlife district`, 'Cover/drinks - verify live rate', dayIdx, 4)
+        ];
+        transportTips = ['Use verified taxi/rideshare or pre-arranged transport for late-night returns.'];
+      } else if (fallbackStyle === 'wellness & spa') {
+        theme = `Restorative Wellness, ${primary.name} & Slow Travel`;
+        activities = [
+          mkActivity('08:00 AM', 'Yoga / Meditation & Healthy Breakfast', 'Begin slowly with a reputable wellness session and nourishing breakfast.', `${destination} wellness area`, 'Per person', dayIdx, 1),
+          mkActivity('11:00 AM', `Gentle Visit: ${primary.name}`, primary.description, primary.name, primary.entryFee || 'Free / verify', dayIdx, 2),
+          mkActivity('03:00 PM', 'Spa / Massage / Wellness Treatment', 'Book a reputable treatment with rest time before and after.', `${destination} spa / wellness center`, 'Verify live rate', dayIdx, 3),
+          mkActivity('07:00 PM', `Light Regional Dinner: ${meal1.name}`, meal1.description, meal1.mustTryAt, 'Per person', dayIdx, 4)
+        ];
+      } else if (fallbackStyle === 'culture & history') {
+        theme = `Heritage & Cultural Context: ${primary.name}`;
+        activities = [
+          mkActivity('09:00 AM', `Guided Heritage Visit: ${primary.name}`, primary.description, primary.name, primary.entryFee || 'Verify', dayIdx, 1),
+          mkActivity('11:30 AM', `Museum / Architectural Context`, `Add a museum, interpretation center, historic neighborhood or architectural walk connected to ${destination}'s history.`, `${destination} heritage district`, 'Verify', dayIdx, 2),
+          mkActivity('02:00 PM', `Traditional Lunch: ${meal1.name}`, meal1.description, meal1.mustTryAt, 'Per person', dayIdx, 3),
+          mkActivity('04:30 PM', `Second Heritage Stop: ${secondary.name}`, secondary.description, secondary.name, secondary.entryFee || 'Verify', dayIdx, 4)
+        ];
+      } else if (fallbackStyle === 'beach escape') {
+        theme = `Coastal Relaxation & Beach Time near ${primary.name}`;
+        activities = [
+          mkActivity('09:30 AM', 'Unhurried Beach Morning', `Use a suitable beach/coastal area near ${destination} with ample free time rather than over-scheduling.`, primary.name, 'Free / verify', dayIdx, 1),
+          mkActivity('01:00 PM', `Waterfront Lunch: ${meal1.name}`, meal1.description, meal1.mustTryAt, 'Per person', dayIdx, 2),
+          mkActivity('03:30 PM', 'Optional Coastal Activity / Resort Downtime', 'Choose swimming, kayaking, a boat ride or simply resort/beach downtime depending on sea and weather conditions.', `${destination} coast`, 'Optional', dayIdx, 3),
+          mkActivity('06:00 PM', 'Sunset by the Water', 'Keep sunset unscheduled enough to relax, photograph and enjoy the coast.', `${destination} waterfront`, 'Free', dayIdx, 4)
+        ];
+      } else if (fallbackStyle === 'nature & wildlife') {
+        theme = `Nature, Wildlife & Responsible Exploration`;
+        activities = [
+          mkActivity('07:30 AM', 'Early Nature / Wildlife Excursion', `Use a real reserve, forest, birding area or nature zone around ${destination}; hire an authorized guide where required.`, `${destination} nature reserve / eco-zone`, 'Verify permits/guide', dayIdx, 1),
+          mkActivity('12:30 PM', `Local Lunch: ${meal1.name}`, meal1.description, meal1.mustTryAt, 'Per person', dayIdx, 2),
+          mkActivity('03:30 PM', `Scenic Nature Visit: ${primary.name}`, primary.description, primary.name, primary.entryFee || 'Verify', dayIdx, 3),
+          mkActivity('06:30 PM', 'Low-impact Sunset / Eco Lodge Evening', 'Keep noise and disturbance low and follow local wildlife rules.', `${destination} eco-friendly area`, 'Verify', dayIdx, 4)
+        ];
+      } else if (fallbackStyle === 'shopping') {
+        theme = `Markets, Artisan Finds & Shopping Districts`;
+        activities = [
+          mkActivity('10:00 AM', 'Local Market / Artisan District', `Start with authentic local products, crafts, textiles or food goods and compare prices before buying.`, `${destination} established market district`, 'Shopping budget varies', dayIdx, 1),
+          mkActivity('01:00 PM', `Lunch: ${meal1.name}`, meal1.description, meal1.mustTryAt, 'Per person', dayIdx, 2),
+          mkActivity('03:00 PM', 'Boutiques / Mall / Specialty Stores', `Choose the strongest destination-appropriate shopping area for branded, designer or specialty products.`, `${destination} retail district`, 'Shopping budget varies', dayIdx, 3),
+          mkActivity('06:00 PM', `Light Sightseeing: ${primary.name}`, primary.description, primary.name, primary.entryFee || 'Free / verify', dayIdx, 4)
+        ];
+      } else if (fallbackStyle === 'backpacker') {
+        theme = `Backpacker Value Day: ${primary.name} & Local Life`;
+        activities = [
+          mkActivity('09:00 AM', `Walk / Public Transit to ${primary.name}`, primary.description, primary.name, primary.entryFee || 'Free / verify', dayIdx, 1),
+          mkActivity('12:30 PM', `Low-cost Local Lunch: ${meal1.name}`, meal1.description, meal1.mustTryAt, 'Budget per plate', dayIdx, 2),
+          mkActivity('03:00 PM', 'Free / Low-cost Neighborhood Exploration', 'Explore a walkable district, public viewpoint, park or community area without fabricated attractions.', `${destination} walkable district`, 'Free / low cost', dayIdx, 3),
+          mkActivity('07:00 PM', 'Social Evening / Hostel Common Area', 'Use a reputable social stay or low-cost community venue and keep transport simple.', `${destination} backpacker area`, 'Low cost', dayIdx, 4)
+        ];
+        transportTips = ['Prefer walking and verified public transport; use taxis only when they materially improve safety or timing.'];
+      } else if (fallbackStyle === 'smart luxury') {
+        theme = `Boutique Comfort & High-value Experiences`;
+        activities = [
+          mkActivity('09:30 AM', `Comfortable Transfer to ${primary.name}`, primary.description, primary.name, primary.entryFee || 'Verify', dayIdx, 1),
+          mkActivity('01:00 PM', `Quality Regional Lunch: ${meal1.name}`, meal1.description, meal1.mustTryAt, 'Mid-premium per person', dayIdx, 2),
+          mkActivity('03:30 PM', `Selective Premium Experience near ${secondary.name}`, 'Choose one high-value guided/private/priority experience where it meaningfully improves comfort or access.', secondary.name, 'Verify live rate', dayIdx, 3),
+          mkActivity('07:30 PM', 'Boutique Dining / Relaxed Evening', 'Choose a distinctive well-reviewed restaurant without defaulting to the most expensive option.', meal2.mustTryAt || destination, 'Per person', dayIdx, 4)
+        ];
+      } else {
+        theme = `Value-focused ${primary.name} & Local Experiences`;
+        activities = [
+          mkActivity('09:30 AM', primary.name, primary.description, primary.name, primary.entryFee, dayIdx, 1),
+          mkActivity('12:30 PM', `Affordable Regional Lunch: ${meal1.name}`, meal1.description, meal1.mustTryAt, 'Budget per person', dayIdx, 2),
+          mkActivity('03:30 PM', `Second Sight: ${secondary.name}`, secondary.description, secondary.name, secondary.entryFee, dayIdx, 3),
+          mkActivity('07:00 PM', 'Low-cost Local Evening', 'Use a free viewpoint, promenade, public square or neighborhood walk appropriate to the destination.', destination, 'Free / low cost', dayIdx, 4)
+        ];
+      }
+
       daysList.push({
         dayNumber: dayIdx + 1,
-        theme: `${primaryPlace.name} & Local Flavors`,
-        activities: [
-          {
-            time: dayIdx === 0 ? "10:00 AM" : "09:30 AM",
-            title: primaryPlace.name,
-            description: primaryPlace.description,
-            location: primaryPlace.name,
-            cost: primaryPlace.entryFee,
-            latitude: Number((baseLat + dayLatOffset1).toFixed(4)),
-            longitude: Number((baseLon + dayLonOffset1).toFixed(4))
-          },
-          {
-            time: "01:30 PM",
-            title: `Try ${meal.name}`,
-            description: `${meal.description} This meal stop is included as a practical local-food break rather than a fabricated attraction.`,
-            location: meal.mustTryAt,
-            cost: "₹300 - ₹900",
-            latitude: Number((baseLat + dayLatOffset2).toFixed(4)),
-            longitude: Number((baseLon + dayLonOffset2).toFixed(4))
-          }
-        ],
-        foodRecommendations: [
-          `Breakfast: Enjoy local tea or coffee with authentic morning specialties`,
-          `Lunch: Savor regional delicacies at ${details.food[dayIdx % details.food.length]?.mustTryAt || "popular neighborhood eateries"}`,
-          `Dinner: Try unique local signatures with ample vegetarian and non-vegetarian selections`
-        ],
-        transportationSuggestions: [
-          "Walking is ideal for exploring localized areas and street markets",
-          "Avail local auto-rickshaws, metro lines, or taxi cabs for longer distances"
-        ],
-        dailyBudget: `₹${Math.round(1500 * mult).toLocaleString("en-IN")}`
+        theme,
+        activities,
+        foodRecommendations: [`Regional specialty: ${meal1.name}`, `Also try: ${meal2.name}`],
+        transportationSuggestions: transportTips,
+        dailyBudget: `₹${Math.round(1500 * mult).toLocaleString('en-IN')}`
       });
     }
 

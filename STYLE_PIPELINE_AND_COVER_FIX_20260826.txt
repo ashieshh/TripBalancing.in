@@ -1,0 +1,16 @@
+TripBalancing Style Pipeline + Destination Cover Fix — 26 Aug 2026
+
+Root causes fixed:
+1) Style-quality validation failures were thrown into the curated fallback. The curated fallback used the same generic "Attraction & Local Flavors" schedule for every travel style, so Luxury/Food Explorer labels and budgets changed while the daily itinerary did not.
+2) PDF cover logic grouped Goa under a generic India fallback, whose image was the Taj Mahal. This caused Goa PDFs to show a wrong-city landmark.
+
+Changes:
+- Added one Gemini style-repair pass before falling back when style quality validation fails.
+- Re-validates the repaired itinerary before accepting it.
+- Replaced generic fallback day builder with style-aware fallback schedules for Budget, Smart Luxury, Luxury, Adventure, Backpacker, Food Explorer, Wellness & Spa, Culture & History, Beach Escape, Nature & Wildlife, Shopping and Nightlife.
+- Luxury fallback now changes service level (private transfer, premium guide/access, upscale dining, spa/elevated experiences) instead of multiplying the same basic itinerary.
+- Food Explorer fallback now uses food-led daily structure with breakfast/cafe, market/food district, regional lunch, tasting/craft and signature dinner.
+- Added Goa-specific cover handling before the generic India branch.
+- Unknown destinations now use the neutral/branded PDF cover instead of an unrelated generic landmark image.
+
+No changes to payments, Supabase/RLS, country pricing, plan pricing, or account logic.

@@ -1203,7 +1203,13 @@ export const exportPremiumTravelPDF = async (
       if (norm.includes("amsterdam") || norm.includes("netherlands") || norm.includes("holland") || norm.includes("dutch")) {
         return "https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1200&h=1600&q=80";
       }
-      if (norm.includes("uttar pradesh") || norm.includes("india") || norm.includes("agra") || norm.includes("taj") || norm.includes("delhi") || norm.includes("mumbai") || norm.includes("jaipur") || norm.includes("goa") || norm.includes("kerala") || norm.includes("bengaluru") || norm.includes("rajasthan") || norm.includes("varanasi")) {
+      // Destination-specific India covers must be checked BEFORE the generic India fallback.
+      // Goa previously fell through to the generic India/Taj Mahal image, which produced a wrong-city cover.
+      if (norm.includes("goa") || norm.includes("panaji") || norm.includes("panjim") || norm.includes("calangute") || norm.includes("baga") || norm.includes("anjuna") || norm.includes("vagator") || norm.includes("palolem")) {
+        // Neutral tropical-coast image: destination-appropriate for Goa and never a false landmark claim.
+        return "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&h=1600&q=80";
+      }
+      if (norm.includes("uttar pradesh") || norm.includes("india") || norm.includes("agra") || norm.includes("taj") || norm.includes("delhi") || norm.includes("mumbai") || norm.includes("jaipur") || norm.includes("kerala") || norm.includes("bengaluru") || norm.includes("rajasthan") || norm.includes("varanasi")) {
         if (norm.includes("varanasi") || norm.includes("ghat") || norm.includes("ganges") || norm.includes("ganga")) {
           return "https://images.unsplash.com/photo-1561361531-99f2a6a9715e?auto=format&fit=crop&w=1200&h=1600&q=80";
         }
@@ -1227,7 +1233,9 @@ export const exportPremiumTravelPDF = async (
       if (norm.includes("mountain") || norm.includes("himalaya") || norm.includes("trek") || norm.includes("nepal") || norm.includes("ladakh") || norm.includes("manali") || norm.includes("shimla") || norm.includes("nature") || norm.includes("forest") || norm.includes("lake") || norm.includes("hill")) {
         return "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&h=1600&q=80";
       }
-      return "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&h=1600&q=80";
+      // Unknown destination: do not show a potentially incorrect city/landmark.
+      // Returning an empty URL lets the PDF render the branded neutral cover background.
+      return "";
     }
 
     if (type === "attraction") {
