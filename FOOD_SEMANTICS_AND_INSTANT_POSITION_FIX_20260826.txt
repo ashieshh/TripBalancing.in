@@ -1,0 +1,13 @@
+TripBalancing - Food Semantics + Instant Result Position Fix (2026-08-26)
+
+1) Food semantics
+- Curated fallbacks now classify dessert/beverage items separately from full meals.
+- Luxury and Food Explorer lunch/dinner slots use savory/full-meal items only.
+- Desserts/beverages are tasting/snack blocks, never meal replacements.
+- Luxury signature dinner no longer inherits a casual shack/stall venue from a beverage/dessert recommendation.
+- Optional Luxury tastings are explicitly after-dinner tasting blocks.
+
+2) Result positioning
+- Replaced animated post-generation scroll with useLayoutEffect + behavior:auto.
+- Browser positions the newly generated result before paint, avoiding the visible mid-page -> scroll-up effect.
+- Saved/shared-trip navigation remains unchanged.

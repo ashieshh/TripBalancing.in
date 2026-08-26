@@ -3449,11 +3449,32 @@ Return the response in strict JSON format.`;
       longitude: Number((baseLon + Math.cos(dayIdx * 10 + slot) * 0.015).toFixed(4))
     });
 
+    // Food semantics for curated fallbacks. A dessert or beverage can enrich a day,
+    // but it must never become the named lunch/dinner. Prefer savory/full-meal items
+    // for meal slots and reserve dessert/beverage items for tasting/snack slots.
+    const foodItems = Array.isArray(details.food) ? details.food : [];
+    const foodKind = (item: any) => String(item?.type || '').toLowerCase().trim();
+    const foodText = (item: any) => `${item?.name || ''} ${item?.description || ''}`.toLowerCase();
+    const isSnackOrDrink = (item: any) => {
+      const kind = foodKind(item);
+      if (kind === 'dessert' || kind === 'beverage') return true;
+      return /(dessert|sweet|cake|pastry|ice cream|pudding|cookie|macaron|bebinca|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni|coffee|tea)/i.test(foodText(item));
+    };
+    const savoryMeals = foodItems.filter((item: any) => !isSnackOrDrink(item));
+    const tastingItems = foodItems.filter((item: any) => isSnackOrDrink(item));
+    const mealAt = (index: number) => savoryMeals.length
+      ? savoryMeals[index % savoryMeals.length]
+      : (foodItems[index % Math.max(1, foodItems.length)] || { name: 'Regional Meal', description: 'Choose a reputable restaurant serving a complete regional meal.', mustTryAt: `${destination} acclaimed restaurant` });
+    const tastingAt = (index: number) => tastingItems.length
+      ? tastingItems[index % tastingItems.length]
+      : (foodItems[(index + 1) % Math.max(1, foodItems.length)] || { name: 'Regional Tasting', description: 'Add a destination-specific dessert, beverage or tasting.', mustTryAt: `${destination} specialty shop` });
+
     for (let dayIdx = 0; dayIdx < diffDays; dayIdx++) {
       const primary = details.places[dayIdx % details.places.length];
       const secondary = details.places[(dayIdx + 1) % details.places.length];
-      const meal1 = details.food[dayIdx % details.food.length];
-      const meal2 = details.food[(dayIdx + 1) % details.food.length];
+      const meal1 = mealAt(dayIdx);
+      const meal2 = mealAt(dayIdx + 1);
+      const tasting = tastingAt(dayIdx);
       let theme = `${primary.name} & Local Discovery`;
       let activities: any[] = [];
       let transportTips = ['Use the most practical verified local transport for the route.'];
@@ -3463,9 +3484,10 @@ Return the response in strict JSON format.`;
         activities = [
           mkActivity('09:30 AM', dayIdx === 0 ? 'Private Airport Transfer & Premium Stay Check-in' : `Chauffeured Transfer to ${primary.name}`, dayIdx === 0 ? `Begin with a pre-arranged private transfer and check in to a well-reviewed upscale or luxury property in ${destination}.` : `Travel comfortably by private car with timing optimized for ${primary.name}.`, dayIdx === 0 ? `${destination} premium hotel district` : primary.name, 'Premium service - verify live rate', dayIdx, 1),
           mkActivity('11:30 AM', `Private / Priority Visit: ${primary.name}`, `${primary.description} Experience it with a private guide, reserved timing or the best available premium access where the destination supports it.`, primary.name, primary.entryFee || 'Verify live rate', dayIdx, 2),
-          mkActivity('02:30 PM', `Upscale Regional Lunch: ${meal1.name}`, `${meal1.description} Choose an acclaimed, high-comfort restaurant and reserve ahead where appropriate.`, meal1.mustTryAt || `${destination} acclaimed dining district`, 'Premium dining - per person', dayIdx, 3),
+          mkActivity('02:30 PM', `Upscale Regional Lunch: ${meal1.name}`, `${meal1.description} This must be a complete savory meal at an acclaimed, high-comfort restaurant; reserve ahead where appropriate.`, meal1.mustTryAt || `${destination} acclaimed dining district`, 'Premium dining - per person', dayIdx, 3),
           mkActivity('05:30 PM', dayIdx % 2 === 0 ? 'Spa / Wellness Recovery' : `Private Scenic Experience near ${secondary.name}`, dayIdx % 2 === 0 ? `Schedule a reputable spa or wellness treatment with unhurried recovery time.` : `Use a private guide/vehicle or premium reserved experience for a comfortable scenic visit.`, dayIdx % 2 === 0 ? `${destination} luxury spa / resort` : secondary.name, 'Premium experience - verify live rate', dayIdx, 4),
-          mkActivity('08:00 PM', `Signature Dinner & Evening`, `End with destination-worthy fine dining or a chef-led tasting experience; keep return transport pre-arranged.`, meal2.mustTryAt || `${destination} fine-dining area`, 'Fine dining - per person', dayIdx, 5)
+          mkActivity('08:00 PM', `Signature Dinner: ${meal2.name}`, `${meal2.description} Serve this as a complete dinner at a reputable upscale restaurant or hotel dining room. Do not use a casual shack/stall as the luxury signature venue.`, `${destination} acclaimed fine-dining / luxury hotel restaurant`, 'Fine dining - per person', dayIdx, 5),
+          ...(tasting && isSnackOrDrink(tasting) ? [mkActivity('09:30 PM', `Optional After-dinner Tasting: ${tasting.name}`, `${tasting.description} Treat this only as a dessert/beverage tasting after the meal, never as the meal itself.`, tasting.mustTryAt || `${destination} specialty venue`, 'Tasting - per person', dayIdx, 6)] : [])
         ];
         transportTips = ['Use pre-arranged private/chauffeured transfers for comfort and reliable evening return.'];
       } else if (fallbackStyle === 'food explorer') {
@@ -3473,9 +3495,9 @@ Return the response in strict JSON format.`;
         activities = [
           mkActivity('08:30 AM', 'Local Breakfast & Cafe Tasting', `Start with a destination-specific breakfast and beverage tasting. Ask for regional specialties and seasonal items.`, `${destination} established breakfast/cafe district`, 'Per person - verify menu', dayIdx, 1),
           mkActivity('10:30 AM', 'Produce / Spice / Fish Market Food Walk', `Explore a real public market or established food district with an emphasis on ingredients, vendors and local food culture. Do not invent a named market if none is verified.`, `${destination} central market / food district`, 'Low-cost tasting allowance', dayIdx, 2),
-          mkActivity('01:00 PM', `Regional Lunch: ${meal1.name}`, `${meal1.description} Try it at ${meal1.mustTryAt || 'a well-reviewed local restaurant'} and note whether pricing is per plate or per person.`, meal1.mustTryAt || `${destination} local restaurant`, 'Per plate/person', dayIdx, 3),
-          mkActivity('04:00 PM', `Food Craft / Tasting Experience`, `Choose a cooking demonstration, spice/produce tasting, bakery visit, beverage tasting or other authentic food-craft experience appropriate to ${destination}.`, `${destination} culinary workshop / specialty shop`, 'Per person - verify live rate', dayIdx, 4),
-          mkActivity('07:30 PM', `Signature Dinner: ${meal2.name}`, `${meal2.description} Finish with a different regional dish and a reputable venue to create a distinct culinary story from lunch.`, meal2.mustTryAt || `${destination} dinner district`, 'Per person - verify menu', dayIdx, 5)
+          mkActivity('01:00 PM', `Regional Lunch: ${meal1.name}`, `${meal1.description} This must be a complete regional meal, not a dessert or beverage. Try it at ${meal1.mustTryAt || 'a well-reviewed local restaurant'} and note whether pricing is per plate or per person.`, meal1.mustTryAt || `${destination} local restaurant`, 'Per plate/person', dayIdx, 3),
+          mkActivity('04:00 PM', `Tasting / Food Craft: ${tasting.name}`, `${tasting.description} Treat desserts and beverages as tastings/snacks only. Pair them with a cooking demonstration, producer visit, bakery, spice/produce tasting or other authentic food-craft experience appropriate to ${destination}.`, tasting.mustTryAt || `${destination} culinary workshop / specialty shop`, 'Per person - verify live rate', dayIdx, 4),
+          mkActivity('07:30 PM', `Signature Dinner: ${meal2.name}`, `${meal2.description} This must be a complete dinner built around a savory regional dish at a reputable venue, distinct from lunch.`, meal2.mustTryAt || `${destination} dinner district`, 'Per person - verify menu', dayIdx, 5)
         ];
       } else if (fallbackStyle === 'adventure') {
         theme = `Active Exploration: ${primary.name} & Outdoor Challenge`;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { 
   Globe, LogOut, ArrowLeft, Sparkles, Database, WifiOff, MapPin, 
   ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users, ShieldCheck
@@ -229,21 +229,21 @@ export default function App() {
     });
   }, [apiError]);
 
-  // The result replaces a long planner form. Without an explicit reset the browser
-  // keeps the old scroll offset, which made a fresh trip open halfway down the result.
-  useEffect(() => {
+  // A newly generated result replaces a long planner form. Position the viewport
+  // synchronously before the browser paints the result, so users never see the
+  // page open in the middle and then animate upward. Saved/shared trips keep
+  // their normal navigation behavior.
+  useLayoutEffect(() => {
     if (generating || !activeItinerary || !pendingGeneratedResultScroll.current) return;
     pendingGeneratedResultScroll.current = false;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const target = document.getElementById("generated-trip-result-top");
-        if (!target) return;
-        const headerOffset = 96;
-        const top = target.getBoundingClientRect().top + window.scrollY - headerOffset;
-        window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-        target.focus({ preventScroll: true });
-      });
-    });
+
+    const target = document.getElementById("generated-trip-result-top");
+    if (!target) return;
+
+    const headerOffset = 96;
+    const top = target.getBoundingClientRect().top + window.scrollY - headerOffset;
+    window.scrollTo({ top: Math.max(0, top), left: 0, behavior: "auto" });
+    target.focus({ preventScroll: true });
   }, [generating, activeItinerary]);
 
   // Share mode state
