@@ -558,7 +558,8 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       for (const activity of Array.isArray(day?.activities)?day.activities:[]) {
         const raw=String(activity?.cost??"");
         const activityKey=key(`${activity?.title||""} ${activity?.location||""}`);
-        const matched=placeFees.find((p:any)=>activityKey.includes(p.key) || p.key.includes(activityKey));
+        const isTransfer=/(transfer|chauffeur|drive|travel to|pickup|drop[- ]?off)/i.test(String(activity?.title||""));
+        const matched=isTransfer ? undefined : placeFees.find((p:any)=>activityKey.includes(p.key) || p.key.includes(activityKey));
         if (matched) {
           if (matched.free) activity.cost="Free";
           else if (matched.fee>0) { const admission=Math.max(1,Math.round(matched.fee)); activity.cost=fmtMoney(admission); fixedAdmissionTotal+=admission; }

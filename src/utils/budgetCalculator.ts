@@ -770,7 +770,8 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     const serviceRows:Array<{activity:any;weight:number}>=[]; let fixedAdmissionTotal=0;
     itinerary.days.forEach((day:any)=>{ (Array.isArray(day?.activities)?day.activities:[]).forEach((activity:any)=>{
       const raw=String(activity?.cost??""); const ak=key(`${activity?.title||""} ${activity?.location||""}`);
-      const matched=placeFees.find((p:any)=>ak.includes(p.key)||p.key.includes(ak));
+      const isTransfer=/(transfer|chauffeur|drive|travel to|pickup|drop[- ]?off)/i.test(String(activity?.title||""));
+      const matched=isTransfer ? undefined : placeFees.find((p:any)=>ak.includes(p.key)||p.key.includes(ak));
       if(matched){ if(matched.free)activity.cost="Free"; else { const fee=Math.max(1,Math.round(matched.fee)); activity.cost=fmtMoney(fee); fixedAdmissionTotal+=fee; } return; }
       const weight=firstMoneyNumber(raw); if(/\bfree\b|included/i.test(raw)||weight<=0){ if(!raw.trim()||/\bfree\b|included/i.test(raw))activity.cost="Free"; return; } serviceRows.push({activity,weight});
     }); });

@@ -65,7 +65,7 @@ export default function DestinationWeather({ destination, startDate, endDate }: 
 
     async function fetchWeather() {
       // Check client-side weather cache first to prevent redundant network requests and load instantly
-      const cacheKey = `weather_grounded_${destination.toLowerCase().trim()}`;
+      const cacheKey = `weather_openmeteo_${destination.toLowerCase().trim()}`;
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
         try {
@@ -88,21 +88,21 @@ export default function DestinationWeather({ destination, startDate, endDate }: 
       setError(null);
 
       try {
-        const response = await fetch("/api/weather", {
+        const response = await fetch("/api/open-weather", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ destination, startDate, endDate }),
+          body: JSON.stringify({ destination }),
         });
 
         if (!response.ok) {
-          throw new Error("Failed to load weather forecast from the AI server.");
+          throw new Error("Live weather is temporarily unavailable. Please try again shortly.");
         }
 
         const data = await response.json();
         
         if (active) {
           setForecast(data.forecast || []);
-          setSummary(data.summary || "7-Day Weather Forecast loaded successfully.");
+          setSummary(data.summary || `5-day forecast for ${destination} from Open-Meteo.`);
           setSources(data.sources || []);
           setIsFallback(data.isFallback || false);
 
@@ -185,10 +185,10 @@ export default function DestinationWeather({ destination, startDate, endDate }: 
             <span className="p-1.5 bg-teal-50 dark:bg-teal-950/40 text-teal-600 dark:text-teal-400 rounded-lg">
               <ThermometerSun className="w-4 h-4" />
             </span>
-            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">AI Grounded Weather Forecast</h3>
+            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Live Weather Forecast</h3>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            Real-time conditions and smart packing recommendations powered by Google Search for &ldquo;{destination}&rdquo;.
+            Live forecast and smart packing recommendations for &ldquo;{destination}&rdquo;, powered by Open-Meteo.
           </p>
         </div>
 
@@ -203,7 +203,7 @@ export default function DestinationWeather({ destination, startDate, endDate }: 
             ) : (
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-teal-700 bg-teal-50 dark:text-teal-400 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900 rounded-2xl">
                 <Calendar className="w-3.5 h-3.5 text-teal-500" />
-                7-Day Grounded Forecast
+                5-Day Live Forecast
               </span>
             )}
           </div>
@@ -214,8 +214,8 @@ export default function DestinationWeather({ destination, startDate, endDate }: 
         <div className="flex flex-col items-center justify-center py-12 space-y-4">
           <div className="w-8 h-8 border-3 border-teal-500 border-t-transparent rounded-full animate-spin" />
           <div className="text-center space-y-1">
-            <p className="text-xs font-bold text-slate-500 dark:text-slate-450 uppercase tracking-wider animate-pulse">Searching Google for Live Weather...</p>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500">Retrieving real-time forecasts, temperatures & conditions...</p>
+            <p className="text-xs font-bold text-slate-500 dark:text-slate-450 uppercase tracking-wider animate-pulse">Loading Live Weather...</p>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500">Retrieving forecast temperatures and conditions...</p>
           </div>
         </div>
       ) : error ? (
@@ -303,7 +303,7 @@ export default function DestinationWeather({ destination, startDate, endDate }: 
             <div className="border-t border-slate-100 dark:border-slate-900 pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-450 dark:text-slate-500">
               <span className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px]">
                 <Sparkles className="w-3.5 h-3.5 text-teal-500 animate-pulse" />
-                <span>AI Grounded via Google Search</span>
+                <span>Weather data via Open-Meteo</span>
               </span>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold text-[10px]">References:</span>

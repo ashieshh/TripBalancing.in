@@ -2412,6 +2412,7 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
       [/validation failure[^.]*\.?/ig,''],
       [/internal rule[^.]*\.?/ig,''],
       [/\bThis\s+Enjoy\b/ig,'Enjoy'],
+      [/\bThis\s+Try\b/ig,'Try'],
       [/\bThis\s+Plan\b/ig,'Plan'],
       [/taxiPremium/ig,'taxi • Premium'],
       [/vehicleTasting/ig,'vehicle • Tasting'],
@@ -2514,7 +2515,7 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
           else {
             const variants=['Bakery & Confectionery Tasting','Local Producer / Spice Tasting','Regional Beverage & Snack Tasting','Seasonal Food Craft Experience'];
             a.title=variants[di % variants.length];
-            a.description=`Explore a different local producer, bakery, spice, snack or beverage experience that has not already appeared earlier in the trip.`;
+            a.description=`Discover a local producer, bakery, spice, snack or beverage experience that adds a different flavor to the day.`;
             a.location=destination;
             a.cost='Check current price';
           }
@@ -2537,19 +2538,19 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
       if(!hasLunch){
         const f=nextUnused(savory,usedMeals);
         if(f) acts.push(foodActivity('01:00 PM',f,'Regional Lunch'));
-        else acts.push({time:'01:00 PM',title:[`Regional Lunch: Seasonal Special`,`Regional Lunch: Local Kitchen Selection`,`Regional Lunch: Chef's Daily Regional Plate`,`Regional Lunch: Market-to-Table Special`][di%4],description:`Choose a well-reviewed local restaurant and order a complete savory regional meal that has not already been featured earlier in the trip.`,location:destination,cost:'Check current menu'});
+        else acts.push({time:'01:00 PM',title:[`Regional Lunch: Seasonal Special`,`Regional Lunch: Local Kitchen Selection`,`Regional Lunch: Chef's Daily Regional Plate`,`Regional Lunch: Market-to-Table Special`][di%4],description:`Enjoy a complete savory regional meal at a well-reviewed local restaurant, with seasonal dishes chosen for this day.`,location:destination,cost:'Check current menu'});
       }
       const hasTasting=acts.some((a:any)=>/tasting|dessert|feni|bakery|food craft/i.test(String(a?.title||'')));
       if(!hasTasting){
         const f=nextUnused(tastings,usedTastings);
         if(f) acts.push(foodActivity('04:00 PM',f,'Tasting / Food Craft'));
-        else acts.push({time:'04:00 PM',title:`Local Food Craft / Tasting`,description:`Use the afternoon for a bakery, producer, spice, dessert or beverage tasting that is different from earlier days.`,location:destination,cost:'Check current price'});
+        else acts.push({time:'04:00 PM',title:`Local Food Craft / Tasting`,description:`Spend the afternoon on a local bakery, producer, spice, dessert or beverage tasting selected to complement the day's meals.`,location:destination,cost:'Check current price'});
       }
       const hasDinner=acts.some((a:any)=>/dinner|evening meal|signature dining/i.test(String(a?.title||'')) && parseTime(a?.time)>=18*60);
       if(!hasDinner){
         const f=nextUnused(savory,usedMeals);
         if(f) acts.push(foodActivity('07:30 PM',f,'Signature Dinner'));
-        else acts.push({time:'07:30 PM',title:[`Regional Dinner: Chef's Seasonal Specials`,`Regional Dinner: Local Tasting Menu`,`Regional Dinner: House Regional Specialties`,`Regional Dinner: Seasonal Culinary Finale`][di%4],description:`Finish with a complete savory dinner at a well-reviewed local restaurant, choosing dishes and a venue not already used earlier in the trip.`,location:destination,cost:'Check current menu'});
+        else acts.push({time:'07:30 PM',title:[`Regional Dinner: Chef's Seasonal Specials`,`Regional Dinner: Local Tasting Menu`,`Regional Dinner: House Regional Specialties`,`Regional Dinner: Seasonal Culinary Finale`][di%4],description:`Finish with a complete savory regional dinner at a well-reviewed local restaurant, with a menu suited to the destination and evening.`,location:destination,cost:'Check current menu'});
       }
 
       // Do not use major remote sightseeing as a late-night filler in a Food Explorer day.
@@ -2561,27 +2562,44 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
       });
     }
 
-    // Luxury meal semantics: a signature dinner cannot be a breakfast/light/street-food item.
+    // Luxury meal semantics: lunch/dinner must be a complete upscale meal, never breakfast/light/street-food/snack items.
     if(style==='luxury') {
       const foodForActivity=(a:any)=>foods.find((f:any)=>{ const fk=norm(f?.name); const ak=norm(`${a?.title||''} ${a?.description||''}`); return fk && ak.includes(fk); }) || null;
       for(const a of acts){
-        if(!/dinner|signature dining/i.test(String(a?.title||''))) continue;
+        const title=String(a?.title||'');
+        const role=/dinner|signature dining/i.test(title)?'dinner':/lunch/i.test(title)?'lunch':'';
+        if(!role) continue;
         const f=foodForActivity(a);
-        const light=/breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette/i.test(`${f?.description||''} ${f?.name||''} ${a?.description||''}`) || (f && isSnack(f));
+        const light=/breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette|small plate/i.test(`${f?.description||''} ${f?.name||''} ${a?.description||''}`) || (f && isSnack(f));
         if(light){
-          const replacement=savory.find((x:any)=>!usedMeals.has(norm(x?.name)) && !/breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette/i.test(`${x?.description||''} ${x?.name||''}`));
+          const replacement=savory.find((x:any)=>!usedMeals.has(norm(x?.name)) && !/breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette|small plate/i.test(`${x?.description||''} ${x?.name||''}`));
           if(replacement){
             usedMeals.add(norm(replacement.name));
-            Object.assign(a,foodActivity(a.time||'08:00 PM',replacement,'Signature Dinner'));
-            a.description=`Enjoy ${replacement.name} as a complete upscale regional dinner with comfortable service and advance reservations where useful.`;
+            Object.assign(a,foodActivity(a.time||(role==='dinner'?'08:00 PM':'02:00 PM'),replacement,role==='dinner'?'Signature Dinner':'Upscale Regional Lunch'));
+            a.description=role==='dinner'
+              ? `Enjoy ${replacement.name} as a complete upscale regional dinner with comfortable service and advance reservations where useful.`
+              : `Enjoy ${replacement.name} as a complete upscale regional lunch at a comfortable, well-reviewed venue.`;
           } else {
-            a.title='Signature Dinner: Seasonal Regional Tasting Menu';
-            a.description=`Choose an acclaimed upscale restaurant or hotel dining room for a complete multi-course regional dinner featuring seasonal specialties.`;
+            a.title=role==='dinner'?'Signature Dinner: Seasonal Regional Tasting Menu':'Upscale Regional Lunch: Seasonal Regional Menu';
+            a.description=role==='dinner'
+              ? `Enjoy a complete multi-course regional dinner at an acclaimed upscale restaurant or hotel dining room.`
+              : `Enjoy a complete regional lunch at a well-reviewed upscale restaurant with seasonal specialties.`;
             a.location=destination;
-            a.cost='Fine dining - check current menu';
+            a.cost=role==='dinner'?'Fine dining - check current menu':'Premium dining - check current menu';
           }
         }
       }
+
+      // A polished itinerary should never contain two breakfasts, two lunches or two dinners on the same day.
+      const seenMealRole=new Set<string>();
+      acts=acts.filter((a:any)=>{
+        const title=String(a?.title||'');
+        const role=/breakfast|brunch/i.test(title)?'breakfast':/lunch/i.test(title)?'lunch':/dinner|signature dining/i.test(title)?'dinner':'';
+        if(!role) return true;
+        if(seenMealRole.has(role)) return false;
+        seenMealRole.add(role);
+        return true;
+      });
     }
 
     // For Luxury, replace removed duplicate attractions with an elevated non-duplicate experience.
@@ -2628,7 +2646,8 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
       if(!transfer) continue;
       const visitMin=parseTime(visit?.time);
       let transferMin=parseTime(transfer?.time);
-      if(transferMin>=visitMin || visitMin-transferMin>180) {
+      const between = acts.some((other:any) => other !== transfer && other !== visit && parseTime(other?.time) > transferMin && parseTime(other?.time) < visitMin);
+      if(transferMin>=visitMin || visitMin-transferMin>120 || between) {
         transferMin=Math.max(7*60,visitMin-75);
         transfer.time=fmtTime(transferMin);
       }
@@ -2680,7 +2699,8 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
         const visit=acts.find((x:any)=>!/(transfer|chauffeur|drive|travel to)/i.test(String(x?.title||'')) && placeMatch(x) && norm(placeMatch(x)?.name)===pk);
         if(visit && parseTime(a?.time,ai)>=parseTime(visit?.time,ai)) errors.push(`day ${i+1} has transfer to ${p.name} after or at the visit time`);
         const raw=String(a?.cost||'').trim(), entry=String(p?.entryFee||'').trim();
-        if(raw && entry && raw===entry) errors.push(`day ${i+1} copies ${p.name} admission into transfer cost`);
+        const numericLike=/^[₹$€£¥]?\s*[0-9][0-9,]*(?:\.[0-9]+)?$/.test(raw) || /^free$/i.test(raw);
+        if(raw && ((entry && raw===entry) || numericLike)) errors.push(`day ${i+1} uses an admission-like amount as transfer cost for ${p.name}`);
       }
       if(p&&!isTransfer){
         const pk=norm(p.name); const prev=seenPlaces.get(pk); if(prev!=null&&prev!==i) errors.push(`day ${i+1} repeats attraction ${p.name} from day ${prev+1}`); else seenPlaces.set(pk,i);
@@ -2700,7 +2720,16 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
     days.forEach((d:any,i:number)=>{ const acts=Array.isArray(d?.activities)?d.activities:[]; if(!acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks breakfast/brunch`); if(!acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks lunch`); if(!acts.some((a:any)=>/dinner|signature dining/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks dinner`); if(acts.length<4)errors.push(`Food Explorer day ${i+1} has fewer than four meaningful culinary blocks`); });
   }
   if(String(itinerary?.travelStyle||'').toLowerCase().trim()==='luxury'){
-    days.forEach((d:any,i:number)=>{ for(const a of (Array.isArray(d?.activities)?d.activities:[])){ if(/dinner|signature dining/i.test(String(a?.title||'')) && /breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette/i.test(`${a?.title||''} ${a?.description||''}`)) errors.push(`Luxury day ${i+1} uses a breakfast/light/snack item as dinner`); } });
+    days.forEach((d:any,i:number)=>{
+      const roleCount={breakfast:0,lunch:0,dinner:0};
+      for(const a of (Array.isArray(d?.activities)?d.activities:[])){
+        const title=String(a?.title||'');
+        const role=/breakfast|brunch/i.test(title)?'breakfast':/lunch/i.test(title)?'lunch':/dinner|signature dining/i.test(title)?'dinner':'';
+        if(role) roleCount[role as keyof typeof roleCount]++;
+        if(/lunch|dinner|signature dining/i.test(title) && /breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette|small plate/i.test(`${a?.title||''} ${a?.description||''}`)) errors.push(`Luxury day ${i+1} uses a breakfast/light/snack item as ${/lunch/i.test(title)?'lunch':'dinner'}`);
+      }
+      if(roleCount.breakfast>1||roleCount.lunch>1||roleCount.dinner>1) errors.push(`Luxury day ${i+1} contains duplicate primary meal slots`);
+    });
   }
   return Array.from(new Set(errors));
 }
@@ -4745,7 +4774,7 @@ app.post("/api/open-weather", async (req, res) => {
 
     // Query 5-day daily forecast from Open-Meteo
     console.log(`[Weather Fetch] Fetching 5-day forecast from Open-Meteo for lat: ${lat}, lon: ${lon}...`);
-    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto`;
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&hourly=relative_humidity_2m&timezone=auto`;
     const weatherRes = await fetch(weatherUrl);
     if (!weatherRes.ok) {
       throw new Error(`Open-Meteo request failed: ${weatherRes.statusText}`);
@@ -4801,19 +4830,36 @@ app.post("/api/open-weather", async (req, res) => {
         dayName = d.toLocaleDateString("en-US", { weekday: "short" });
       }
 
+      const dayHumidityValues = Array.isArray(weatherData?.hourly?.relative_humidity_2m)
+        ? weatherData.hourly.relative_humidity_2m.slice(i * 24, i * 24 + 24).filter((v: any) => Number.isFinite(Number(v))).map(Number)
+        : [];
+      const humidityAvg = dayHumidityValues.length
+        ? Math.round(dayHumidityValues.reduce((sum: number, value: number) => sum + value, 0) / dayHumidityValues.length)
+        : null;
+
       forecast.push({
         dayName,
         date: dateStr,
         tempMax: Math.round(daily.temperature_2m_max?.[i] ?? 25),
         tempMin: Math.round(daily.temperature_2m_min?.[i] ?? 15),
         condition: mapping.condition,
-        iconType: mapping.iconType
+        iconType: mapping.iconType,
+        precipitation: `${Math.round(Number(daily.precipitation_probability_max?.[i] ?? 0))}%`,
+        humidity: humidityAvg == null ? "—" : `${humidityAvg}%`
       });
     }
 
+    const rainy = forecast.filter((d: any) => /rain|drizzle|storm|shower/i.test(String(d.condition))).length;
+    const maxTemp = forecast.length ? Math.max(...forecast.map((d: any) => Number(d.tempMax) || 0)) : null;
+    const minTemp = forecast.length ? Math.min(...forecast.map((d: any) => Number(d.tempMin) || 0)) : null;
     const result = {
       destination,
-      forecast
+      summary: forecast.length
+        ? `${forecast.length}-day outlook: ${rainy ? `${rainy} day${rainy === 1 ? "" : "s"} with rain/showers possible. ` : "Mostly dry conditions expected. "}${minTemp}°C to ${maxTemp}°C.`
+        : `Weather forecast for ${destination}.`,
+      forecast,
+      sources: [{ title: "Open-Meteo", url: "https://open-meteo.com/" }],
+      isFallback: false
     };
 
     OPEN_WEATHER_CACHE.set(cacheKey, {
