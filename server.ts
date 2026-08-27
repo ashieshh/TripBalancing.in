@@ -2145,6 +2145,24 @@ function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string
 
 
 /**
+ * One shared definition of a COMPLETE lunch/dinner item.
+ * Every travel style and every generation path must use this rule before putting
+ * a named food into a primary meal slot. Tastings/snacks can still appear as
+ * separate activities; they just cannot masquerade as lunch or dinner.
+ */
+function isCompleteMealFood(food: any, role: 'lunch' | 'dinner' = 'dinner') {
+  if (!food) return false;
+  const kind = String(food?.type || '').toLowerCase().trim();
+  const text = `${food?.name || ''} ${food?.description || ''} ${food?.type || ''}`.toLowerCase();
+
+  if (/(dessert|beverage|drink|tasting|snack|sweet)/i.test(kind)) return false;
+  if (/(dessert|sweet|cake|pastr(?:y|ies)|ice cream|gelato|pudding|cookie|biscuit|macaron|bebinca|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni|coffee|tea|juice|lassi|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|digestive|tasting|snack)/i.test(text)) return false;
+  if (/(breakfast|bakery|bread paired|small plate)/i.test(text)) return false;
+  if (role === 'dinner' && /(omelette|toast|salad only)/i.test(text)) return false;
+  return true;
+}
+
+/**
  * Final shared food-semantics guard.
  *
  * This runs for BOTH Gemini output and curated fallback output immediately before
@@ -2161,10 +2179,9 @@ function normalizeFinalFoodSemantics(itinerary: any) {
     if (kind === 'dessert' || kind === 'beverage') return true;
     return /(dessert|sweet|cake|pastry|ice cream|pudding|cookie|macaron|bebinca|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|digestive)/i.test(textOf(f));
   };
-  const savoryFoods = foods.filter((f: any) => !isSnackOrDrink(f));
-  if (!savoryFoods.length) return itinerary;
+  const savoryFoods = foods.filter((f: any) => isCompleteMealFood(f, 'lunch') || isCompleteMealFood(f, 'dinner'));
 
-  const mealTitle = /(breakfast|brunch|lunch|dinner)/i;
+  const mealTitle = /(breakfast|brunch|lunch|dinner|signature dining|upscale regional dining|regional meal|evening meal)/i;
   const tastingTitle = /(tasting|dessert|snack|beverage|drink|after[- ]?dinner|coffee|tea)/i;
   const findMentionedFood = (activity: any) => {
     const hay = `${activity?.title || ''} ${activity?.description || ''}`.toLowerCase();
@@ -2184,11 +2201,27 @@ function normalizeFinalFoodSemantics(itinerary: any) {
 
       const mentioned = findMentionedFood(activity);
       const activityText = `${title} ${activity?.description || ''}`;
-      const semanticallySnack = mentioned ? isSnackOrDrink(mentioned) : /(bebinca|feni|dessert|pastry|cake|sweet|cocktail|wine|beer|spirit|liqueur|beverage)/i.test(activityText);
-      if (!semanticallySnack) return activity;
+      const mins = (() => { const m=String(activity?.time||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/); if(!m) return 19*60; let h=Number(m[1])%12; if(m[3]==='PM')h+=12; return h*60+Number(m[2]||0); })();
+      const role: 'lunch'|'dinner' = /lunch/i.test(title) ? 'lunch' : (/dinner|signature dining/i.test(title) || (/upscale regional dining|regional meal|evening meal/i.test(title) && mins >= 17*60)) ? 'dinner' : 'lunch';
+      const semanticallyInvalid = mentioned
+        ? !isCompleteMealFood(mentioned, role)
+        : /(bebinca|feni|dessert|pastry|cake|sweet|cocktail|wine|beer|spirit|liqueur|beverage|lassi|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|snack|tasting)/i.test(activityText);
+      // Breakfast/brunch has its own semantic guard elsewhere. Here we protect every
+      // primary lunch/dinner/dining label, including Luxury "Upscale Regional Dining".
+      if (!semanticallyInvalid || /breakfast|brunch/i.test(title)) return activity;
 
-      const replacement = savoryFoods[(dayIndex + activityIndex + savoryCursor++) % savoryFoods.length];
-      const mealLabel = /breakfast/i.test(title) ? 'Regional Breakfast' : /brunch/i.test(title) ? 'Regional Brunch' : /lunch/i.test(title) ? 'Regional Lunch' : 'Signature Dinner';
+      const eligible = savoryFoods.filter((f:any)=>isCompleteMealFood(f, role));
+      const replacement = eligible.length ? eligible[(dayIndex + activityIndex + savoryCursor++) % eligible.length] : null;
+      const mealLabel = role === 'dinner' ? (/upscale|luxury/i.test(title) ? 'Upscale Regional Dinner' : 'Signature Dinner') : (/upscale|luxury/i.test(title) ? 'Upscale Regional Lunch' : 'Regional Lunch');
+      if (!replacement) {
+        return {
+          ...activity,
+          title: role === 'dinner' ? 'Upscale Regional Dinner: Chef\'s Local Seasonal Menu' : 'Upscale Regional Lunch: Chef\'s Local Seasonal Menu',
+          description: `Choose a complete savory ${role} at a reputable, well-reviewed restaurant in ${itinerary.destination || 'the destination'}. Snacks, desserts, beverages and tastings must remain separate stops.`,
+          location: itinerary.destination || activity?.location,
+          cost: activity?.cost || 'Per person - verify menu'
+        };
+      }
       const oldName = String(mentioned?.name || '').trim();
       const newTitle = oldName && title.toLowerCase().includes(oldName.toLowerCase())
         ? title.replace(new RegExp(oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), String(replacement.name || 'Regional Meal'))
@@ -2410,9 +2443,9 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
   const isSnack=(f:any)=>/(dessert|tasting|beverage|drink|cocktail|wine|beer|spirit|liqueur|feni|cake|pastr(?:y|ies)|sweet|bebinca|macaron|croissant|pain au chocolat|cookie|biscuit|gelato|ice cream|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|digestive)/i.test(`${f?.name||''} ${f?.type||''} ${f?.description||''}`);
   const isSuitableMainMeal=(f:any, role:'lunch'|'dinner')=>{
     const text=`${f?.name||''} ${f?.type||''} ${f?.description||''}`;
-    if(isSnack(f)) return false;
-    if(/breakfast|light meal|street[- ]?food|snack|bakery|bread paired|small plate|\bpaan\b|betel[- ]?leaf|mouth freshener|digestive/i.test(text)) return false;
-    if(role==='dinner' && /omelette|soup|sandwich|toast|salad only/i.test(text)) return false;
+    if(!isCompleteMealFood(f, role)) return false;
+    if(/light meal|street[- ]?food|small plate/i.test(text)) return false;
+    if(role==='dinner' && /soup|sandwich/i.test(text)) return false;
     return true;
   };
   const isSuitableBreakfast=(f:any)=>{
@@ -2750,7 +2783,8 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
       const foodForActivity=(a:any)=>foods.find((f:any)=>{ const fk=norm(f?.name); const ak=norm(`${a?.title||''} ${a?.description||''}`); return fk && ak.includes(fk); }) || null;
       for(const a of acts){
         const title=String(a?.title||'');
-        const role=/dinner|signature dining/i.test(title)?'dinner':/lunch/i.test(title)?'lunch':'';
+        const atMinutes=parseTime(a?.time||'',0);
+        const role=/dinner|signature dining/i.test(title)?'dinner':/lunch/i.test(title)?'lunch':/upscale regional dining|regional dining|evening meal/i.test(title)?(atMinutes>=17*60?'dinner':'lunch'):'';
         if(!role) continue;
         const f=foodForActivity(a);
         const light=!!f && !isSuitableMainMeal(f,role as 'lunch'|'dinner');
@@ -3031,7 +3065,11 @@ function finalizeItineraryForUser(itinerary:any, exactDays:number) {
   // can re-introduce overlaps or incomplete Food Explorer days.
   const exactRouted = applySmartRouteAndTransport(enforceExactTripDays(routedPass2, exactDays));
   const finalCustomer = normalizeCustomerFacingItinerary(exactRouted);
-  return reconcileItineraryBudget(finalCustomer);
+  // ABSOLUTE FINAL semantic pass shared by every travel style. Customer-facing
+  // enrichment can add Luxury/Wellness/etc. dining blocks, so validate complete
+  // meal semantics only after all of those blocks have been created.
+  const finalFoodSafe = normalizeFinalFoodSemantics(finalCustomer);
+  return reconcileItineraryBudget(finalFoodSafe);
 }
 
 function applySmartRouteAndTransport(itinerary: any) {
@@ -4358,16 +4396,12 @@ Return the response in strict JSON format.`;
     const foodItems = Array.isArray(details.food) ? details.food : [];
     const foodKind = (item: any) => String(item?.type || '').toLowerCase().trim();
     const foodText = (item: any) => `${item?.name || ''} ${item?.description || ''}`.toLowerCase();
-    const isSnackOrDrink = (item: any) => {
-      const kind = foodKind(item);
-      if (kind === 'dessert' || kind === 'beverage') return true;
-      return /(dessert|sweet|cake|pastry|ice cream|pudding|cookie|macaron|bebinca|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni|coffee|tea)/i.test(foodText(item));
-    };
-    const savoryMeals = foodItems.filter((item: any) => !isSnackOrDrink(item));
+    const isSnackOrDrink = (item: any) => !isCompleteMealFood(item, 'lunch');
+    const savoryMeals = foodItems.filter((item: any) => isCompleteMealFood(item, 'lunch') || isCompleteMealFood(item, 'dinner'));
     const tastingItems = foodItems.filter((item: any) => isSnackOrDrink(item));
     const mealAt = (index: number) => savoryMeals.length
       ? savoryMeals[index % savoryMeals.length]
-      : (foodItems[index % Math.max(1, foodItems.length)] || { name: 'Regional Meal', description: 'Choose a reputable restaurant serving a complete regional meal.', mustTryAt: `${destination} acclaimed restaurant` });
+      : ({ name: "Chef's Local Seasonal Menu", description: `Choose a complete savory regional meal at a reputable restaurant in ${destination}.`, mustTryAt: `${destination} acclaimed restaurant` });
     const tastingAt = (index: number) => tastingItems.length
       ? tastingItems[index % tastingItems.length]
       : (foodItems[(index + 1) % Math.max(1, foodItems.length)] || { name: 'Regional Tasting', description: 'Add a destination-specific dessert, beverage or tasting.', mustTryAt: `${destination} specialty shop` });
