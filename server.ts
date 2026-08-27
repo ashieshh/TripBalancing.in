@@ -2159,7 +2159,7 @@ function normalizeFinalFoodSemantics(itinerary: any) {
   const isSnackOrDrink = (f: any) => {
     const kind = String(f?.type || '').toLowerCase().trim();
     if (kind === 'dessert' || kind === 'beverage') return true;
-    return /(dessert|sweet|cake|pastry|ice cream|pudding|cookie|macaron|bebinca|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni)/i.test(textOf(f));
+    return /(dessert|sweet|cake|pastry|ice cream|pudding|cookie|macaron|bebinca|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|digestive)/i.test(textOf(f));
   };
   const savoryFoods = foods.filter((f: any) => !isSnackOrDrink(f));
   if (!savoryFoods.length) return itinerary;
@@ -2407,11 +2407,11 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
     .replace(/\s+/g,' ').trim();
   const parseTime=(v:any,idx=0)=>{ const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/); if(!m)return 9*60+idx*150; let h=Number(m[1])%12; if(m[3]==='PM')h+=12; return h*60+Number(m[2]||0); };
   const fmtTime=(mins:number)=>{ mins=Math.max(7*60,Math.min(23*60+30,Math.round(mins/15)*15)); const h24=Math.floor(mins/60), mm=mins%60, ap=h24>=12?'PM':'AM', h=h24%12||12; return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`; };
-  const isSnack=(f:any)=>/(dessert|tasting|beverage|drink|cocktail|wine|beer|spirit|liqueur|feni|cake|pastr(?:y|ies)|sweet|bebinca|macaron|croissant|pain au chocolat|cookie|biscuit|gelato|ice cream)/i.test(`${f?.name||''} ${f?.type||''} ${f?.description||''}`);
+  const isSnack=(f:any)=>/(dessert|tasting|beverage|drink|cocktail|wine|beer|spirit|liqueur|feni|cake|pastr(?:y|ies)|sweet|bebinca|macaron|croissant|pain au chocolat|cookie|biscuit|gelato|ice cream|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|digestive)/i.test(`${f?.name||''} ${f?.type||''} ${f?.description||''}`);
   const isSuitableMainMeal=(f:any, role:'lunch'|'dinner')=>{
     const text=`${f?.name||''} ${f?.type||''} ${f?.description||''}`;
     if(isSnack(f)) return false;
-    if(/breakfast|light meal|street[- ]?food|snack|bakery|bread paired|small plate/i.test(text)) return false;
+    if(/breakfast|light meal|street[- ]?food|snack|bakery|bread paired|small plate|\bpaan\b|betel[- ]?leaf|mouth freshener|digestive/i.test(text)) return false;
     if(role==='dinner' && /omelette|soup|sandwich|toast|salad only/i.test(text)) return false;
     return true;
   };
@@ -2730,6 +2730,19 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
         const f=activityFood(a);
         if(f) usedNamedFoods.add(norm(f.name));
       }
+
+      // FINAL GLOBAL Food Explorer completeness guard. Run after every semantic replacement/removal so
+      // a depleted local-food pool can never leave a day without breakfast, lunch, an afternoon
+      // tasting/food-craft block, or dinner. Generic fallbacks are customer-facing and destination-neutral.
+      const hasFinalBreakfast=acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||'')) && parseTime(a?.time)<=11*60);
+      const hasFinalLunch=acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||'')) && parseTime(a?.time)>=11*60 && parseTime(a?.time)<=16*60);
+      const hasFinalTasting=acts.some((a:any)=>/tasting|dessert|food craft|beverage|producer|bakery/i.test(String(a?.title||'')) && parseTime(a?.time)>=14*60 && parseTime(a?.time)<=18*60+30);
+      const hasFinalDinner=acts.some((a:any)=>/dinner|evening meal|signature dining/i.test(String(a?.title||'')) && parseTime(a?.time)>=18*60);
+      if(!hasFinalBreakfast) acts.push({time:'08:30 AM',title:'Local Breakfast & Bakery Stop',description:`Begin with a destination-specific breakfast featuring a locally appropriate bakery, savoury breakfast item and regional beverage in ${destination}.`,location:destination,cost:'Check current menu'});
+      if(!hasFinalLunch) acts.push({time:'01:00 PM',title:'Regional Lunch: Local Seasonal Main',description:`Enjoy a complete savory regional lunch at a well-reviewed restaurant in ${destination}, chosen around local seasonal specialties.`,location:destination,cost:'Check current menu'});
+      if(!hasFinalTasting) acts.push({time:'04:00 PM',title:'Local Food Craft / Tasting',description:`Choose a destination-specific bakery, dessert, beverage, spice, producer or other food-craft tasting experience in ${destination}.`,location:destination,cost:'Check current price'});
+      if(!hasFinalDinner) acts.push({time:'07:30 PM',title:'Regional Dinner: Local Seasonal Main',description:`Finish with a complete savory regional dinner at a well-reviewed restaurant in ${destination}, featuring a proper main course rather than a snack, dessert or beverage.`,location:destination,cost:'Check current menu'});
+      acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
     }
 
     // Luxury meal semantics: lunch/dinner must be a complete upscale meal, never breakfast/light/street-food/snack items.
@@ -2856,7 +2869,7 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
         return Math.max(20,Math.min(90,travel||45));
       }
       if(/spa|wellness|recovery/i.test(t)) return 90;
-      if(/breakfast|lunch|dinner|brunch/i.test(t)) return 75;
+      if(/breakfast|lunch|dinner|brunch/i.test(t)){ const explicitMeal=durationTextToMinutes(a?.visitDuration); return Math.max(60,Math.min(180,explicitMeal||75)); }
       if(/tasting|bakery|food craft|market/i.test(t)) return 60;
       if(/private cultural|design experience|evening leisure|culinary experience/i.test(t)) return 90;
       const explicit=durationTextToMinutes(a?.visitDuration);
@@ -2988,7 +3001,7 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
     for(let j=0;j<acts.length-1;j++){ const start=parseTime(acts[j]?.time,j), next=parseTime(acts[j+1]?.time,j+1); if(next < start + Math.max(30,duration(acts[j]))) errors.push(`day ${i+1} contains overlapping activity times`); }
   });
   if(String(itinerary?.travelStyle||'').toLowerCase().trim()==='food explorer'){
-    days.forEach((d:any,i:number)=>{ const acts=Array.isArray(d?.activities)?d.activities:[]; if(!acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks breakfast/brunch`); if(!acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks lunch`); if(!acts.some((a:any)=>/dinner|signature dining/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks dinner`); if(acts.length<4)errors.push(`Food Explorer day ${i+1} has fewer than four meaningful culinary blocks`); });
+    days.forEach((d:any,i:number)=>{ const acts=Array.isArray(d?.activities)?d.activities:[]; if(!acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks breakfast/brunch`); if(!acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks lunch`); if(!acts.some((a:any)=>/dinner|signature dining/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks dinner`); if(!acts.some((a:any)=>/tasting|dessert|food craft|beverage|producer|bakery/i.test(String(a?.title||'')) && parseTime(a?.time,0)>=14*60))errors.push(`Food Explorer day ${i+1} lacks an afternoon tasting/food-craft block`); if(acts.length<4)errors.push(`Food Explorer day ${i+1} has fewer than four meaningful culinary blocks`); });
   }
   if(String(itinerary?.travelStyle||'').toLowerCase().trim()==='luxury'){
     days.forEach((d:any,i:number)=>{
@@ -2997,7 +3010,7 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
         const title=String(a?.title||'');
         const role=/breakfast|brunch/i.test(title)?'breakfast':/lunch/i.test(title)?'lunch':/dinner|signature dining/i.test(title)?'dinner':'';
         if(role) roleCount[role as keyof typeof roleCount]++;
-        if(/lunch|dinner|signature dining/i.test(title) && /breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette|small plate|croissant|pain au chocolat|pastr(?:y|ies)|macaron|dessert|beverage/i.test(`${a?.title||''} ${a?.description||''}`)) errors.push(`Luxury day ${i+1} uses a breakfast/light/snack item as ${/lunch/i.test(title)?'lunch':'dinner'}`);
+        if(/lunch|dinner|signature dining/i.test(title) && /breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette|small plate|croissant|pain au chocolat|pastr(?:y|ies)|macaron|dessert|beverage|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener/i.test(`${a?.title||''} ${a?.description||''}`)) errors.push(`Luxury day ${i+1} uses a breakfast/light/snack item as ${/lunch/i.test(title)?'lunch':'dinner'}`);
       }
       if(roleCount.breakfast>1||roleCount.lunch>1||roleCount.dinner>1) errors.push(`Luxury day ${i+1} contains duplicate primary meal slots`);
     });
@@ -3013,7 +3026,12 @@ function finalizeItineraryForUser(itinerary:any, exactDays:number) {
   const routedPass1 = applySmartRouteAndTransport(customerPass1);
   const customerPass2 = normalizeCustomerFacingItinerary(routedPass1);
   const routedPass2 = applySmartRouteAndTransport(customerPass2);
-  return reconcileItineraryBudget(enforceExactTripDays(routedPass2, exactDays));
+  // Exact-day repair and route enrichment can introduce/expand final blocks. Normalize ONE LAST TIME
+  // after that data is final so collision checks see the actual visitDuration and no downstream step
+  // can re-introduce overlaps or incomplete Food Explorer days.
+  const exactRouted = applySmartRouteAndTransport(enforceExactTripDays(routedPass2, exactDays));
+  const finalCustomer = normalizeCustomerFacingItinerary(exactRouted);
+  return reconcileItineraryBudget(finalCustomer);
 }
 
 function applySmartRouteAndTransport(itinerary: any) {

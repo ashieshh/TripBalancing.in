@@ -662,8 +662,12 @@ const drawMiniRouteMap = (doc: any, x: number, y: number, w: number, h: number, 
 
   if (!activities || activities.length === 0) return;
 
-  const nodes = Math.min(activities.length, 5);
+  const nodes = activities.length;
   const step = (w - 16) / (nodes - 1 || 1);
+  // Render every activity dynamically. Shrink icons/labels as the stop count grows instead of dropping stops.
+  const nodeRadius = nodes <= 5 ? 3.2 : nodes <= 7 ? 2.7 : 2.3;
+  const labelMax = nodes <= 5 ? 10 : nodes <= 7 ? 8 : 6;
+  const labelFont = nodes <= 5 ? 5.5 : nodes <= 7 ? 4.7 : 4.1;
   
   // Draw premium track: dashed teal connector line
   doc.setDrawColor(13, 148, 136);
@@ -680,7 +684,7 @@ const drawMiniRouteMap = (doc: any, x: number, y: number, w: number, h: number, 
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(13, 148, 136);
     doc.setLineWidth(0.5);
-    doc.circle(cx, cy, 3.2, "FD");
+    doc.circle(cx, cy, nodeRadius, "FD");
 
     // Draw distinct node icons: Hotel icon for 1st stop, MapPin for others
     if (i === 0) {
@@ -705,9 +709,9 @@ const drawMiniRouteMap = (doc: any, x: number, y: number, w: number, h: number, 
 
     // Stop Label
     const rawTitle = activities[i].title || "Stop";
-    const label = rawTitle.length > 12 ? rawTitle.substring(0, 10) + ".." : rawTitle;
+    const label = rawTitle.length > labelMax + 2 ? rawTitle.substring(0, labelMax) + ".." : rawTitle;
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(5.5);
+    doc.setFontSize(labelFont);
     doc.setTextColor(51, 65, 85);
     
     const isEven = i % 2 === 0;
