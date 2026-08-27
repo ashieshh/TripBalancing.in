@@ -662,7 +662,7 @@ const drawMiniRouteMap = (doc: any, x: number, y: number, w: number, h: number, 
 
   if (!activities || activities.length === 0) return;
 
-  const nodes = Math.min(activities.length, 4);
+  const nodes = Math.min(activities.length, 5);
   const step = (w - 16) / (nodes - 1 || 1);
   
   // Draw premium track: dashed teal connector line
@@ -2191,7 +2191,7 @@ export const exportPremiumTravelPDF = async (
           .replace(/taxiFine/ig, "taxi • Fine")
           .trim();
         // Leading separator keeps adjacent metadata badges visually and textually distinct in exported PDFs.
-        const costVal = `• ${rawCostVal}`;
+        const costVal = `\u00A0• ${rawCostVal}`;
         doc.setFillColor(254, 243, 199);
         doc.roundedRect(cardX + 51, badgeY2 - 3, 24, 4.2, 0.8, 0.8, "F");
         doc.setFont("helvetica", "bold");

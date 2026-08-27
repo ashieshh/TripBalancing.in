@@ -2407,7 +2407,7 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
     .replace(/\s+/g,' ').trim();
   const parseTime=(v:any,idx=0)=>{ const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/); if(!m)return 9*60+idx*150; let h=Number(m[1])%12; if(m[3]==='PM')h+=12; return h*60+Number(m[2]||0); };
   const fmtTime=(mins:number)=>{ mins=Math.max(7*60,Math.min(23*60+30,Math.round(mins/15)*15)); const h24=Math.floor(mins/60), mm=mins%60, ap=h24>=12?'PM':'AM', h=h24%12||12; return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`; };
-  const isSnack=(f:any)=>/(dessert|beverage|drink|cocktail|wine|beer|spirit|liqueur|feni|cake|pastr(?:y|ies)|sweet|bebinca|macaron|croissant|pain au chocolat|cookie|biscuit|gelato|ice cream)/i.test(`${f?.name||''} ${f?.type||''} ${f?.description||''}`);
+  const isSnack=(f:any)=>/(dessert|tasting|beverage|drink|cocktail|wine|beer|spirit|liqueur|feni|cake|pastr(?:y|ies)|sweet|bebinca|macaron|croissant|pain au chocolat|cookie|biscuit|gelato|ice cream)/i.test(`${f?.name||''} ${f?.type||''} ${f?.description||''}`);
   const isSuitableMainMeal=(f:any, role:'lunch'|'dinner')=>{
     const text=`${f?.name||''} ${f?.type||''} ${f?.description||''}`;
     if(isSnack(f)) return false;
@@ -2418,9 +2418,10 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
   const isSuitableBreakfast=(f:any)=>{
     const text=`${f?.name||''} ${f?.type||''} ${f?.description||''}`.toLowerCase();
     if(/beverage|cocktail|wine|beer|spirit|liqueur|feni|dessert only/i.test(text)) return false;
-    if(/breakfast|brunch|bakery|bread|croissant|pain au chocolat|pastr(?:y|ies)|omelette|egg|toast|pancake|waffle|cereal|porridge|yogurt|fruit|poi|bhaji|buns/i.test(text)) return true;
-    // Main-course soups, curries, stews and heavy dinner dishes should not be silently relabelled as breakfast.
-    if(/soup|curry|stew|roast|steak|seafood|fish curry|balchao|xacuti|ratatouille|pasta|risotto|burger/i.test(text)) return false;
+    // Reject clear main-course dishes before looking for breakfast words. This avoids false positives such as
+    // "French Onion Soup ... toasted baguette" matching the word "toast" inside "toasted".
+    if(/\b(soup|curry|stew|roast|steak|seafood|balchao|xacuti|ratatouille|pasta|risotto|burger|bourguignon)\b|fish curry/i.test(text)) return false;
+    if(/\b(breakfast|brunch|bakery|bread|croissant|omelette|egg|toast|pancake|waffle|cereal|porridge|yogurt|fruit|poi|bhaji|buns|tartine)\b|pain au chocolat|pastr(?:y|ies)/i.test(text)) return true;
     return false;
   };
   const savory=foods.filter((f:any)=>f?.name && !isSnack(f));
@@ -2581,6 +2582,27 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
               : `Enjoy a complete savory regional lunch at a well-reviewed restaurant in ${destination}, featuring seasonal local specialties.`;
             a.location=destination;
             a.cost='Check current menu';
+          }
+        }
+      }
+
+      // Replace generic culinary placeholders with unused destination-specific foods whenever the data pool can support it.
+      // This keeps later Food Explorer days specific instead of exposing labels such as “Chef's Seasonal Menu”.
+      for(const a of acts){
+        const title=String(a?.title||'');
+        const genericMain=/Neighborhood Kitchen Selection|Chef['’]s Seasonal(?: Local)? Menu|Market-Inspired Regional Menu|Local Tasting Menu|Regional House Specialties|Seasonal Regional Menu/i.test(title);
+        const genericTaste=/Regional Beverage & Snack Tasting|Seasonal Food Craft Experience|Local Food Craft \/ Tasting|Bakery & Confectionery Tasting|Local Producer \/ Spice Tasting/i.test(title);
+        if(genericMain){
+          const role=/dinner/i.test(title)?'dinner':'lunch';
+          const replacement=savory.find((x:any)=>x?.name && !usedMeals.has(norm(x.name)) && isSuitableMainMeal(x,role as 'lunch'|'dinner'));
+          if(replacement){
+            usedMeals.add(norm(replacement.name));
+            Object.assign(a,foodActivity(a.time||(role==='dinner'?'07:30 PM':'01:00 PM'),replacement,role==='dinner'?'Regional Dinner':'Regional Lunch'));
+          }
+        } else if(genericTaste){
+          const replacement=tastings.find((x:any)=>x?.name && !usedTastings.has(norm(x.name)));
+          if(replacement){
+            Object.assign(a,foodActivity(a.time||'04:00 PM',replacement,'Tasting / Food Craft'));
           }
         }
       }
@@ -3642,7 +3664,7 @@ Please tailor the recommendations explicitly:
    - Specific local transit/transportation suggestions for that day ('transportationSuggestions' field).
    - Estimated daily budget for that day ('dailyBudget' field).
 4. CRITICAL: For longer trips (up to 365 days), make sure to generate entries for every requested day without omitting or skipping any days. Keep daily descriptions concise but complete to stay within token limits.
-5. The "localFood" recommendations should describe must-try street foods and popular restaurants, explicitly labeling veg/non-veg.
+5. The "localFood" recommendations should describe must-try street foods and popular restaurants, explicitly labeling veg/non-veg. For Food Explorer, return enough distinct localFood entries to support the entire trip without generic filler: normally at least 2 distinct entries per day, including breakfast-appropriate items, savory lunch/dinner items, and separate tasting/dessert/beverage items.
 6. Estimate highly realistic, accurate budgets based on the destination's current average living costs, the travel style (${travelStyle}), duration (${diffDays} days), and number of travelers (${travelers}).
    - You MUST estimate expected cost ranges (a minimum expected cost and a maximum expected cost, e.g., "₹10,000 - ₹15,000" or "$150 - $220") instead of a single fixed value for each.
    - Breakdown costs into 6 specific categories:
@@ -4061,13 +4083,23 @@ Return the response in strict JSON format.`;
           { name: "Eiffel Tower", description: "Iconic wrought-iron lattice tower on the Champ de Mars, symbol of France.", bestTimeToVisit: "Sunset & Night sparkle", entryFee: "€18 - €28" },
           { name: "Louvre Museum", description: "The world's largest art museum, housing Mona Lisa and Venus de Milo.", bestTimeToVisit: "Morning (Pre-booked slots)", entryFee: "€22" },
           { name: "Notre-Dame Cathedral", description: "A masterpiece of French Gothic architecture on Île de la Cité.", bestTimeToVisit: "Early Afternoon", entryFee: "Free to enter" },
-          { name: "Montmartre & Sacré-Cœur", description: "Bohemian neighborhood with artists, cobblestone alleys, and a beautiful basilica overlooking the city.", bestTimeToVisit: "Late Evening", entryFee: "Free" }
+          { name: "Montmartre & Sacré-Cœur", description: "Bohemian neighborhood with artists, cobblestone alleys, and a beautiful basilica overlooking the city.", bestTimeToVisit: "Late Evening", entryFee: "Free" },
+          { name: "Musée d'Orsay", description: "Major museum of nineteenth- and early twentieth-century art in a former railway station on the Seine.", bestTimeToVisit: "Morning / Early Afternoon", entryFee: "Paid entry - verify current rate" },
+          { name: "Sainte-Chapelle", description: "Gothic royal chapel on the Île de la Cité renowned for its extensive stained-glass windows.", bestTimeToVisit: "Late Morning / Afternoon", entryFee: "Paid entry - verify current rate" },
+          { name: "Palais Garnier", description: "Historic Paris opera house known for ornate Beaux-Arts interiors and theatrical heritage.", bestTimeToVisit: "Daytime", entryFee: "Paid visit - verify current rate" },
+          { name: "Seine River Cruise", description: "A scenic cruise along the Seine offering river-level views of central Paris landmarks.", bestTimeToVisit: "Late Afternoon / Evening", entryFee: "Paid cruise - verify current rate" }
         ],
         food: [
           { name: "Butter Croissants & Pain au Chocolat", description: "Golden, flaky, buttery French pastries baked fresh daily.", type: "veg", mustTryAt: "Du Pain et des Idées" },
+          { name: "Tartine with Butter & Jam", description: "A classic French breakfast of fresh baguette or country bread with butter, preserves and a hot drink.", type: "veg", mustTryAt: "A well-reviewed Parisian bakery-cafe" },
           { name: "French Onion Soup", description: "Rich beef broth based caramelized onion soup topped with toasted baguette and melted Gruyère.", type: "non-veg", mustTryAt: "Le Procope" },
+          { name: "Croque Monsieur", description: "A toasted ham-and-cheese sandwich finished with creamy béchamel, suited to a casual savory lunch.", type: "non-veg", mustTryAt: "A traditional Parisian brasserie" },
+          { name: "Boeuf Bourguignon", description: "Slow-braised beef in red wine with aromatics, commonly served as a substantial French main course.", type: "non-veg", mustTryAt: "A well-reviewed traditional French bistro" },
+          { name: "Ratatouille", description: "Traditional stewed vegetable dish from Nice, featuring zucchini, eggplant, and bell peppers.", type: "veg", mustTryAt: "Le Potager du Marais" },
+          { name: "Savory Buckwheat Galette", description: "A savory buckwheat crêpe filled with cheese, egg or vegetables, suitable for lunch or a light dinner.", type: "both", mustTryAt: "A well-reviewed crêperie in Paris" },
+          { name: "French Cheese Tasting", description: "A tasting of several French cheeses with bread and suitable accompaniments.", type: "tasting", mustTryAt: "A reputable Parisian fromagerie" },
           { name: "Macarons", description: "Delicate meringue-based cookie sandwiches with luxurious buttercream or ganache fillings.", type: "dessert", mustTryAt: "Ladurée" },
-          { name: "Ratatouille", description: "Traditional stewed vegetable dish from Nice, featuring zucchini, eggplant, and bell peppers.", type: "veg", mustTryAt: "Le Potager du Marais" }
+          { name: "Crêpes", description: "Thin French crêpes served sweet or simply garnished, ideal as a snack or dessert stop.", type: "dessert", mustTryAt: "A well-reviewed Parisian crêperie" }
         ],
         packing: ["Elegant walking shoes", "Chic layers for cooler evenings", "Compact umbrella", "Anti-theft daypack", "Universal power adapter"],
         tips: [
