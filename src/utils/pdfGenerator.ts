@@ -2153,8 +2153,8 @@ export const exportPremiumTravelPDF = async (
         const rawLoc = act.location || "Central";
         doc.text(`Loc: ${rawLoc}`, cardX + 53, badgeY1);
 
-        // Row 2 - Badge 3: Duration (Perfect Centering)
-        const simulatedDuration = ["1.5h", "2.0h", "1.0h", "3.0h"][actIdx % 4];
+        // Row 2 - Badge 3: Duration. Use the validated itinerary duration rather than a simulated placeholder.
+        const simulatedDuration = String((act as any).visitDuration || "1h").trim();
         doc.setFillColor(238, 242, 255);
         doc.roundedRect(cardX + 4, badgeY2 - 3, 15, 4.2, 0.8, 0.8, "F");
         doc.setFont("helvetica", "bold");
@@ -2163,7 +2163,12 @@ export const exportPremiumTravelPDF = async (
         doc.text(simulatedDuration, cardX + 11.5, badgeY2 - 0.1, { align: "center" });
 
         // Row 2 - Badge 4: Transport (Balanced Icon & Text Center Grouping)
-        const simulatedTransit = String((act as any).transportFromPrevious || (act as any).transport || (actIdx === 0 ? "Walk" : "Cab"));
+        const simulatedTransit = String((act as any).transportFromPrevious || (act as any).transport || (actIdx === 0 ? "Start of day" : "Cab"))
+          .replace(/dayPremium/ig, "day • Premium")
+          .replace(/vehicleCheck/ig, "vehicle • Check")
+          .replace(/transitCheck/ig, "transit • Check")
+          .replace(/taxiFine/ig, "taxi • Fine")
+          .trim();
         const transitBoxX = cardX + 23;
         const transitBoxW = 24;
         const transitTextWidth = simulatedTransit.length * 0.85;
@@ -2180,7 +2185,13 @@ export const exportPremiumTravelPDF = async (
         doc.text(simulatedTransit, transitUnitStartX + 4.2, badgeY2 - 0.1, { align: "left" });
 
         // Row 2 - Badge 5: Cost (Perfect Centering)
-        const costVal = act.cost || "Included";
+        const rawCostVal = String(act.cost || "Included")
+          .replace(/vehicleCheck/ig, "vehicle • Check")
+          .replace(/transitCheck/ig, "transit • Check")
+          .replace(/taxiFine/ig, "taxi • Fine")
+          .trim();
+        // Leading separator keeps adjacent metadata badges visually and textually distinct in exported PDFs.
+        const costVal = `• ${rawCostVal}`;
         doc.setFillColor(254, 243, 199);
         doc.roundedRect(cardX + 51, badgeY2 - 3, 24, 4.2, 0.8, 0.8, "F");
         doc.setFont("helvetica", "bold");

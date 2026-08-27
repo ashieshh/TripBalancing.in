@@ -2406,7 +2406,7 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
     .replace(/\b(regional|signature|upscale|local|meal|lunch|dinner|breakfast|brunch|tasting|food|dining|at|the|a|an|private|priority|visit|experience|tour|guided|discovery)\b/g,' ')
     .replace(/\s+/g,' ').trim();
   const parseTime=(v:any,idx=0)=>{ const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/); if(!m)return 9*60+idx*150; let h=Number(m[1])%12; if(m[3]==='PM')h+=12; return h*60+Number(m[2]||0); };
-  const fmtTime=(mins:number)=>{ mins=Math.max(7*60,Math.min(21*60+30,Math.round(mins/15)*15)); const h24=Math.floor(mins/60), mm=mins%60, ap=h24>=12?'PM':'AM', h=h24%12||12; return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`; };
+  const fmtTime=(mins:number)=>{ mins=Math.max(7*60,Math.min(23*60+30,Math.round(mins/15)*15)); const h24=Math.floor(mins/60), mm=mins%60, ap=h24>=12?'PM':'AM', h=h24%12||12; return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`; };
   const isSnack=(f:any)=>/(dessert|beverage|drink|cocktail|wine|beer|spirit|liqueur|feni|cake|pastr(?:y|ies)|sweet|bebinca|macaron|croissant|pain au chocolat|cookie|biscuit|gelato|ice cream)/i.test(`${f?.name||''} ${f?.type||''} ${f?.description||''}`);
   const isSuitableMainMeal=(f:any, role:'lunch'|'dinner')=>{
     const text=`${f?.name||''} ${f?.type||''} ${f?.description||''}`;
@@ -2415,9 +2415,17 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
     if(role==='dinner' && /omelette|soup|sandwich|toast|salad only/i.test(text)) return false;
     return true;
   };
+  const isSuitableBreakfast=(f:any)=>{
+    const text=`${f?.name||''} ${f?.type||''} ${f?.description||''}`.toLowerCase();
+    if(/beverage|cocktail|wine|beer|spirit|liqueur|feni|dessert only/i.test(text)) return false;
+    if(/breakfast|brunch|bakery|bread|croissant|pain au chocolat|pastr(?:y|ies)|omelette|egg|toast|pancake|waffle|cereal|porridge|yogurt|fruit|poi|bhaji|buns/i.test(text)) return true;
+    // Main-course soups, curries, stews and heavy dinner dishes should not be silently relabelled as breakfast.
+    if(/soup|curry|stew|roast|steak|seafood|fish curry|balchao|xacuti|ratatouille|pasta|risotto|burger/i.test(text)) return false;
+    return false;
+  };
   const savory=foods.filter((f:any)=>f?.name && !isSnack(f));
   const tastings=foods.filter((f:any)=>f?.name && isSnack(f));
-  const usedMeals=new Set<string>(), usedVenues=new Set<string>(), usedTastings=new Set<string>();
+  const usedMeals=new Set<string>(), usedVenues=new Set<string>(), usedTastings=new Set<string>(), usedExperienceFoods=new Set<string>();
 
   const polished = (v:any) => {
     let t=String(v||'').trim();
@@ -2534,9 +2542,28 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
       return true;
     });
 
-    // Food Explorer meal semantics: pastries, desserts, beverages and breakfast/light items cannot become lunch or dinner.
+    // Food Explorer meal semantics: breakfast must be breakfast-appropriate, while pastries, desserts, beverages and breakfast/light items cannot become lunch or dinner.
     if(style==='food explorer') {
       const foodForActivity=(a:any)=>foods.find((f:any)=>{ const fk=norm(f?.name); const ak=norm(`${a?.title||''} ${a?.description||''}`); return fk && ak.includes(fk); }) || null;
+
+      for(const a of acts){
+        const title=String(a?.title||'');
+        if(!/breakfast|brunch/i.test(title)) continue;
+        const f=foodForActivity(a);
+        if(f && !isSuitableBreakfast(f)){
+          const replacement=foods.find((x:any)=>x?.name && isSuitableBreakfast(x) && !usedMeals.has(norm(x.name)) && !usedTastings.has(norm(x.name)));
+          if(replacement){
+            usedMeals.add(norm(replacement.name));
+            Object.assign(a,foodActivity(a.time||'08:30 AM',replacement,'Local Breakfast'));
+          } else {
+            a.title='Local Breakfast & Bakery Stop';
+            a.description=`Begin with a destination-specific breakfast and bakery stop in ${destination}, choosing fresh bread or pastries with a savoury accompaniment and a regional beverage.`;
+            a.location=destination;
+            a.cost='Check current menu';
+          }
+        }
+      }
+
       for(const a of acts){
         const title=String(a?.title||'');
         const role=/dinner|signature dining/i.test(title)?'dinner':/lunch|regional meal/i.test(title)?'lunch':'';
@@ -2658,6 +2685,36 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
       });
     }
 
+    // For Luxury, replace generic placeholder experiences with real destination-specific content whenever possible.
+    if(style==='luxury'){
+      const usedHere=new Set(acts.map((a:any)=>norm(matchedPlace(a)?.name)).filter(Boolean));
+      const reservedElsewhere=(p:any)=>{ const pk=norm(p?.name); const r=reservedPlaceDay.get(pk); return r!=null && r!==di; };
+      for(const a of acts){
+        if(!/Private Cultural & Design Experience|Premium Evening Leisure Experience/i.test(String(a?.title||''))) continue;
+        const p=places.find((x:any)=>x?.name && !usedHere.has(norm(x.name)) && !seenPlaceDay.has(norm(x.name)) && !reservedElsewhere(x));
+        if(p){
+          a.title=`Private / Priority Visit: ${p.name}`;
+          a.description=polished(`${p.description||`Enjoy a privately arranged visit to ${p.name}.`} Experience it with comfortable pacing and advance reservations where useful.`);
+          a.location=p.name;
+          a.cost=String(p.entryFee||'Check current price');
+          const start=preferredMinutes(p,parseTime(a.time));
+          a.time=fmtTime(start);
+          usedHere.add(norm(p.name));
+          seenPlaceDay.set(norm(p.name),di);
+          continue;
+        }
+        const f=foods.find((x:any)=>x?.name && !usedExperienceFoods.has(norm(x.name)) && !usedMeals.has(norm(x.name)) && !usedTastings.has(norm(x.name)));
+        if(f){
+          usedExperienceFoods.add(norm(f.name));
+          const tasting=isSnack(f) || /Cultural & Design/i.test(String(a?.title||''));
+          a.title=tasting?`Private Culinary Tasting: ${f.name}`:`Signature Culinary Experience: ${f.name}`;
+          a.description=polished(`${f.description||`Discover ${f.name} as part of a destination-specific culinary experience.`} Enjoy it at a well-reviewed venue with comfortable pacing and reservations where useful.`);
+          a.location=f.mustTryAt||destination;
+          a.cost='Premium culinary experience - check current price';
+        }
+      }
+    }
+
     // For Luxury, replace removed duplicate attractions with an elevated non-duplicate experience.
     if(style==='luxury' && acts.length<4){
       // Prefer a real unused destination attraction before falling back to a generic premium block.
@@ -2694,19 +2751,38 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
     });
 
     acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
-    const activityDurationMinutes=(a:any)=>{
-      const raw=String(a?.visitDuration||'').toLowerCase();
+    const durationTextToMinutes=(rawValue:any)=>{
+      const raw=String(rawValue||'').toLowerCase();
       const range=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/);
       if(range){ const hi=Number(range[2]); return /min/.test(range[3])?Math.round(hi):Math.round(hi*60); }
       const single=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/);
       if(single){ const n=Number(single[1]); return /min/.test(single[2])?Math.round(n):Math.round(n*60); }
+      const hm=raw.match(/(?:(\d+)h)?\s*(?:(\d+)m)?/);
+      if(hm && (hm[1]||hm[2])) return Number(hm[1]||0)*60+Number(hm[2]||0);
+      return 0;
+    };
+    const activityDurationMinutes=(a:any)=>{
       const t=String(a?.title||'');
-      if(/transfer|chauffeur|drive|travel to/i.test(t)) return 60;
+      // A transfer's displayed visitDuration is often model noise. Prefer actual travel time and keep it within realistic local-transfer bounds.
+      if(/transfer|chauffeur|drive|travel to/i.test(t)){
+        const travel=durationTextToMinutes(a?.travelTimeFromPrevious);
+        return Math.max(20,Math.min(90,travel||45));
+      }
+      if(/spa|wellness|recovery/i.test(t)) return 90;
       if(/breakfast|lunch|dinner|brunch/i.test(t)) return 75;
       if(/tasting|bakery|food craft|market/i.test(t)) return 60;
-      if(/museum|fort|cathedral|church|palace|tower|waterfall|visit/i.test(t)) return 90;
-      return 75;
+      if(/private cultural|design experience|evening leisure|culinary experience/i.test(t)) return 90;
+      const explicit=durationTextToMinutes(a?.visitDuration);
+      if(/museum|fort|cathedral|church|palace|tower|waterfall|priority visit|private \/ priority visit/i.test(t)) return Math.max(60,Math.min(150,explicit||90));
+      return Math.max(45,Math.min(120,explicit||75));
     };
+    const formatDuration=(mins:number)=>mins%60===0?`${mins/60}h`:mins<60?`${mins}m`:`${Math.floor(mins/60)}h ${mins%60}m`;
+    // Normalize obviously inflated model durations so the PDF and collision engine use the same value.
+    for(const a of acts){
+      const normalized=activityDurationMinutes(a);
+      const title=String(a?.title||'');
+      if(/transfer|chauffeur|drive|travel to|spa|wellness|recovery|private cultural|design experience|evening leisure/i.test(title)) a.visitDuration=formatDuration(normalized);
+    }
     // Resolve ordinary collisions first. Named transfers are aligned to their visit afterwards.
     for(let i=1;i<acts.length;i++){
       const prev=parseTime(acts[i-1]?.time,i-1), cur=parseTime(acts[i]?.time,i);
