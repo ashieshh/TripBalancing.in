@@ -2424,9 +2424,17 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
     if(/\b(breakfast|brunch|bakery|bread|croissant|omelette|egg|toast|pancake|waffle|cereal|porridge|yogurt|fruit|poi|bhaji|buns|tartine)\b|pain au chocolat|pastr(?:y|ies)/i.test(text)) return true;
     return false;
   };
+  const isSuitableTasting=(f:any)=>{
+    const text=`${f?.name||''} ${f?.type||''} ${f?.description||''}`.toLowerCase();
+    // Afternoon tasting blocks are for snacks, desserts, bakery/pastry, beverages or explicit tastings.
+    // Reject substantial mains and breakfast-only items even if the model labels them as a tasting.
+    if(/\b(main course|substantial|stew|curry|roast|steak|bourguignon|risotto|pasta|burger|full meal)\b/i.test(text)) return false;
+    if(/\b(classic|traditional|local|regional)?\s*breakfast\b|breakfast of|breakfast-only/i.test(text)) return false;
+    return isSnack(f) || /\b(tasting|fromagerie|cheese tasting|bakery|pastry|dessert|snack|beverage|coffee|tea|chocolate|confection|crepe)\b/i.test(text);
+  };
   const savory=foods.filter((f:any)=>f?.name && !isSnack(f));
   const tastings=foods.filter((f:any)=>f?.name && isSnack(f));
-  const usedMeals=new Set<string>(), usedVenues=new Set<string>(), usedTastings=new Set<string>(), usedExperienceFoods=new Set<string>();
+  const usedMeals=new Set<string>(), usedVenues=new Set<string>(), usedTastings=new Set<string>(), usedExperienceFoods=new Set<string>(), usedNamedFoods=new Set<string>();
 
   const polished = (v:any) => {
     let t=String(v||'').trim();
@@ -2667,6 +2675,63 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
       });
     }
 
+    // Final Food Explorer semantic pass: use only true tasting foods in tasting slots, and
+    // prefer unused named destination dishes before exposing generic lunch/dinner fallbacks.
+    // This runs after day-completeness insertion so it also repairs newly added fallback blocks.
+    if(style==='food explorer') {
+      const activityFood=(a:any)=>foods.find((f:any)=>{
+        const fk=norm(f?.name);
+        const ak=norm(`${a?.title||''} ${a?.description||''}`);
+        return fk && ak.includes(fk);
+      }) || null;
+
+      // Reserve named foods already used in non-generic customer-facing slots on this day.
+      // (Previous days have already populated usedNamedFoods because itinerary.days.map is sequential.)
+      for(const a of acts){
+        const f=activityFood(a);
+        if(!f) continue;
+        const isTasteBlock=/tasting|dessert|food craft|beverage|snack/i.test(String(a?.title||''));
+        if(!isTasteBlock || isSuitableTasting(f)) usedNamedFoods.add(norm(f.name));
+      }
+
+      // A tasting must not be a substantial main course or a breakfast-only item.
+      for(const a of acts){
+        if(!/tasting|dessert|food craft|beverage|snack/i.test(String(a?.title||''))) continue;
+        const current=activityFood(a);
+        if(current && isSuitableTasting(current)) continue;
+        const replacement=foods.find((f:any)=>f?.name && isSuitableTasting(f) && !usedNamedFoods.has(norm(f.name)));
+        if(replacement){
+          Object.assign(a,foodActivity(a.time||'04:00 PM',replacement,'Tasting / Food Craft'));
+          a.cost='Per person - check current price';
+          usedNamedFoods.add(norm(replacement.name));
+        } else if(current && !isSuitableTasting(current)){
+          a.title='Local Food Craft / Tasting';
+          a.description=`Choose a destination-specific bakery, dessert, beverage, producer or tasting experience in ${destination}.`;
+          a.location=destination;
+          a.cost='Check current price';
+        }
+      }
+
+      // Replace generic lunch/dinner labels with unused named destination dishes whenever possible.
+      for(const a of acts){
+        const title=String(a?.title||'');
+        const generic=/Neighborhood Kitchen Selection|Chef['’]s Seasonal(?: Local)? Menu|Market-Inspired Regional Menu|Local Tasting Menu|Regional House Specialties|Regional House Specialty|Seasonal Regional Menu|Seasonal Local Menu/i.test(title);
+        if(!generic || !/lunch|dinner/i.test(title)) continue;
+        const role=/dinner/i.test(title)?'dinner':'lunch';
+        const replacement=foods.find((f:any)=>f?.name && isSuitableMainMeal(f,role as 'lunch'|'dinner') && !usedNamedFoods.has(norm(f.name)));
+        if(replacement){
+          Object.assign(a,foodActivity(a.time||(role==='dinner'?'07:30 PM':'01:00 PM'),replacement,role==='dinner'?'Regional Dinner':'Regional Lunch'));
+          usedNamedFoods.add(norm(replacement.name));
+        }
+      }
+
+      // Persist all named foods actually visible after the repairs so later days remain unique.
+      for(const a of acts){
+        const f=activityFood(a);
+        if(f) usedNamedFoods.add(norm(f.name));
+      }
+    }
+
     // Luxury meal semantics: lunch/dinner must be a complete upscale meal, never breakfast/light/street-food/snack items.
     if(style==='luxury') {
       const foodForActivity=(a:any)=>foods.find((f:any)=>{ const fk=norm(f?.name); const ak=norm(`${a?.title||''} ${a?.description||''}`); return fk && ak.includes(fk); }) || null;
@@ -2836,6 +2901,24 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
       const entry=String(p?.entryFee||'').trim();
       const looksLikeAdmission=rawCost && (rawCost===entry || /^[₹$€£¥]?\s*[0-9][0-9,]*(?:\.[0-9]+)?$/.test(rawCost) || /^free$/i.test(rawCost));
       if(looksLikeAdmission) transfer.cost=style==='luxury'?'Private transfer - check current price':'Transport - check current price';
+    }
+    acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
+
+    // ABSOLUTE FINAL schedule normalization. Run this after every fallback insertion, preferred-time
+    // adjustment and transfer/visit dependency repair. If an earlier activity overruns a later one,
+    // move the later block forward; because we keep the current array order, a moved transfer also
+    // pushes its paired attraction visit forward on the next iteration.
+    for(let i=1;i<acts.length;i++){
+      const prev=acts[i-1], cur=acts[i];
+      const prevStart=parseTime(prev?.time,i-1);
+      const curStart=parseTime(cur?.time,i);
+      const prevIsTransfer=/(transfer|chauffeur|drive|travel to)/i.test(String(prev?.title||''));
+      const curPlace=matchedPlace(cur);
+      const prevPlace=matchedPlace(prev);
+      const sameTransferPair=prevIsTransfer && curPlace && prevPlace && norm(curPlace.name)===norm(prevPlace.name);
+      const buffer=sameTransferPair?15:15;
+      const required=Math.max(sameTransferPair?35:45,activityDurationMinutes(prev)+buffer);
+      if(curStart-prevStart<required) cur.time=fmtTime(Math.ceil((prevStart+required)/15)*15);
     }
     acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
 
