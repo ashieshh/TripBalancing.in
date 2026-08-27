@@ -2983,6 +2983,131 @@ function normalizeCustomerFacingItinerary(itinerary: any) {
   return itinerary;
 }
 
+
+/**
+ * Absolute whole-trip feasibility guard.
+ *
+ * This is intentionally destination-agnostic. It enforces journey structure after
+ * all AI generation, food repair and style enrichment are complete:
+ *   arrival/check-in -> activities -> departure transfer,
+ * sensible day richness by travel style, and one last duration/collision pass.
+ */
+function enforceWholeTripFeasibility(itinerary:any) {
+  if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+  const style=String(itinerary?.travelStyle||'').toLowerCase().trim();
+  const destination=String(itinerary?.destination||'the destination');
+  const places=Array.isArray(itinerary?.placesToVisit)?itinerary.placesToVisit:[];
+  const foods=Array.isArray(itinerary?.localFood)?itinerary.localFood:[];
+  const days=itinerary.days.map((d:any)=>({...d,activities:Array.isArray(d?.activities)?d.activities.map((a:any)=>({...a})):[]}));
+
+  const parseTime=(v:any,idx=0)=>{const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return 9*60+idx*150;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0)};
+  const fmtTime=(mins:number)=>{mins=Math.max(5*60,Math.min(23*60+30,Math.round(mins/15)*15));const h24=Math.floor(mins/60),mm=mins%60,ap=h24>=12?'PM':'AM',h=h24%12||12;return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`};
+  const durationMinutes=(a:any)=>{const raw=String(a?.visitDuration||'').toLowerCase();const range=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(range){const n=Number(range[2]);return /min/.test(range[3])?Math.round(n):Math.round(n*60)}const one=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(one){const n=Number(one[1]);return /min/.test(one[2])?Math.round(n):Math.round(n*60)}const t=String(a?.title||'');if(/transfer|chauffeur|drive|travel to/i.test(t))return 45;if(/breakfast|lunch|dinner|brunch|tasting|food craft/i.test(t))return 75;if(/spa|wellness/i.test(t))return 90;return 75};
+  const isArrival=(a:any)=>/(arrival|arrive|airport transfer.*stay|airport transfer.*check|station transfer.*stay|hotel check[- ]?in|heritage check[- ]?in|premium stay|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`) && !/(departure|return flight|head .*airport|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const isDeparture=(a:any)=>/(departure transfer|airport departure|transfer to airport|to the airport|head .*airport|return flight|return train|station departure|check[- ]?out.*airport|airport lounge.*before boarding)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const isMeal=(a:any,role:'lunch'|'dinner')=>role==='lunch'?/\blunch\b|regional meal/i.test(String(a?.title||'')):/\bdinner\b|signature dining|evening meal/i.test(String(a?.title||''));
+  const isMeaningful=(a:any)=>String(a?.title||'').trim().length>2;
+  const usedPlaceNames=new Set<string>();
+  for(const d of days)for(const a of d.activities){const hay=`${a?.title||''} ${a?.location||''}`.toLowerCase();for(const p of places){const n=String(p?.name||'').trim();if(n&&hay.includes(n.toLowerCase()))usedPlaceNames.add(n.toLowerCase())}}
+  const unusedPlace=()=>places.find((p:any)=>p?.name&&!usedPlaceNames.has(String(p.name).toLowerCase()));
+  const completeFoods=foods.filter((f:any)=>isCompleteMealFood(f,'dinner'));
+  const pickMeal=(dayIndex:number)=>completeFoods.length?completeFoods[dayIndex%completeFoods.length]:null;
+
+  // Day 1: an explicit arrival/check-in block is a hard boundary. Anything that
+  // was placed before arrival is pushed after that boundary instead of being left
+  // as an impossible pre-arrival sightseeing activity.
+  if(days[0]){
+    const acts=days[0].activities;
+    const arrival=acts.find((a:any)=>isArrival(a));
+    if(arrival){
+      const arrivalStart=parseTime(arrival.time,0);
+      let cursor=arrivalStart+durationMinutes(arrival)+30;
+      const before=acts.filter((a:any)=>a!==arrival&&parseTime(a.time,0)<arrivalStart&&!isArrival(a));
+      for(const a of before){a.time=fmtTime(cursor);cursor+=durationMinutes(a)+30}
+    }
+  }
+
+  days.forEach((day:any,di:number)=>{
+    let acts=day.activities.filter((a:any)=>isMeaningful(a));
+    acts.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+    const departure=acts.find((a:any)=>isDeparture(a));
+    const arrival=acts.find((a:any)=>isArrival(a));
+    const isDepartureDay=Boolean(departure);
+    const isArrivalDay=Boolean(arrival);
+
+    // Departure transfer is a hard cutoff. No validator/filler is allowed to put
+    // sightseeing, tasting or dinner after the traveller has left for the airport/station.
+    if(departure){
+      const cut=parseTime(departure.time,acts.indexOf(departure));
+      acts=acts.filter((a:any)=>a===departure||parseTime(a.time,0)<cut);
+    }
+
+    const fullDay=!isArrivalDay&&!isDepartureDay;
+    const premium=/luxury|smart luxury|honeymoon|wellness|spa/.test(style);
+    const business=/business/.test(style);
+    const target=fullDay?(business?3:4):(isArrivalDay?3:2);
+
+    // Premium full days should end with a real dinner. If the semantic filter
+    // removed an unsuitable snack/drink from that role, add a proper dinner rather
+    // than weakening the food-safety rule.
+    if(fullDay&&premium&&!acts.some((a:any)=>isMeal(a,'dinner'))){
+      const meal=pickMeal(di);
+      const last=acts.length?Math.max(...acts.map((a:any)=>parseTime(a.time,0)+durationMinutes(a))):18*60;
+      const dinnerStart=Math.max(19*60+30,Math.ceil((last+30)/15)*15);
+      acts.push({
+        time:fmtTime(Math.min(dinnerStart,21*60+30)),
+        title:meal?`Signature Dinner: ${meal.name}`:'Signature Dinner: Chef\'s Local Seasonal Menu',
+        description:meal?`${meal.description||'Enjoy a complete savory regional dinner.'} Serve it as a complete dinner at a reputable, well-reviewed restaurant in ${destination}.`:`Choose a complete savory regional dinner at a reputable, well-reviewed restaurant in ${destination}.`,
+        location:meal?.mustTryAt||destination,
+        visitDuration:'1h 30m',
+        cost:'Fine dining - check current menu'
+      });
+    }
+
+    // Conservative style-aware richness. Only full days are filled; arrival and
+    // departure days stay intentionally lighter. Prefer an unused real attraction.
+    while(fullDay&&acts.length<target){
+      const p=unusedPlace();
+      const sorted=acts.slice().sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+      let start=14*60+30;
+      if(sorted.length){
+        let bestGap=0,bestStart=start;
+        for(let i=0;i<sorted.length-1;i++){
+          const end=parseTime(sorted[i].time,i)+durationMinutes(sorted[i]);
+          const next=parseTime(sorted[i+1].time,i+1);
+          if(next-end>bestGap&&next-end>=120){bestGap=next-end;bestStart=end+30}
+        }
+        start=bestGap?bestStart:Math.min(18*60,parseTime(sorted[sorted.length-1].time,sorted.length-1)+durationMinutes(sorted[sorted.length-1])+45);
+      }
+      if(p){
+        usedPlaceNames.add(String(p.name).toLowerCase());
+        acts.push({time:fmtTime(start),title:premium?`Private / Priority Experience: ${p.name}`:`Explore ${p.name}`,description:`Spend meaningful time at ${p.name} with pacing appropriate to the selected ${itinerary.travelStyle||'travel'} style.`,location:p.name,visitDuration:'1h 30m',cost:p.entryFee||'Check current price'});
+      }else{
+        acts.push({time:fmtTime(start),title:premium?'Destination-Specific Premium Experience':'Destination Experience',description:`Add a meaningful, locally appropriate experience in ${destination} that fits the selected ${itinerary.travelStyle||'travel'} style and nearby route.`,location:destination,visitDuration:'1h 30m',cost:premium?'Premium experience - check current price':'Check current price'});
+      }
+    }
+
+    // Absolute final collision pass for this day's final content.
+    acts.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+    for(let i=1;i<acts.length;i++){
+      const prev=acts[i-1],cur=acts[i];
+      const required=parseTime(prev.time,i-1)+durationMinutes(prev)+15;
+      if(parseTime(cur.time,i)<required)cur.time=fmtTime(required);
+    }
+
+    // If collision repair pushed anything beyond a departure cutoff, drop it.
+    const finalDeparture=acts.find((a:any)=>isDeparture(a));
+    if(finalDeparture){
+      const cut=parseTime(finalDeparture.time,acts.indexOf(finalDeparture));
+      acts=acts.filter((a:any)=>a===finalDeparture||parseTime(a.time,0)<cut);
+      acts.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+    }
+    day.activities=acts;
+  });
+
+  return {...itinerary,days};
+}
+
 function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const errors:string[] = [];
   const days = Array.isArray(itinerary?.days) ? itinerary.days : [];
@@ -2993,6 +3118,8 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const sigs = new Set<string>();
   const seenPlaces = new Map<string,number>();
   const seenMeals = new Map<string,number>();
+  const isArrival=(a:any)=>/(arrival|arrive|airport transfer.*stay|airport transfer.*check|station transfer.*stay|hotel check[- ]?in|heritage check[- ]?in|premium stay|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`) && !/(departure|return flight|head .*airport|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const isDeparture=(a:any)=>/(departure transfer|airport departure|transfer to airport|to the airport|head .*airport|return flight|return train|station departure|check[- ]?out.*airport|airport lounge.*before boarding)/i.test(`${a?.title||''} ${a?.description||''}`);
   days.forEach((d:any,i:number)=>{
     const acts=Array.isArray(d?.activities)?d.activities:[];
     if(acts.length<3) errors.push(`day ${i+1} has fewer than three user-facing blocks`);
@@ -3034,19 +3161,36 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
     const duration=(a:any)=>{ const raw=String(a?.visitDuration||'').toLowerCase(); const r=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/); if(r){const hi=Number(r[2]);return /min/.test(r[3])?hi:hi*60;} const one=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/); if(one){const n=Number(one[1]);return /min/.test(one[2])?n:n*60;} return /meal|breakfast|lunch|dinner|tasting/i.test(String(a?.title||''))?75:60; };
     for(let j=0;j<acts.length-1;j++){ const start=parseTime(acts[j]?.time,j), next=parseTime(acts[j+1]?.time,j+1); if(next < start + Math.max(30,duration(acts[j]))) errors.push(`day ${i+1} contains overlapping activity times`); }
   });
+  // Whole-trip journey sanity: nothing before an explicit arrival/check-in boundary
+  // and nothing after an explicit departure transfer.
+  if(days[0]){
+    const acts=Array.isArray(days[0]?.activities)?days[0].activities:[];
+    const arrival=acts.find((a:any)=>isArrival(a));
+    if(arrival){ const t=parseTime(arrival?.time,0); if(acts.some((a:any)=>a!==arrival&&!isArrival(a)&&parseTime(a?.time,0)<t)) errors.push('day 1 contains an activity before arrival/check-in'); }
+  }
+  days.forEach((d:any,i:number)=>{
+    const acts=Array.isArray(d?.activities)?d.activities:[]; const dep=acts.find((a:any)=>isDeparture(a));
+    if(dep){ const t=parseTime(dep?.time,0); if(acts.some((a:any)=>a!==dep&&parseTime(a?.time,0)>t)) errors.push(`day ${i+1} contains an activity after departure transfer`); }
+  });
+
   if(String(itinerary?.travelStyle||'').toLowerCase().trim()==='food explorer'){
     days.forEach((d:any,i:number)=>{ const acts=Array.isArray(d?.activities)?d.activities:[]; if(!acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks breakfast/brunch`); if(!acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks lunch`); if(!acts.some((a:any)=>/dinner|signature dining/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks dinner`); if(!acts.some((a:any)=>/tasting|dessert|food craft|beverage|producer|bakery/i.test(String(a?.title||'')) && parseTime(a?.time,0)>=14*60))errors.push(`Food Explorer day ${i+1} lacks an afternoon tasting/food-craft block`); if(acts.length<4)errors.push(`Food Explorer day ${i+1} has fewer than four meaningful culinary blocks`); });
   }
   if(String(itinerary?.travelStyle||'').toLowerCase().trim()==='luxury'){
     days.forEach((d:any,i:number)=>{
+      const acts=Array.isArray(d?.activities)?d.activities:[];
       const roleCount={breakfast:0,lunch:0,dinner:0};
-      for(const a of (Array.isArray(d?.activities)?d.activities:[])){
+      for(const a of acts){
         const title=String(a?.title||'');
         const role=/breakfast|brunch/i.test(title)?'breakfast':/lunch/i.test(title)?'lunch':/dinner|signature dining/i.test(title)?'dinner':'';
         if(role) roleCount[role as keyof typeof roleCount]++;
         if(/lunch|dinner|signature dining/i.test(title) && /breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette|small plate|croissant|pain au chocolat|pastr(?:y|ies)|macaron|dessert|beverage|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener/i.test(`${a?.title||''} ${a?.description||''}`)) errors.push(`Luxury day ${i+1} uses a breakfast/light/snack item as ${/lunch/i.test(title)?'lunch':'dinner'}`);
       }
       if(roleCount.breakfast>1||roleCount.lunch>1||roleCount.dinner>1) errors.push(`Luxury day ${i+1} contains duplicate primary meal slots`);
+      const dayText=`${d?.theme||''} ${acts.map((a:any)=>`${a?.title||''} ${a?.description||''}`).join(' ')}`;
+      const boundaryDay=/(arrival|departure|airport|station|check[- ]?in|check[- ]?out)/i.test(dayText);
+      if(!boundaryDay && roleCount.dinner===0) errors.push(`Luxury day ${i+1} lacks a complete dinner`);
+      if(!boundaryDay && acts.length<4) errors.push(`Luxury day ${i+1} is under-filled for a full premium day`);
     });
   }
   return Array.from(new Set(errors));
@@ -3069,7 +3213,12 @@ function finalizeItineraryForUser(itinerary:any, exactDays:number) {
   // enrichment can add Luxury/Wellness/etc. dining blocks, so validate complete
   // meal semantics only after all of those blocks have been created.
   const finalFoodSafe = normalizeFinalFoodSemantics(finalCustomer);
-  return reconcileItineraryBudget(finalFoodSafe);
+  // Whole-trip chronology must be checked after every enrichment/repair step.
+  // This is the hard journey boundary: arrival/check-in first, departure last,
+  // style-aware day richness, then one final collision normalization.
+  const journeySafe = enforceWholeTripFeasibility(finalFoodSafe);
+  const journeyFoodSafe = normalizeFinalFoodSemantics(journeySafe);
+  return reconcileItineraryBudget(journeyFoodSafe);
 }
 
 function applySmartRouteAndTransport(itinerary: any) {
