@@ -795,12 +795,19 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
         h.pricePerNight = `${fmtMoney(variedRate)}/night estimated`;
       });
     };
-    // Keep the tier selected by the travel style centered on the actual accommodation
-    // allowance. Other tiers remain reference alternatives. This changes only the
-    // display estimate multipliers and does not alter trip generation or itinerary logic.
-    const budgetHotelFactor = style === "budget" ? 1.00 : style === "mid" ? 0.58 : 0.38;
-    const midHotelFactor = style === "budget" ? 1.85 : style === "mid" ? 1.00 : 0.68;
-    const luxuryHotelFactor = style === "budget" ? 4.25 : style === "mid" ? 2.35 : 1.00;
+    // Align the recommended hotel tier with the actual accommodation allowance.
+    // Keep this logic local to reconciliation so it cannot reference variables from
+    // calculateRealWorldBudget() and cannot break trip generation at runtime.
+    const hotelStyleKey = String(travelStyle || "Mid-range").toLowerCase();
+    const selectedHotelTier = /luxury|honeymoon|wellness|spa/.test(hotelStyleKey)
+      ? "luxury"
+      : /budget|backpacker/.test(hotelStyleKey)
+        ? "budget"
+        : "mid";
+
+    const budgetHotelFactor = selectedHotelTier === "budget" ? 1.00 : selectedHotelTier === "mid" ? 0.58 : 0.38;
+    const midHotelFactor = selectedHotelTier === "budget" ? 1.85 : selectedHotelTier === "mid" ? 1.00 : 0.68;
+    const luxuryHotelFactor = selectedHotelTier === "budget" ? 4.25 : selectedHotelTier === "mid" ? 2.35 : 1.00;
 
     setHotelTier(itinerary.hotelRecommendations.budget, budgetHotelFactor);
     setHotelTier(itinerary.hotelRecommendations.midRange, midHotelFactor);
