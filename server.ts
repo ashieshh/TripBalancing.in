@@ -3108,6 +3108,98 @@ function enforceWholeTripFeasibility(itinerary:any) {
   return {...itinerary,days};
 }
 
+/**
+ * Immutable trip-level journey anchors.
+ *
+ * This is the LAST itinerary-structure mutation before budget reconciliation.
+ * It guarantees that every trip with an origin has an arrival/check-in anchor on
+ * day 1 and a departure-transfer anchor on the final day, then removes any
+ * activity outside those boundaries. No downstream meal/style enrichment may run
+ * after this function.
+ */
+function enforceImmutableJourneyAnchors(itinerary:any) {
+  if (!itinerary || !Array.isArray(itinerary.days) || !itinerary.days.length) return itinerary;
+  const origin=String(itinerary?.origin||'').trim();
+  if (!origin) return itinerary;
+  const destination=String(itinerary?.destination||'the destination');
+  const days=itinerary.days.map((d:any)=>({...d,activities:Array.isArray(d?.activities)?d.activities.map((a:any)=>({...a})):[]}));
+  const parseTime=(v:any,idx=0)=>{const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return 9*60+idx*120;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0)};
+  const fmtTime=(mins:number)=>{mins=Math.max(5*60,Math.min(23*60+30,Math.round(mins/15)*15));const h24=Math.floor(mins/60),mm=mins%60,ap=h24>=12?'PM':'AM',h=h24%12||12;return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`};
+  const durationMinutes=(a:any)=>{const raw=String(a?.visitDuration||'').toLowerCase();const r=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(r){const n=Number(r[2]);return /min/.test(r[3])?Math.round(n):Math.round(n*60)}const one=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(one){const n=Number(one[1]);return /min/.test(one[2])?Math.round(n):Math.round(n*60)}return /transfer|chauffeur|airport|station/i.test(String(a?.title||''))?45:/meal|breakfast|lunch|dinner|tasting/i.test(String(a?.title||''))?75:75};
+  const isArrival=(a:any)=>/(arrival|arrive|airport pickup|airport transfer.*stay|airport transfer.*check|station transfer.*stay|hotel check[- ]?in|heritage check[- ]?in|premium stay|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`) && !/(departure|return flight|head .*airport|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const isDeparture=(a:any)=>/(departure transfer|airport departure|airport transfer$|transfer to airport|to the airport|head .*airport|return flight|return train|station departure|check[- ]?out.*airport|airport lounge.*before boarding)/i.test(`${a?.title||''} ${a?.description||''}`);
+
+  // DAY 1 — guarantee an arrival/check-in anchor. Because the form currently
+  // captures travel dates but not the booked flight/train clock time, a missing
+  // anchor uses a conservative planning window rather than pretending to know a
+  // live ticket time. Existing explicit arrival blocks are preserved.
+  {
+    let acts=days[0].activities.filter((a:any)=>!isDeparture(a));
+    let arrival=acts.find((a:any)=>isArrival(a));
+    if(!arrival){
+      arrival={
+        time:'11:00 AM',
+        title:'Arrival Transfer & Hotel Check-in',
+        description:`Arrive from ${origin}, transfer to your stay in ${destination}, complete check-in or bag drop, and allow a short settling-in buffer. Adjust this planning anchor to your booked flight/train arrival time.`,
+        location:destination,
+        visitDuration:'1h',
+        cost:'Check current transfer price'
+      };
+      acts.push(arrival);
+    }
+    const anchorStart=parseTime(arrival.time,0);
+    const anchorEnd=anchorStart+durationMinutes(arrival)+30;
+    const after=acts.filter((a:any)=>a===arrival||parseTime(a?.time,0)>=anchorEnd);
+    const displaced=acts.filter((a:any)=>a!==arrival&&parseTime(a?.time,0)<anchorEnd);
+    let cursor=anchorEnd;
+    for(const a of displaced){ a.time=fmtTime(cursor); cursor+=durationMinutes(a)+30; after.push(a); }
+    after.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+    for(let i=1;i<after.length;i++){const prev=after[i-1],cur=after[i];const need=parseTime(prev.time,i-1)+durationMinutes(prev)+15;if(parseTime(cur.time,i)<need)cur.time=fmtTime(need)}
+    days[0].activities=after;
+  }
+
+  // FINAL DAY — guarantee a departure-transfer anchor and make it an immutable
+  // cutoff. If the AI supplied one, keep its clock time. If not, use a conservative
+  // 4 PM planning anchor and clearly mark it as ticket-dependent.
+  {
+    const li=days.length-1;
+    let acts=days[li].activities;
+    let departure=acts.find((a:any)=>isDeparture(a));
+    if(!departure){
+      departure={
+        time:'04:00 PM',
+        title:'Departure Transfer to Airport / Station',
+        description:`Collect your bags and leave ${destination} for your return journey to ${origin}. Adjust this planning anchor to your booked departure time and required airport/station check-in buffer.`,
+        location:destination,
+        visitDuration:'45m',
+        cost:'Check current transfer price'
+      };
+      acts.push(departure);
+    }
+    let cut=parseTime(departure.time,acts.indexOf(departure));
+    // Make sure activities immediately before departure actually finish in time.
+    acts=acts.filter((a:any)=>a===departure||parseTime(a?.time,0)+durationMinutes(a)+30<=cut);
+    if(!acts.includes(departure))acts.push(departure);
+    acts.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+    // If a previous activity still collides, move it earlier where possible; otherwise remove it.
+    const depIndex=acts.indexOf(departure);
+    if(depIndex>0){
+      const prev=acts[depIndex-1];
+      const latestStart=cut-durationMinutes(prev)-30;
+      if(parseTime(prev.time,depIndex-1)>latestStart){
+        const previousEnd=depIndex>1?parseTime(acts[depIndex-2].time,depIndex-2)+durationMinutes(acts[depIndex-2])+15:5*60;
+        if(previousEnd<=latestStart)prev.time=fmtTime(latestStart); else acts.splice(depIndex-1,1);
+      }
+    }
+    // Hard delete anything after departure. This is intentionally the last
+    // customer-facing structure mutation in the pipeline.
+    cut=parseTime(departure.time,0);
+    days[li].activities=acts.filter((a:any)=>a===departure||parseTime(a?.time,0)<cut).sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+  }
+
+  return {...itinerary,days};
+}
+
 function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const errors:string[] = [];
   const days = Array.isArray(itinerary?.days) ? itinerary.days : [];
@@ -3122,7 +3214,8 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const isDeparture=(a:any)=>/(departure transfer|airport departure|transfer to airport|to the airport|head .*airport|return flight|return train|station departure|check[- ]?out.*airport|airport lounge.*before boarding)/i.test(`${a?.title||''} ${a?.description||''}`);
   days.forEach((d:any,i:number)=>{
     const acts=Array.isArray(d?.activities)?d.activities:[];
-    if(acts.length<3) errors.push(`day ${i+1} has fewer than three user-facing blocks`);
+    const boundaryDay=acts.some((a:any)=>isArrival(a)||isDeparture(a));
+    if(!boundaryDay&&acts.length<3) errors.push(`day ${i+1} has fewer than three user-facing blocks`);
     const times=acts.map((a:any,j:number)=>parseTime(a?.time,j)).sort((a:number,b:number)=>a-b);
     for(let j=0;j<times.length-1;j++) if(times[j+1]-times[j]>300) errors.push(`day ${i+1} has an unexplained schedule gap over five hours`);
     const sig=acts.slice(0,4).map((a:any)=>norm(a?.title)).join('|');
@@ -3174,7 +3267,7 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
   });
 
   if(String(itinerary?.travelStyle||'').toLowerCase().trim()==='food explorer'){
-    days.forEach((d:any,i:number)=>{ const acts=Array.isArray(d?.activities)?d.activities:[]; if(!acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks breakfast/brunch`); if(!acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks lunch`); if(!acts.some((a:any)=>/dinner|signature dining/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks dinner`); if(!acts.some((a:any)=>/tasting|dessert|food craft|beverage|producer|bakery/i.test(String(a?.title||'')) && parseTime(a?.time,0)>=14*60))errors.push(`Food Explorer day ${i+1} lacks an afternoon tasting/food-craft block`); if(acts.length<4)errors.push(`Food Explorer day ${i+1} has fewer than four meaningful culinary blocks`); });
+    days.forEach((d:any,i:number)=>{ const acts=Array.isArray(d?.activities)?d.activities:[]; const boundaryDay=acts.some((a:any)=>isArrival(a)||isDeparture(a)); if(boundaryDay)return; if(!acts.some((a:any)=>/breakfast|brunch/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks breakfast/brunch`); if(!acts.some((a:any)=>/lunch|regional meal/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks lunch`); if(!acts.some((a:any)=>/dinner|signature dining/i.test(String(a?.title||''))))errors.push(`Food Explorer day ${i+1} lacks dinner`); if(!acts.some((a:any)=>/tasting|dessert|food craft|beverage|producer|bakery/i.test(String(a?.title||'')) && parseTime(a?.time,0)>=14*60))errors.push(`Food Explorer day ${i+1} lacks an afternoon tasting/food-craft block`); if(acts.length<4)errors.push(`Food Explorer day ${i+1} has fewer than four meaningful culinary blocks`); });
   }
   if(String(itinerary?.travelStyle||'').toLowerCase().trim()==='luxury'){
     days.forEach((d:any,i:number)=>{
@@ -3217,8 +3310,12 @@ function finalizeItineraryForUser(itinerary:any, exactDays:number) {
   // This is the hard journey boundary: arrival/check-in first, departure last,
   // style-aware day richness, then one final collision normalization.
   const journeySafe = enforceWholeTripFeasibility(finalFoodSafe);
+  // Meal semantics may add/replace late dining blocks, so run it BEFORE the
+  // immutable trip anchors. Nothing that can add itinerary activities runs after
+  // enforceImmutableJourneyAnchors().
   const journeyFoodSafe = normalizeFinalFoodSemantics(journeySafe);
-  return reconcileItineraryBudget(journeyFoodSafe);
+  const anchored = enforceImmutableJourneyAnchors(journeyFoodSafe);
+  return reconcileItineraryBudget(anchored);
 }
 
 function applySmartRouteAndTransport(itinerary: any) {
