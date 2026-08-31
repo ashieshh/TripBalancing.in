@@ -3365,6 +3365,18 @@ function enforceFinalMealDensityAndVariety(itinerary:any) {
   if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
   const foods=Array.isArray(itinerary.localFood)?itinerary.localFood:[];
   const destination=String(itinerary.destination||'the destination');
+  const style=String(itinerary.travelStyle||'').toLowerCase().trim();
+  // Final tasting-duration polish: a tasting/snack/beverage stop is normally a short
+  // experience, not a 90-minute premium meal. Keep explicit long-form classes/tours alone.
+  for (const day of itinerary.days) {
+    for (const a of (Array.isArray(day?.activities)?day.activities:[])) {
+      const text=`${a?.title||''} ${a?.description||''}`.toLowerCase();
+      const tasting=/tasting|food craft|snack|dessert|beverage|lassi|\bpaan\b|\bchaat\b/.test(text);
+      const longForm=/cooking class|workshop|masterclass|food tour|food walk|market walk|producer visit/.test(text);
+      const completeMeal=/breakfast|brunch|lunch|dinner|complete (savory|regional|multi-course)|fine dining/.test(text);
+      if (tasting && !longForm && !completeMeal) a.visitDuration='30–60 min';
+    }
+  }
   const parseTime=(v:any,idx=0)=>{const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return 9*60+idx*150;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0)};
   const fmtTime=(mins:number)=>{mins=Math.max(5*60,Math.min(23*60+30,Math.round(mins/15)*15));const h24=Math.floor(mins/60),mm=mins%60,ap=h24>=12?'PM':'AM',h=h24%12||12;return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`};
   const duration=(a:any)=>{const raw=String(a?.visitDuration||'').toLowerCase();const range=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(range){const n=Number(range[2]);return /min/.test(range[3])?Math.round(n):Math.round(n*60)}const one=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(one){const n=Number(one[1]);return /min/.test(one[2])?Math.round(n):Math.round(n*60)}return /breakfast|brunch|lunch|dinner|dining|meal/i.test(String(a?.title||''))?90:75};
@@ -3380,8 +3392,50 @@ function enforceFinalMealDensityAndVariety(itinerary:any) {
   const foodKey=(f:any)=>String(f?.name||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
   const completeFoods=foods.filter((f:any)=>f?.name && (isCompleteMealFood(f,'lunch')||isCompleteMealFood(f,'dinner')));
 
+  // Food Explorer gets stronger trip-wide named-food variety. The same named food
+  // should not recur on a later day when an unused suitable destination food exists.
+  // This is deliberately limited to Food Explorer; generic safe fallbacks are used only
+  // when the curated destination pool has been exhausted.
+  const tripUsedFoods=new Set<string>();
+
   itinerary.days=itinerary.days.map((day:any)=>{
     let acts=Array.isArray(day?.activities)?day.activities.map((a:any)=>({...a})):[];
+
+    if(style==='food explorer') {
+      for(const a of acts){
+        const activityText=`${a?.title||''} ${a?.description||''}`.toLowerCase();
+        const recognized=foods.find((f:any)=>{const k=foodKey(f);return k && activityText.includes(k);});
+        if(!recognized) continue;
+        const key=foodKey(recognized);
+        if(!tripUsedFoods.has(key)){tripUsedFoods.add(key);continue;}
+        const role=roleOf(a);
+        const isMeal=!!role && isCompleteMealActivity(a);
+        const candidates=isMeal
+          ? completeFoods.filter((f:any)=>!tripUsedFoods.has(foodKey(f)) && isCompleteMealFood(f, role==='dinner'?'dinner':'lunch'))
+          : foods.filter((f:any)=>f?.name && !tripUsedFoods.has(foodKey(f)) && !isCompleteMealFood(f,'lunch') && !isCompleteMealFood(f,'dinner'));
+        const replacement=candidates[0];
+        if(replacement){
+          const label=isMeal?(role==='dinner'?'Regional Dinner':role==='breakfast'?'Local Breakfast':'Regional Lunch'):'Tasting / Food Craft';
+          a.title=`${label}: ${replacement.name}`;
+          a.description=replacement.description||`Enjoy ${replacement.name} as a destination-specific culinary experience.`;
+          a.location=replacement.mustTryAt||destination;
+          a.cost=isMeal?'Check current menu':'Check current price';
+          tripUsedFoods.add(foodKey(replacement));
+        } else {
+          // Do not repeat the exact named food just because the small curated pool ran out.
+          if(isMeal){
+            const label=role==='dinner'?'Regional Dinner':role==='breakfast'?'Local Breakfast':'Regional Lunch';
+            a.title=`${label}: Chef's Local Seasonal Menu`;
+            a.description=`Choose a complete destination-appropriate ${role||'meal'} at a reputable, well-reviewed venue in ${destination}, different from named foods already used on this trip.`;
+            a.location=destination; a.cost='Check current menu';
+          } else {
+            a.title='Seasonal Local Food Craft Experience';
+            a.description=`Choose a different locally appropriate snack, bakery, producer, spice, dessert or beverage experience in ${destination} rather than repeating a named food already used on this trip.`;
+            a.location=destination; a.cost='Check current price'; a.visitDuration='30–60 min';
+          }
+        }
+      }
+    }
     acts.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
 
     // Same named complete meal must not appear twice on the same day. Replace the later
