@@ -3355,6 +3355,88 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
   return Array.from(new Set(errors));
 }
 
+
+/**
+ * Final global meal-density and same-day variety polish.
+ * Runs after immutable journey anchors and never adds attractions or meal slots.
+ * Complete meals need a 2.5-hour gap from the END of one meal to the START of the next.
+ */
+function enforceFinalMealDensityAndVariety(itinerary:any) {
+  if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+  const foods=Array.isArray(itinerary.localFood)?itinerary.localFood:[];
+  const destination=String(itinerary.destination||'the destination');
+  const parseTime=(v:any,idx=0)=>{const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return 9*60+idx*150;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0)};
+  const fmtTime=(mins:number)=>{mins=Math.max(5*60,Math.min(23*60+30,Math.round(mins/15)*15));const h24=Math.floor(mins/60),mm=mins%60,ap=h24>=12?'PM':'AM',h=h24%12||12;return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`};
+  const duration=(a:any)=>{const raw=String(a?.visitDuration||'').toLowerCase();const range=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(range){const n=Number(range[2]);return /min/.test(range[3])?Math.round(n):Math.round(n*60)}const one=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(one){const n=Number(one[1]);return /min/.test(one[2])?Math.round(n):Math.round(n*60)}return /breakfast|brunch|lunch|dinner|dining|meal/i.test(String(a?.title||''))?90:75};
+  const roleOf=(a:any):'breakfast'|'brunch'|'lunch'|'dinner'|''=>{const t=String(a?.title||'');if(/\bbrunch\b/i.test(t))return 'brunch';if(/\bbreakfast\b/i.test(t))return 'breakfast';if(/\blunch\b|regional meal/i.test(t))return 'lunch';if(/\bdinner\b|signature dining|evening meal|upscale regional dining/i.test(t))return 'dinner';return ''};
+  const isCompleteMealActivity=(a:any)=>{
+    const role=roleOf(a); if(!role)return false;
+    const text=`${a?.title||''} ${a?.description||''}`.toLowerCase();
+    if(/tasting|snack|dessert|beverage|drink|coffee|tea|lassi|\bpaan\b|\bchaat\b|food craft|bakery tasting/i.test(text) && !/complete (savory|regional|multi-course)|fine dining|royal thali|full meal/i.test(text)) return false;
+    return true;
+  };
+  const isBoundary=(a:any)=>/(arrival|departure|airport|station|check[- ]?in|check[- ]?out|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const mealKey=(a:any)=>String(a?.title||'').replace(/^[^:]+:\s*/,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\b(chef s|local|regional|signature|upscale|seasonal|menu|dining|meal)\b/g,' ').replace(/\s+/g,' ').trim();
+  const foodKey=(f:any)=>String(f?.name||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+  const completeFoods=foods.filter((f:any)=>f?.name && (isCompleteMealFood(f,'lunch')||isCompleteMealFood(f,'dinner')));
+
+  itinerary.days=itinerary.days.map((day:any)=>{
+    let acts=Array.isArray(day?.activities)?day.activities.map((a:any)=>({...a})):[];
+    acts.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+
+    // Same named complete meal must not appear twice on the same day. Replace the later
+    // occurrence with an unused destination meal; if none exists, keep a generic complete meal.
+    const used=new Set<string>();
+    for(const a of acts){
+      if(!isCompleteMealActivity(a))continue;
+      let key=mealKey(a);
+      if(key && used.has(key)){
+        const role=roleOf(a);
+        const replacement=completeFoods.find((f:any)=>!used.has(foodKey(f)) && !acts.some((x:any)=>x!==a && mealKey(x)===foodKey(f)));
+        if(replacement){
+          const label=role==='dinner'?'Signature Dinner':role==='lunch'?'Upscale Regional Lunch':role==='brunch'?'Regional Brunch':'Local Breakfast';
+          a.title=`${label}: ${replacement.name}`;
+          a.description=`${replacement.description||`Enjoy ${replacement.name} as a complete regional meal.`} ${role==='dinner'?'Serve it as a complete dinner':role==='lunch'?'Serve it as a complete lunch':'Enjoy it as the scheduled meal'} at a reputable, well-reviewed venue in ${destination}.`;
+          a.location=replacement.mustTryAt||destination;
+          key=foodKey(replacement);
+        }else{
+          const label=role==='dinner'?'Signature Dinner':role==='lunch'?'Upscale Regional Lunch':role==='brunch'?'Regional Brunch':'Local Breakfast';
+          a.title=`${label}: Chef's Local Seasonal Menu`;
+          a.description=`Choose a complete, destination-appropriate ${role||'meal'} at a reputable, well-reviewed venue in ${destination}, distinct from the day's other complete meals.`;
+          a.location=destination;
+          key=`generic ${role}`;
+        }
+      }
+      if(key)used.add(key);
+    }
+
+    // Require 150 minutes between the END of one complete meal and START of the next.
+    // Prefer moving the later meal only when it fits before the following activity/boundary;
+    // otherwise remove the redundant later meal (especially brunch -> lunch crowding).
+    acts.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+    for(let i=0;i<acts.length;i++){
+      if(!isCompleteMealActivity(acts[i]))continue;
+      let j=i+1; while(j<acts.length && !isCompleteMealActivity(acts[j]))j++;
+      if(j>=acts.length)break;
+      const first=acts[i], second=acts[j];
+      const firstEnd=parseTime(first.time,i)+duration(first);
+      const secondStart=parseTime(second.time,j);
+      if(secondStart-firstEnd>=150)continue;
+      const desired=Math.ceil((firstEnd+150)/15)*15;
+      const next=acts[j+1];
+      const nextStart=next?parseTime(next.time,j+1):24*60;
+      const latestAllowed=roleOf(second)==='dinner'?22*60:roleOf(second)==='lunch'?16*60+30:20*60;
+      const fits=desired<=latestAllowed && desired+duration(second)+15<=nextStart && !(next&&isBoundary(next)&&desired+duration(second)+30>nextStart);
+      if(fits){ second.time=fmtTime(desired); }
+      else { acts.splice(j,1); i--; }
+    }
+
+    acts.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+    return {...day,activities:acts};
+  });
+  return itinerary;
+}
+
 function finalizeItineraryForUser(itinerary:any, exactDays:number) {
   const quality = improveItineraryQuality(itinerary);
   const foodSafe = normalizeFinalFoodSemantics(quality);
@@ -3381,7 +3463,10 @@ function finalizeItineraryForUser(itinerary:any, exactDays:number) {
   // enforceImmutableJourneyAnchors().
   const journeyFoodSafe = normalizeFinalFoodSemantics(journeySafe);
   const anchored = enforceImmutableJourneyAnchors(journeyFoodSafe);
-  return reconcileItineraryBudget(anchored);
+  // Final polish only: this pass never adds itinerary slots or attractions. It only
+  // spaces/removes crowded complete meals and replaces same-day duplicate meal names.
+  const mealPolished = enforceFinalMealDensityAndVariety(anchored);
+  return reconcileItineraryBudget(mealPolished);
 }
 
 function applySmartRouteAndTransport(itinerary: any) {
