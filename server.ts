@@ -3064,6 +3064,59 @@ function enforceWholeTripFeasibility(itinerary:any) {
       });
     }
 
+    // Full-day utilization quality guard for premium styles. A relaxed premium day
+    // may have buffers, but it should not waste the entire morning or leave a huge
+    // afternoon hole simply because an attraction is best visited near sunset.
+    // This is destination-agnostic: prefer a real unused attraction, then a
+    // destination-specific premium block, and add a proper lunch when the day lacks one.
+    if(fullDay&&premium){
+      acts.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+      const earliest=acts.length?parseTime(acts[0].time,0):24*60;
+      if(earliest>11*60+30){
+        const p=unusedPlace();
+        if(p){
+          usedPlaceNames.add(String(p.name).toLowerCase());
+          acts.push({time:'09:30 AM',title:`Private / Priority Experience: ${p.name}`,description:`Spend meaningful time at ${p.name} with relaxed premium pacing before the later headline experience.`,location:p.name,visitDuration:'1h 30m',cost:p.entryFee||'Check current price'});
+        }else{
+          acts.push({time:'09:30 AM',title:'Morning Premium Cultural Experience',description:`Begin the full day with a meaningful, locally appropriate premium cultural or leisure experience in ${destination}, keeping the pace relaxed and route-aware.`,location:destination,visitDuration:'1h 30m',cost:'Premium experience - check current price'});
+        }
+      }
+
+      // A full premium day should not run from morning sightseeing straight to an
+      // evening tasting with no substantive midday meal. Add lunch only when absent.
+      if(!acts.some((a:any)=>isMeal(a,'lunch'))){
+        const meal=pickMeal(di+1);
+        acts.push({
+          time:'01:30 PM',
+          title:meal?`Upscale Regional Lunch: ${meal.name}`:"Upscale Regional Lunch: Chef's Local Seasonal Menu",
+          description:meal?`${meal.description||'Enjoy a complete savory regional lunch.'} Serve it as a complete lunch at a reputable, well-reviewed restaurant in ${destination}.`:`Choose a complete savory regional lunch at a reputable, well-reviewed restaurant in ${destination}.`,
+          location:meal?.mustTryAt||destination,
+          visitDuration:'1h 30m',
+          cost:'Premium dining - check current menu'
+        });
+      }
+
+      // Fill at most one excessive daytime gap (>3 hours) after the morning/lunch
+      // guard. This keeps Luxury/Honeymoon/Wellness relaxed without leaving half a
+      // vacation day empty. Never add a second filler merely to chase density.
+      acts.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+      let gapStart:number|null=null;
+      for(let i=0;i<acts.length-1;i++){
+        const end=parseTime(acts[i].time,i)+durationMinutes(acts[i]);
+        const next=parseTime(acts[i+1].time,i+1);
+        if(end>=9*60 && next<=19*60+30 && next-end>=180){ gapStart=end+30; break; }
+      }
+      if(gapStart!=null){
+        const p=unusedPlace();
+        if(p){
+          usedPlaceNames.add(String(p.name).toLowerCase());
+          acts.push({time:fmtTime(gapStart),title:`Private / Priority Experience: ${p.name}`,description:`Use this open part of the day for ${p.name}, with comfortable premium pacing and enough buffer before the next reservation.`,location:p.name,visitDuration:'1h 30m',cost:p.entryFee||'Check current price'});
+        }else{
+          acts.push({time:fmtTime(gapStart),title:'Destination-Specific Premium Experience',description:`Use this open part of the day for a meaningful, locally appropriate premium experience in ${destination}, with comfortable pacing and route-aware timing.`,location:destination,visitDuration:'1h 30m',cost:'Premium experience - check current price'});
+        }
+      }
+    }
+
     // Conservative style-aware richness. Only full days are filled; arrival and
     // departure days stay intentionally lighter. Prefer an unused real attraction.
     while(fullDay&&acts.length<target){
@@ -3155,7 +3208,20 @@ function enforceImmutableJourneyAnchors(itinerary:any) {
     for(const a of displaced){ a.time=fmtTime(cursor); cursor+=durationMinutes(a)+30; after.push(a); }
     after.sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
     for(let i=1;i<after.length;i++){const prev=after[i-1],cur=after[i];const need=parseTime(prev.time,i-1)+durationMinutes(prev)+15;if(parseTime(cur.time,i)<need)cur.time=fmtTime(need)}
-    days[0].activities=after;
+
+    // Arrival-day meal-window guard. Do not preserve the *label* of a meal when
+    // arrival/check-in has pushed it into an implausible clock window. A breakfast
+    // after 11:30 AM or a lunch after 4:30 PM is removed rather than becoming an
+    // afternoon "breakfast" or evening "lunch". Later meals/tastings remain intact.
+    const mealWindowSafe=after.filter((a:any)=>{
+      if(a===arrival) return true;
+      const title=String(a?.title||'');
+      const start=parseTime(a?.time,0);
+      if(/breakfast|brunch/i.test(title) && start>11*60+30) return false;
+      if(/\blunch\b|regional meal/i.test(title) && start>16*60+30) return false;
+      return true;
+    });
+    days[0].activities=mealWindowSafe;
   }
 
   // FINAL DAY — guarantee a departure-transfer anchor and make it an immutable
