@@ -782,36 +782,29 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
   const nightsForRates = Math.max(1, days - 1);
   const roomsForRates = Math.max(1, Math.ceil(travelers / 2));
 
-  // Hotel cards: keep every tier internally consistent with the trip's accommodation allowance.
-  // The selected travel style already determines `calculated.hotel`, so multiplying the selected
-  // tier again (for example Luxury x 3.25) makes recommendations wildly exceed the budget.
-  // We therefore anchor the SELECTED tier around the actual per-room/night allowance and place
-  // the other two tiers below/above it as reference alternatives. These remain planning estimates,
-  // never live rates or guaranteed availability.
+  // Hotel cards: retain hotel names/ratings, replace prices with consistent trip-currency rates.
   if (itinerary.hotelRecommendations) {
     const baseNight = calculated.hotel > 0
       ? calculated.hotel / nightsForRates / roomsForRates
       : 0;
-
-    const tierFactors: Record<"budget" | "mid" | "luxury", { budget: number; midRange: number; luxury: number }> = {
-      budget:  { budget: 1.00, midRange: 1.85, luxury: 4.25 },
-      mid:     { budget: 0.58, midRange: 1.00, luxury: 2.35 },
-      luxury:  { budget: 0.38, midRange: 0.68, luxury: 1.00 },
-    };
-    const factors = tierFactors[style];
-
     const setHotelTier = (list: any[] | undefined, factor: number) => {
       if (!Array.isArray(list)) return;
       const variation = [0.92, 1.00, 1.08];
       list.forEach((h: any, index: number) => {
-        const variedRate = Math.max(0, baseNight * factor * variation[index % variation.length]);
+        const variedRate = baseNight * factor * variation[index % variation.length];
         h.pricePerNight = `${fmtMoney(variedRate)}/night estimated`;
-        h.priceBasis = "TripBalancing planning estimate; verify live rate, taxes, room type and availability before booking.";
       });
     };
-    setHotelTier(itinerary.hotelRecommendations.budget, factors.budget);
-    setHotelTier(itinerary.hotelRecommendations.midRange, factors.midRange);
-    setHotelTier(itinerary.hotelRecommendations.luxury, factors.luxury);
+    // Keep the tier selected by the travel style centered on the actual accommodation
+    // allowance. Other tiers remain reference alternatives. This changes only the
+    // display estimate multipliers and does not alter trip generation or itinerary logic.
+    const budgetHotelFactor = style === "budget" ? 1.00 : style === "mid" ? 0.58 : 0.38;
+    const midHotelFactor = style === "budget" ? 1.85 : style === "mid" ? 1.00 : 0.68;
+    const luxuryHotelFactor = style === "budget" ? 4.25 : style === "mid" ? 2.35 : 1.00;
+
+    setHotelTier(itinerary.hotelRecommendations.budget, budgetHotelFactor);
+    setHotelTier(itinerary.hotelRecommendations.midRange, midHotelFactor);
+    setHotelTier(itinerary.hotelRecommendations.luxury, luxuryHotelFactor);
   }
 
   // Food daily guide: derive from the reconciled food category, never from AI currency strings.
