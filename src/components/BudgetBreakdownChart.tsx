@@ -8,7 +8,8 @@ import {
   ArrowRightLeft, Globe2, TrendingUp, Calendar, RefreshCw, AlertCircle, ShieldCheck,
   Car, Bike, Plane, MapPin, Star, ExternalLink, Train, Receipt, Sparkles, Ticket
 } from "lucide-react";
-import { BudgetBreakdown, LoggedExpense, Itinerary } from "../types";
+import { BudgetBreakdown, LoggedExpense, Itinerary, HotelRecommend } from "../types";
+import { supabase } from "../lib/supabase";
 
 interface BudgetBreakdownChartProps {
   breakdown: BudgetBreakdown;
@@ -110,6 +111,8 @@ function detectBaseCurrencyCode(val: string | undefined | null): string {
 export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], itinerary }: BudgetBreakdownChartProps) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [selectedHotelTier, setSelectedHotelTier] = useState<"budget" | "midRange" | "luxury">("midRange");
+  const [liveHotelRecommendations, setLiveHotelRecommendations] = useState<{ budget: HotelRecommend[]; midRange: HotelRecommend[]; luxury: HotelRecommend[] } | null>(null);
+  const [hotelRateSource, setHotelRateSource] = useState<"loading" | "agoda" | "estimate">("loading");
 
   // Detect currency symbol from any available string
   const currencySymbol = detectCurrencySymbol(
@@ -122,9 +125,87 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
   const endMs = itinerary?.endDate ? new Date(`${itinerary.endDate}T00:00:00`).getTime() : NaN;
   const accommodationNights = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, Math.round((endMs - startMs) / 86400000)) : 0;
   const accommodationPerNight = accommodationNights > 0 ? Math.round(accommodationTotalValue / accommodationNights) : 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadLiveAgodaHotels = async () => {
+      if (!itinerary?.destination || !itinerary?.startDate || !itinerary?.endDate || !supabase) {
+        if (!cancelled) setHotelRateSource("estimate");
+        return;
+      }
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (!token) {
+          if (!cancelled) setHotelRateSource("estimate");
+          return;
+        }
+        const baseCurrency = detectBaseCurrencyCode(
+          breakdown.total || breakdown.accommodation || breakdown.food || breakdown.activities || breakdown.transport
+        );
+        const response = await fetch("/api/agoda-hotels", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            destination: itinerary.destination,
+            checkInDate: itinerary.startDate,
+            checkOutDate: itinerary.endDate,
+            adults: Math.max(1, Number(itinerary.travelers) || 1),
+            children: 0,
+            currency: baseCurrency,
+            maxResult: 18,
+          }),
+        });
+        if (!response.ok) throw new Error("Agoda unavailable");
+        const payload = await response.json();
+        const hotels = Array.isArray(payload?.hotels) ? payload.hotels : [];
+        if (!hotels.length) throw new Error("No Agoda hotels");
+
+        const symbolFor = (code: string) => POPULAR_CURRENCIES[String(code || "").toUpperCase()]?.symbol || `${String(code || "").toUpperCase()} `;
+        const convert = (h: any): HotelRecommend => ({
+          name: String(h.hotelName || "Agoda Hotel"),
+          pricePerNight: `${symbolFor(h.currency)}${Math.round(Number(h.dailyRate) || 0).toLocaleString()}/night`,
+          rating: Math.max(0, Math.min(5, Number(h.starRating) || 0)),
+          distanceFromCenter: Number(h.reviewScore) > 0 ? `Guest score ${Number(h.reviewScore).toFixed(1)}/10` : "See Agoda details",
+          bookingLink: String(h.landingURL || "#"),
+          description: [h.includeBreakfast ? "Breakfast included" : "", h.freeWifi ? "Free Wi-Fi" : "", Number(h.reviewCount) > 0 ? `${Number(h.reviewCount).toLocaleString()} reviews` : ""].filter(Boolean).join(" • "),
+          imageURL: h.imageURL ? String(h.imageURL) : undefined,
+          reviewScore: Number(h.reviewScore) || undefined,
+          reviewCount: Number(h.reviewCount) || undefined,
+          includeBreakfast: Boolean(h.includeBreakfast),
+          freeWifi: Boolean(h.freeWifi),
+          source: "agoda",
+        });
+        const sorted = hotels.slice().sort((a: any, b: any) => (Number(a.dailyRate) || 0) - (Number(b.dailyRate) || 0));
+        const budget = sorted.filter((h: any) => Number(h.starRating) < 3.5).slice(0, 3);
+        const midRange = sorted.filter((h: any) => Number(h.starRating) >= 3.5 && Number(h.starRating) < 4.5).slice(0, 3);
+        const luxury = sorted.filter((h: any) => Number(h.starRating) >= 4.5).slice(0, 3);
+        const fill = (preferred: any[], fallback: any[]) => (preferred.length >= 3 ? preferred : [...preferred, ...fallback.filter((x) => !preferred.includes(x))]).slice(0, 3).map(convert);
+        const mapped = {
+          budget: fill(budget, sorted),
+          midRange: fill(midRange, sorted.slice().sort((a: any, b: any) => Math.abs((Number(a.starRating) || 0) - 4) - Math.abs((Number(b.starRating) || 0) - 4))),
+          luxury: fill(luxury, sorted.slice().sort((a: any, b: any) => (Number(b.starRating) || 0) - (Number(a.starRating) || 0))),
+        };
+        if (!cancelled) {
+          setLiveHotelRecommendations(mapped);
+          setHotelRateSource("agoda");
+          // Keep the same itinerary object current so PDF generation performed after
+          // this fetch can use the live Agoda cards instead of stale planning estimates.
+          itinerary.hotelRecommendations = mapped;
+          (itinerary as any).hotelRateSource = "agoda";
+        }
+      } catch {
+        if (!cancelled) setHotelRateSource("estimate");
+      }
+    };
+    setLiveHotelRecommendations(null);
+    setHotelRateSource("loading");
+    void loadLiveAgodaHotels();
+    return () => { cancelled = true; };
+  }, [itinerary?.destination, itinerary?.startDate, itinerary?.endDate, itinerary?.travelers, breakdown.total, breakdown.accommodation, breakdown.food, breakdown.activities, breakdown.transport]);
   
   // Safe extraction of hotel recommendations with elegant fallbacks
-  const hotelRecommendations = itinerary?.hotelRecommendations || {
+  const estimatedHotelRecommendations = itinerary?.hotelRecommendations || {
     budget: [
       { name: "Eco Stay Hostel " + destination, pricePerNight: currencySymbol + "800", rating: 4.2, distanceFromCenter: "1.5 km", bookingLink: "#" },
       { name: "Central Tourist Inn", pricePerNight: currencySymbol + "1,200", rating: 4.0, distanceFromCenter: "2.1 km", bookingLink: "#" },
@@ -141,6 +222,7 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
       { name: "Imperial Palace Hotel", pricePerNight: currencySymbol + "18,000", rating: 4.7, distanceFromCenter: "1.1 km", bookingLink: "#" },
     ]
   };
+  const hotelRecommendations = liveHotelRecommendations || estimatedHotelRecommendations;
 
   const rawTransport = itinerary?.detailedTransportationCosts;
   const detailedTransportationCosts = {
@@ -944,7 +1026,7 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
             </div>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Highly recommended hotels at different comfort tiers. Prices are estimated seasonal averages.
+            {hotelRateSource === "agoda" ? "Live Agoda hotel rates for your selected dates." : hotelRateSource === "loading" ? "Checking Agoda for live hotel rates; planning estimates are shown meanwhile." : "Highly recommended hotels at different comfort tiers. Prices are planning estimates."}
             {accommodationPerNight > 0 && (
               <> Your trip currently allocates about <strong>{currencySymbol}{accommodationPerNight.toLocaleString()} per night</strong> across {accommodationNights} night{accommodationNights === 1 ? "" : "s"}; the tiers below are reference options, not a forced selection.</>
             )}
@@ -964,7 +1046,7 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
                       {hotel.name}
                     </h5>
                     <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/35 px-2 py-0.5 rounded-md">
-                      Estimated
+                      {hotelRateSource === "agoda" ? "Agoda" : "Estimated"}
                     </span>
                   </div>
 
@@ -987,7 +1069,7 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
                   <div className="space-y-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-900/60 text-xs">
                     <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 font-medium">
                       <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                      <span>{hotel.distanceFromCenter} from city center</span>
+                      <span>{hotelRateSource === "agoda" ? hotel.distanceFromCenter : `${hotel.distanceFromCenter} from city center`}</span>
                     </div>
                     <div className="flex items-center justify-between pt-1">
                       <span className="text-[10px] font-bold uppercase text-slate-400 dark:text-slate-500">Avg Price Per Night</span>
@@ -995,17 +1077,20 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
                         {hotel.pricePerNight}
                       </span>
                     </div>
+                    {hotelRateSource === "agoda" && hotel.description && (
+                      <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">{hotel.description}</div>
+                    )}
                   </div>
                 </div>
 
                 {/* Booking Button (External tab link to google or booking placeholder) */}
                 <a
-                  href={`https://www.google.com/search?q=${encodeURIComponent(hotel.name + " " + destination)}`}
+                  href={hotelRateSource === "agoda" && hotel.bookingLink ? hotel.bookingLink : `https://www.google.com/search?q=${encodeURIComponent(hotel.name + " " + destination)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full py-2 bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-xs font-bold text-slate-700 dark:text-slate-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                 >
-                  <span>Check Rates</span>
+                  <span>{hotelRateSource === "agoda" ? "View on Agoda" : "Check Rates"}</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               </div>

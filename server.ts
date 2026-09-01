@@ -19,6 +19,7 @@ import {
   generateBuddyInviteEmail
 } from "./src/services/emailService";
 import { reconcileItineraryBudget, setLiveUsdRates, getLiveCrossRate, detectCurrencyCode, parseNumericValue } from "./src/utils/budgetCalculator";
+import { getAgodaStatus, searchAgodaHotels, warmAgodaCityIndex } from "./src/services/agodaService";
 
 dotenv.config();
 
@@ -5197,6 +5198,37 @@ app.post("/api/geocode", async (req, res) => {
   }
 });
 
+// Agoda live hotel availability. This route is intentionally independent from
+// itinerary generation so an Agoda outage can never break trip planning.
+app.get("/api/agoda-status", verifyUserAuth, (_req, res) => {
+  return res.json(getAgodaStatus());
+});
+
+app.post("/api/agoda-hotels", verifyUserAuth, async (req, res) => {
+  try {
+    const { destination, checkInDate, checkOutDate, adults, children, currency, maxResult } = req.body || {};
+    if (!destination || !checkInDate || !checkOutDate) {
+      return res.status(400).json({ error: "Destination, check-in date and check-out date are required." });
+    }
+    const result = await searchAgodaHotels({
+      destination: String(destination),
+      checkInDate: String(checkInDate),
+      checkOutDate: String(checkOutDate),
+      adults: Number(adults) || 2,
+      children: Number(children) || 0,
+      currency: String(currency || "USD"),
+      maxResult: Number(maxResult) || 12,
+    });
+    return res.json({ source: "agoda", city: result.city, hotels: result.hotels });
+  } catch (error: any) {
+    console.warn("[Agoda] Live hotel search unavailable:", error?.message || error);
+    return res.status(503).json({
+      error: "Live Agoda rates are temporarily unavailable. TripBalancing estimates remain available.",
+      code: "AGODA_UNAVAILABLE"
+    });
+  }
+});
+
 // AI Travel Advisories and Tips Endpoint (with Google Search Grounding)
 app.post("/api/travel-tips", verifyUserAuth, async (req, res) => {
   try {
@@ -5789,5 +5821,8 @@ async function setupVite() {
 setupVite().then(() => {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`TripBalancing Server running on http://0.0.0.0:${PORT}`);
+    if (process.env.AGODA_HOTEL_DATA_URL) {
+      void warmAgodaCityIndex(false);
+    }
   });
 });

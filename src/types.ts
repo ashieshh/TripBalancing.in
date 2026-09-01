@@ -99,6 +99,12 @@ export interface HotelRecommend {
   distanceFromCenter: string;
   bookingLink: string;
   description?: string;
+  imageURL?: string;
+  reviewScore?: number;
+  reviewCount?: number;
+  includeBreakfast?: boolean;
+  freeWifi?: boolean;
+  source?: "agoda" | "estimate";
 }
 
 export interface DetailedTransportationCosts {

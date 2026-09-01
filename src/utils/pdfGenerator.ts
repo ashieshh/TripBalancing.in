@@ -2407,7 +2407,8 @@ export const exportPremiumTravelPDF = async (
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(13, 148, 136);
-    doc.text(`Trip accommodation allowance: ${currencySym}${nightlyAllowance.toLocaleString()} per night (${hotelNights} night${hotelNights === 1 ? "" : "s"}). Recommendations below are reference options, not a forced tier.`, marginX, y);
+    const hasAgodaRates = [hotelData.budget, hotelData.midRange, hotelData.luxury].some((list: any) => Array.isArray(list) && list.some((h: any) => h?.source === "agoda"));
+    doc.text(`Trip accommodation allowance: ${currencySym}${nightlyAllowance.toLocaleString()} per night (${hotelNights} night${hotelNights === 1 ? "" : "s"}). ${hasAgodaRates ? "Hotel prices below are live Agoda rates for the selected dates." : "Recommendations below are planning estimates, not a forced tier."}`, marginX, y);
     y += 7;
   }
 
@@ -2454,12 +2455,13 @@ export const exportPremiumTravelPDF = async (
       drawPriceBadge(doc, contentX, y + 14.5, 48, 5, /\/\s*night\b/i.test(String(hotel.pricePerNight)) ? String(hotel.pricePerNight) : `${hotel.pricePerNight} / night`);
 
       // Distance badge (width 34, centered map pin icon + distance text)
-      drawCenteredBadge(doc, contentX + 52, y + 14.5, 34, 5, `${hotel.distanceFromCenter} to Ctr`, undefined, [238, 242, 255], [79, 70, 229], "map");
+      const hotelLocationBadge = hotel?.source === "agoda" ? String(hotel.distanceFromCenter || "Agoda live") : `${hotel.distanceFromCenter} to Ctr`;
+      drawCenteredBadge(doc, contentX + 52, y + 14.5, 34, 5, hotelLocationBadge, undefined, [238, 242, 255], [79, 70, 229], "map");
 
       // Comfort level badge (width 40, centered hotel icon + comfort label text)
       drawCenteredBadge(doc, contentX + 90, y + 14.5, 40, 5, comfortLabel.toUpperCase(), undefined, [254, 243, 199], [217, 119, 6], "hotel");
 
-      const hotelDesc = String(hotel.description || `${comfortLabel} option. Verify live availability, room type, taxes and cancellation terms before booking.`);
+      const hotelDesc = String(hotel.description || (hotel?.source === "agoda" ? `Live Agoda rate. Open the Agoda booking link in TripBalancing to verify room type, taxes and cancellation terms.` : `${comfortLabel} option. Verify live availability, room type, taxes and cancellation terms before booking.`));
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7.2);
       doc.setTextColor(100, 116, 139);
