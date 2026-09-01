@@ -111,8 +111,12 @@ function detectBaseCurrencyCode(val: string | undefined | null): string {
 export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], itinerary }: BudgetBreakdownChartProps) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [selectedHotelTier, setSelectedHotelTier] = useState<"budget" | "midRange" | "luxury">("midRange");
-  const [liveHotelRecommendations, setLiveHotelRecommendations] = useState<{ budget: HotelRecommend[]; midRange: HotelRecommend[]; luxury: HotelRecommend[] } | null>(null);
-  const [hotelRateSource, setHotelRateSource] = useState<"loading" | "agoda" | "estimate">("loading");
+  const serverHasAgodaHotels = [itinerary?.hotelRecommendations?.budget, itinerary?.hotelRecommendations?.midRange, itinerary?.hotelRecommendations?.luxury]
+    .some((list) => Array.isArray(list) && list.some((hotel: any) => hotel?.source === "agoda"));
+  const [liveHotelRecommendations, setLiveHotelRecommendations] = useState<{ budget: HotelRecommend[]; midRange: HotelRecommend[]; luxury: HotelRecommend[] } | null>(
+    serverHasAgodaHotels ? itinerary?.hotelRecommendations || null : null
+  );
+  const [hotelRateSource, setHotelRateSource] = useState<"loading" | "agoda" | "estimate">(serverHasAgodaHotels ? "agoda" : "loading");
 
   // Detect currency symbol from any available string
   const currencySymbol = detectCurrencySymbol(
@@ -129,6 +133,15 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
   useEffect(() => {
     let cancelled = false;
     const loadLiveAgodaHotels = async () => {
+      const alreadyLive = [itinerary?.hotelRecommendations?.budget, itinerary?.hotelRecommendations?.midRange, itinerary?.hotelRecommendations?.luxury]
+        .some((list) => Array.isArray(list) && list.some((hotel: any) => hotel?.source === "agoda"));
+      if (alreadyLive && itinerary?.hotelRecommendations) {
+        if (!cancelled) {
+          setLiveHotelRecommendations(itinerary.hotelRecommendations);
+          setHotelRateSource("agoda");
+        }
+        return;
+      }
       if (!itinerary?.destination || !itinerary?.startDate || !itinerary?.endDate || !supabase) {
         if (!cancelled) setHotelRateSource("estimate");
         return;
@@ -198,8 +211,10 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
         if (!cancelled) setHotelRateSource("estimate");
       }
     };
-    setLiveHotelRecommendations(null);
-    setHotelRateSource("loading");
+    if (!serverHasAgodaHotels) {
+      setLiveHotelRecommendations(null);
+      setHotelRateSource("loading");
+    }
     void loadLiveAgodaHotels();
     return () => { cancelled = true; };
   }, [itinerary?.destination, itinerary?.startDate, itinerary?.endDate, itinerary?.travelers, breakdown.total, breakdown.accommodation, breakdown.food, breakdown.activities, breakdown.transport]);

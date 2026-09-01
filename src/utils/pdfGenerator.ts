@@ -1614,7 +1614,10 @@ export const exportPremiumTravelPDF = async (
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(71, 85, 105);
-  const hotelSummaryText = `For your stay in ${itinerary.destination || "destination"}, we have compiled a premium index of options. Our recommended prime choices range from highly rated Budget selections up to ultra-luxury resort villas. For booking links and estimated nightly rate guidance, consult Section 04 of this guide. Rates are planning estimates, not live availability or guaranteed booking prices.`;
+  const overviewHasAgodaRates = [itinerary.hotelRecommendations?.budget, itinerary.hotelRecommendations?.midRange, itinerary.hotelRecommendations?.luxury].some((list: any) => Array.isArray(list) && list.some((h: any) => h?.source === "agoda"));
+  const hotelSummaryText = overviewHasAgodaRates
+    ? `For your stay in ${itinerary.destination || "destination"}, TripBalancing found live Agoda hotel options for your selected dates. Section 04 shows current Agoda nightly rates, property ratings and booking links. Availability, taxes and cancellation terms can still change until booking is completed.`
+    : `For your stay in ${itinerary.destination || "destination"}, we have compiled a premium index of options. Our recommended prime choices range from highly rated Budget selections up to ultra-luxury resort villas. For booking links and estimated nightly rate guidance, consult Section 04 of this guide. Rates are planning estimates, not live availability or guaranteed booking prices.`;
   doc.text(doc.splitTextToSize(hotelSummaryText, 170), marginX + 5, y + 11.5);
   y += 34;
 
@@ -2368,8 +2371,11 @@ export const exportPremiumTravelPDF = async (
   const preferredLodging = lodgingStyle === 'luxury' ? 'Luxury Retreats' : lodgingStyle === 'smart luxury' ? 'Mid-Range / Boutique Suites' : (lodgingStyle === 'budget' || lodgingStyle === 'backpacker') ? 'Budget Stays' : 'style-appropriate stays';
   const hotelData = itinerary.hotelRecommendations || { budget: [], midRange: [], luxury: [] };
   const hasHotelCards = ['budget','midRange','luxury'].some((k) => Array.isArray((hotelData as any)[k]) && (hotelData as any)[k].length > 0);
+  const sectionHasAgodaRates = [hotelData.budget, hotelData.midRange, hotelData.luxury].some((list: any) => Array.isArray(list) && list.some((h: any) => h?.source === "agoda"));
   const lodgingIntro = hasHotelCards
-    ? `Finding the right stay is essential to the itinerary. For your selected ${itinerary.travelStyle || 'travel'} style, TripBalancing prioritizes ${preferredLodging} first, then shows other tiers as reference alternatives. The properties below are planning references with estimated nightly guidance; verify live rates, availability, taxes, reviews and cancellation terms before booking.`
+    ? sectionHasAgodaRates
+      ? `Finding the right stay is essential to the itinerary. For your selected ${itinerary.travelStyle || 'travel'} style, TripBalancing prioritizes ${preferredLodging} first, then shows other tiers as reference alternatives. The properties below use live Agoda rates for your selected dates; verify final taxes, availability and cancellation terms on Agoda before booking.`
+      : `Finding the right stay is essential to the itinerary. For your selected ${itinerary.travelStyle || 'travel'} style, TripBalancing prioritizes ${preferredLodging} first, then shows other tiers as reference alternatives. The properties below are planning references with estimated nightly guidance; verify live rates, availability, taxes, reviews and cancellation terms before booking.`
     : `TripBalancing has calculated an accommodation allowance for this trip, but no sufficiently reliable property-level recommendations were available for this destination. Use the style-appropriate tiers below as a planning guide and verify live hotel options before booking.`;
   doc.text(doc.splitTextToSize(lodgingIntro, 180), marginX, y);
   y += 24;

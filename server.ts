@@ -4117,6 +4117,7 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
       const cachedItinerary = finalizeItineraryForUser(cachedPrepared, diffDays);
       cachedItinerary.travelStyle = travelStyle;
       cachedItinerary.travelers = Number(travelers) || 1;
+      await attachLiveAgodaHotelsToItinerary(cachedItinerary);
       const cachedSource = cached.data?.generationSource || "gemini";
       cachedItinerary.generationSource = cachedSource;
       let entitlementAfter = authoritativeEntitlement;
@@ -4597,6 +4598,7 @@ Return the response in strict JSON format.`;
 
     // Store in cache for future identical requests
     const reconciledItinerary = finalizeItineraryForUser(pricedItinerary, diffDays);
+    await attachLiveAgodaHotelsToItinerary(reconciledItinerary);
     const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
     if (finalUserFacingErrors.length) console.warn(`[FINAL_ITINERARY_QUALITY] ${finalUserFacingErrors.join('; ')}`);
 
@@ -5148,6 +5150,7 @@ Return the response in strict JSON format.`;
     fallbackItinerary.budgetAmount = budgetAmount;
     const pricedFallback = await attachMarketFlightEstimate({ ...fallbackItinerary, plannedBudget: budgetAmount }, origin || "", destination, startDate, endDate, travelers);
     const reconciledFallback = finalizeItineraryForUser(pricedFallback, diffDays);
+    await attachLiveAgodaHotelsToItinerary(reconciledFallback);
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,
@@ -5197,6 +5200,66 @@ app.post("/api/geocode", async (req, res) => {
     });
   }
 });
+
+// Attach Agoda live hotel results directly to the itinerary returned by the server.
+// This is deliberately fail-safe: any Agoda problem leaves the existing planning
+// recommendations untouched and can never fail trip generation.
+async function attachLiveAgodaHotelsToItinerary(itinerary: any): Promise<any> {
+  try {
+    if (!itinerary?.destination || !itinerary?.startDate || !itinerary?.endDate) {
+      console.log("[Agoda] Itinerary enrichment skipped: destination or stay dates missing.");
+      return itinerary;
+    }
+    const currency = detectCurrencyCode(String(itinerary.budgetAmount || itinerary.plannedBudget || "USD"), itinerary.destination);
+    console.log(`[Agoda] Itinerary enrichment starting: destination="${String(itinerary.destination).slice(0, 120)}", dates=${itinerary.startDate}->${itinerary.endDate}, currency=${currency}.`);
+    const result = await searchAgodaHotels({
+      destination: String(itinerary.destination),
+      checkInDate: String(itinerary.startDate),
+      checkOutDate: String(itinerary.endDate),
+      adults: Math.max(1, Number(itinerary.travelers) || 1),
+      children: 0,
+      currency,
+      maxResult: 18,
+    });
+    const hotels = Array.isArray(result.hotels) ? result.hotels.filter(h => Number(h.dailyRate) > 0) : [];
+    if (!hotels.length) {
+      console.warn(`[Agoda] Itinerary enrichment returned no usable hotels for cityId=${result.city.cityId}; keeping planning estimates.`);
+      return itinerary;
+    }
+    const symbols: Record<string,string> = { INR:"₹", USD:"$", EUR:"€", GBP:"£", JPY:"¥", AUD:"A$", CAD:"C$", SGD:"S$", AED:"د.إ", CHF:"CHF ", THB:"฿", CNY:"¥" };
+    const convert = (h: any) => ({
+      name: String(h.hotelName || "Agoda Hotel"),
+      pricePerNight: `${symbols[String(h.currency || currency).toUpperCase()] || `${String(h.currency || currency).toUpperCase()} `}${Math.round(Number(h.dailyRate) || 0).toLocaleString("en-US")}/night`,
+      rating: Math.max(0, Math.min(5, Number(h.starRating) || 0)),
+      distanceFromCenter: Number(h.reviewScore) > 0 ? `Guest score ${Number(h.reviewScore).toFixed(1)}/10` : "See Agoda details",
+      bookingLink: String(h.landingURL || "#"),
+      description: [h.includeBreakfast ? "Breakfast included" : "", h.freeWifi ? "Free Wi-Fi" : "", Number(h.reviewCount) > 0 ? `${Number(h.reviewCount).toLocaleString("en-US")} reviews` : ""].filter(Boolean).join(" • "),
+      imageURL: h.imageURL ? String(h.imageURL) : undefined,
+      reviewScore: Number(h.reviewScore) || undefined,
+      reviewCount: Number(h.reviewCount) || undefined,
+      includeBreakfast: Boolean(h.includeBreakfast),
+      freeWifi: Boolean(h.freeWifi),
+      source: "agoda" as const,
+    });
+    const byPrice = hotels.slice().sort((a,b) => Number(a.dailyRate)-Number(b.dailyRate));
+    const budget = byPrice.filter(h => Number(h.starRating) < 3.5);
+    const mid = byPrice.filter(h => Number(h.starRating) >= 3.5 && Number(h.starRating) < 4.5);
+    const luxury = byPrice.filter(h => Number(h.starRating) >= 4.5);
+    const fill = (preferred: any[], fallback: any[]) => (preferred.length >= 3 ? preferred : [...preferred, ...fallback.filter(x => !preferred.includes(x))]).slice(0,3).map(convert);
+    itinerary.hotelRecommendations = {
+      budget: fill(budget, byPrice),
+      midRange: fill(mid, hotels.slice().sort((a,b) => Math.abs(Number(a.starRating)-4)-Math.abs(Number(b.starRating)-4))),
+      luxury: fill(luxury, hotels.slice().sort((a,b) => Number(b.starRating)-Number(a.starRating))),
+    };
+    itinerary.hotelRateSource = "agoda";
+    itinerary.agodaCityId = result.city.cityId;
+    console.log(`[Agoda] Itinerary enrichment applied: cityId=${result.city.cityId}, liveHotels=${hotels.length}.`);
+    return itinerary;
+  } catch (error: any) {
+    console.warn(`[Agoda] Itinerary enrichment unavailable; keeping planning estimates: ${error?.message || error}`);
+    return itinerary;
+  }
+}
 
 // Agoda live hotel availability. This route is intentionally independent from
 // itinerary generation so an Agoda outage can never break trip planning.
