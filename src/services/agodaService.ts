@@ -39,6 +39,31 @@ function normalizeName(value: string): string {
     .trim();
 }
 
+function getAgodaCredentials() {
+  let siteId = String(process.env.AGODA_SITE_ID || "").trim();
+  const rawApiKey = String(process.env.AGODA_API_KEY || "").trim();
+  let apiKey = rawApiKey;
+
+  // Agoda's partner portal may copy the credential as "siteId:apiKey".
+  // Accept either that full value or a bare API key so we never send
+  // an invalid "siteId:siteId:apiKey" Authorization header.
+  const separator = rawApiKey.indexOf(":");
+  if (separator > 0) {
+    const embeddedSiteId = rawApiKey.slice(0, separator).trim();
+    const embeddedApiKey = rawApiKey.slice(separator + 1).trim();
+    if (embeddedApiKey && (!siteId || embeddedSiteId === siteId)) {
+      if (!siteId) siteId = embeddedSiteId;
+      apiKey = embeddedApiKey;
+    }
+  }
+
+  return {
+    siteId,
+    apiKey,
+    authorization: siteId && apiKey ? `${siteId}:${apiKey}` : ""
+  };
+}
+
 function addCity(record: CityRecord) {
   if (!record.cityId || !record.cityName) return;
   const cityKey = normalizeName(record.cityName);
@@ -275,9 +300,8 @@ export async function searchAgodaHotels(input: {
   currency?: string;
   maxResult?: number;
 }): Promise<{ city: CityRecord; hotels: AgodaHotelResult[] }> {
-  const siteId = String(process.env.AGODA_SITE_ID || "").trim();
-  const apiKey = String(process.env.AGODA_API_KEY || "").trim();
-  if (!siteId || !apiKey) throw new Error("Agoda API credentials are not configured.");
+  const { siteId, apiKey, authorization } = getAgodaCredentials();
+  if (!siteId || !apiKey || !authorization) throw new Error("Agoda API credentials are not configured.");
   if (!validDate(input.checkInDate) || !validDate(input.checkOutDate)) throw new Error("Invalid Agoda stay dates.");
   if (!cityIndexReady) await warmAgodaCityIndex(false);
   const city = resolveAgodaCity(input.destination);
@@ -322,7 +346,7 @@ export async function searchAgodaHotels(input: {
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Accept-Encoding": "gzip,deflate",
-        "Authorization": `${siteId}:${apiKey}`
+        "Authorization": authorization
       },
       body: JSON.stringify(body)
     });
