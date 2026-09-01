@@ -4001,6 +4001,114 @@ app.get('/api/travelpayouts/resolve-location', async (req, res) => {
   }
 });
 
+
+
+// Travelpayouts hotel comparison links.
+// Agoda remains the source of live hotel pricing; Travelpayouts is used only to
+// create an additional affiliate comparison/booking path. The API token stays
+// server-side and the endpoint fails softly so hotel cards continue to work.
+const TP_HOTEL_LINK_CACHE = new Map<string, { url: string; expires: number }>();
+
+app.post('/api/travelpayouts/hotel-links', verifyUserAuth, async (req, res) => {
+  const startedAt = Date.now();
+  try {
+    const token = String(process.env.TRAVELPAYOUTS_API_TOKEN || '').trim();
+    const trs = Number(process.env.TRAVELPAYOUTS_PROJECT_ID || 563908);
+    const marker = Number(process.env.TRAVELPAYOUTS_MARKER || 766498);
+    const destination = String(req.body?.destination || '').trim();
+    const checkInDate = String(req.body?.checkInDate || '').trim();
+    const checkOutDate = String(req.body?.checkOutDate || '').trim();
+    const adults = Math.max(1, Number(req.body?.adults) || 1);
+    const rawHotels = Array.isArray(req.body?.hotels) ? req.body.hotels : [];
+    const hotelNames: string[] = Array.from(new Set<string>(rawHotels.map((h: any) => String(h?.name || h || '').trim()).filter((name: string) => Boolean(name)))).slice(0, 10);
+
+    if (!token || !Number.isFinite(trs) || !Number.isFinite(marker)) {
+      console.warn('[Travelpayouts hotels] Partner-link API is not configured.');
+      return res.json({ available: false, links: [], reason: 'not_configured' });
+    }
+    if (!destination || !checkInDate || !checkOutDate || !hotelNames.length) {
+      return res.status(400).json({ available: false, links: [], error: 'destination, dates and hotels are required' });
+    }
+
+    const buildBookingUrl = (hotelName: string) => {
+      const params = new URLSearchParams({
+        ss: `${hotelName}, ${destination}`,
+        checkin: checkInDate,
+        checkout: checkOutDate,
+        group_adults: String(adults),
+        group_children: '0',
+        no_rooms: '1',
+      });
+      return `https://www.booking.com/searchresults.html?${params.toString()}`;
+    };
+
+    const results: Array<{ hotelName: string; partnerUrl: string; code: string; message?: string }> = [];
+    const misses: Array<{ hotelName: string; brandUrl: string; cacheKey: string }> = [];
+    for (const hotelName of hotelNames) {
+      const cacheKey = `${hotelName.toLowerCase()}|${destination.toLowerCase()}|${checkInDate}|${checkOutDate}|${adults}`;
+      const cached = TP_HOTEL_LINK_CACHE.get(cacheKey);
+      if (cached && cached.expires > Date.now()) {
+        results.push({ hotelName, partnerUrl: cached.url, code: 'success' });
+      } else {
+        misses.push({ hotelName, brandUrl: buildBookingUrl(hotelName), cacheKey });
+      }
+    }
+
+    if (misses.length) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      let response: Response;
+      try {
+        response = await fetch('https://api.travelpayouts.com/links/v1/create', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-Access-Token': token,
+          },
+          body: JSON.stringify({
+            trs,
+            marker,
+            shorten: true,
+            links: misses.map((item) => ({
+              url: item.brandUrl,
+              sub_id: 'tripbalancing_hotel_compare',
+            })),
+          }),
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+
+      const payload: any = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        console.warn(`[Travelpayouts hotels] Partner-link API HTTP ${response.status}: ${String(payload?.error || payload?.message || 'request failed').slice(0, 180)}`);
+        return res.json({ available: false, links: results, reason: `http_${response.status}` });
+      }
+
+      const created = Array.isArray(payload?.result?.links) ? payload.result.links : [];
+      misses.forEach((item, index) => {
+        const row = created[index] || {};
+        const partnerUrl = String(row?.partner_url || '').trim();
+        const code = String(row?.code || (partnerUrl ? 'success' : 'failed'));
+        const message = String(row?.message || '').trim();
+        if (partnerUrl) {
+          TP_HOTEL_LINK_CACHE.set(item.cacheKey, { url: partnerUrl, expires: Date.now() + 6 * 60 * 60 * 1000 });
+        }
+        results.push({ hotelName: item.hotelName, partnerUrl, code, ...(message ? { message } : {}) });
+      });
+    }
+
+    const successful = results.filter((x) => x.partnerUrl).length;
+    console.log(`[Travelpayouts hotels] Generated ${successful}/${hotelNames.length} comparison links in ${Date.now() - startedAt}ms.`);
+    return res.json({ available: successful > 0, links: results });
+  } catch (err: any) {
+    console.warn('[Travelpayouts hotels] Link generation failed:', err?.message || err);
+    return res.json({ available: false, links: [], reason: 'request_failed' });
+  }
+});
+
 app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;
   let diffDays = 3;

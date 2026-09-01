@@ -117,6 +117,8 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
     serverHasAgodaHotels ? itinerary?.hotelRecommendations || null : null
   );
   const [hotelRateSource, setHotelRateSource] = useState<"loading" | "agoda" | "estimate">(serverHasAgodaHotels ? "agoda" : "loading");
+  const [travelpayoutsHotelLinks, setTravelpayoutsHotelLinks] = useState<Record<string, string>>({});
+  const [travelpayoutsHotelsAvailable, setTravelpayoutsHotelsAvailable] = useState(false);
 
   // Detect currency symbol from any available string
   const currencySymbol = detectCurrencySymbol(
@@ -220,6 +222,57 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
     void loadLiveAgodaHotels();
     return () => { cancelled = true; };
   }, [itinerary?.destination, itinerary?.startDate, itinerary?.endDate, itinerary?.travelers, breakdown.total, breakdown.accommodation, breakdown.food, breakdown.activities, breakdown.transport]);
+
+  // Generate Travelpayouts affiliate comparison links server-side. Agoda remains
+  // the price source; these links only give the traveler another place to verify
+  // and compare the hotel before booking. Failure is intentionally silent.
+  useEffect(() => {
+    let cancelled = false;
+    const loadTravelpayoutsHotelLinks = async () => {
+      const tierLists = liveHotelRecommendations || itinerary?.hotelRecommendations;
+      const allHotels = [tierLists?.budget || [], tierLists?.midRange || [], tierLists?.luxury || []]
+        .flat()
+        .filter((h: any, idx: number, arr: any[]) => h?.name && arr.findIndex((x: any) => x?.name === h?.name) === idx)
+        .slice(0, 10);
+      if (!allHotels.length || !itinerary?.destination || !itinerary?.startDate || !itinerary?.endDate || !supabase) {
+        if (!cancelled) {
+          setTravelpayoutsHotelLinks({});
+          setTravelpayoutsHotelsAvailable(false);
+        }
+        return;
+      }
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (!token) return;
+        const response = await fetch('/api/travelpayouts/hotel-links', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            destination: itinerary.destination,
+            checkInDate: itinerary.startDate,
+            checkOutDate: itinerary.endDate,
+            adults: Math.max(1, Number(itinerary.travelers) || 1),
+            hotels: allHotels.map((h: any) => ({ name: h.name })),
+          }),
+        });
+        if (!response.ok) return;
+        const payload = await response.json();
+        const next: Record<string, string> = {};
+        for (const row of Array.isArray(payload?.links) ? payload.links : []) {
+          if (row?.hotelName && row?.partnerUrl) next[String(row.hotelName)] = String(row.partnerUrl);
+        }
+        if (!cancelled) {
+          setTravelpayoutsHotelLinks(next);
+          setTravelpayoutsHotelsAvailable(Object.keys(next).length > 0);
+        }
+      } catch {
+        if (!cancelled) setTravelpayoutsHotelsAvailable(false);
+      }
+    };
+    void loadTravelpayoutsHotelLinks();
+    return () => { cancelled = true; };
+  }, [liveHotelRecommendations, itinerary?.hotelRecommendations, itinerary?.destination, itinerary?.startDate, itinerary?.endDate, itinerary?.travelers]);
   
   // Safe extraction of hotel recommendations with elegant fallbacks
   const estimatedHotelRecommendations = itinerary?.hotelRecommendations || {
@@ -1100,19 +1153,39 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
                   </div>
                 </div>
 
-                {/* Booking Button (External tab link to google or booking placeholder) */}
-                <a
-                  href={hotelRateSource === "agoda" && hotel.bookingLink ? hotel.bookingLink : `https://www.google.com/search?q=${encodeURIComponent(hotel.name + " " + destination)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full py-2 bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-xs font-bold text-slate-700 dark:text-slate-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
-                >
-                  <span>{hotelRateSource === "agoda" ? "View on Agoda" : "Check Rates"}</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
+                {/* Booking / comparison actions. Agoda remains the live-rate source;
+                    Travelpayouts provides a second affiliate path for price verification. */}
+                <div className={`grid gap-2 ${travelpayoutsHotelLinks[hotel.name] ? "grid-cols-2" : "grid-cols-1"}`}>
+                  <a
+                    href={hotelRateSource === "agoda" && hotel.bookingLink ? hotel.bookingLink : `https://www.google.com/search?q=${encodeURIComponent(hotel.name + " " + destination)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2 bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800 rounded-xl text-center text-[11px] font-bold text-slate-700 dark:text-slate-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <span>{hotelRateSource === "agoda" ? "View on Agoda" : "Check Rates"}</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                  {travelpayoutsHotelLinks[hotel.name] && (
+                    <a
+                      href={travelpayoutsHotelLinks[hotel.name]}
+                      target="_blank"
+                      rel="noopener noreferrer sponsored"
+                      className="w-full py-2 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/35 dark:hover:bg-teal-950/55 border border-teal-200 dark:border-teal-900 rounded-xl text-center text-[11px] font-bold text-teal-700 dark:text-teal-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Compare this hotel through a Travelpayouts partner link"
+                    >
+                      <span>Compare Deals</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                </div>
               </div>
             ))}
           </div>
+          {travelpayoutsHotelsAvailable && (
+            <p className="text-[10px] leading-relaxed text-slate-400 dark:text-slate-500">
+              Compare Deals links are generated through Travelpayouts. Agoda remains the source of the nightly rate shown above; other platforms may show a different room, tax treatment, cancellation policy or final price.
+            </p>
+          )}
         </div>
 
         {/* SECTION 2: Transportation Cost Estimates */}
