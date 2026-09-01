@@ -301,11 +301,25 @@ export async function searchAgodaHotels(input: {
   maxResult?: number;
 }): Promise<{ city: CityRecord; hotels: AgodaHotelResult[] }> {
   const { siteId, apiKey, authorization } = getAgodaCredentials();
-  if (!siteId || !apiKey || !authorization) throw new Error("Agoda API credentials are not configured.");
-  if (!validDate(input.checkInDate) || !validDate(input.checkOutDate)) throw new Error("Invalid Agoda stay dates.");
-  if (!cityIndexReady) await warmAgodaCityIndex(false);
+  console.log(`[Agoda] Search requested for destination="${String(input.destination || "").slice(0, 120)}", dates=${input.checkInDate || "?"}->${input.checkOutDate || "?"}, adults=${Number(input.adults) || 2}, children=${Number(input.children) || 0}, currency=${String(input.currency || "USD").toUpperCase()}.`);
+  if (!siteId || !apiKey || !authorization) {
+    console.warn(`[Agoda] Search stopped before request: credentials missing (siteId=${siteId ? "present" : "missing"}, apiKey=${apiKey ? "present" : "missing"}).`);
+    throw new Error("Agoda API credentials are not configured.");
+  }
+  if (!validDate(input.checkInDate) || !validDate(input.checkOutDate)) {
+    console.warn(`[Agoda] Search stopped before request: invalid stay dates (${input.checkInDate || "?"} -> ${input.checkOutDate || "?"}).`);
+    throw new Error("Invalid Agoda stay dates.");
+  }
+  if (!cityIndexReady) {
+    console.log("[Agoda] City index not ready at search time; waiting for index warm-up.");
+    await warmAgodaCityIndex(false);
+  }
   const city = resolveAgodaCity(input.destination);
-  if (!city) throw new Error(`Agoda city ID not found for ${input.destination}.`);
+  if (!city) {
+    console.warn(`[Agoda] City resolution failed for destination="${String(input.destination || "").slice(0, 120)}".`);
+    throw new Error(`Agoda city ID not found for ${input.destination}.`);
+  }
+  console.log(`[Agoda] Destination resolved: "${String(input.destination).slice(0, 120)}" -> cityId=${city.cityId}, city="${city.cityName}", country="${city.country || "unknown"}".`);
 
   const adults = Math.max(1, Math.min(20, Math.floor(Number(input.adults) || 2)));
   const children = Math.max(0, Math.min(10, Math.floor(Number(input.children) || 0)));
@@ -313,9 +327,18 @@ export async function searchAgodaHotels(input: {
   const maxResult = Math.max(1, Math.min(30, Math.floor(Number(input.maxResult) || 12)));
   const cacheKey = [city.cityId, input.checkInDate, input.checkOutDate, adults, children, currency, maxResult].join("|");
   const cached = hotelSearchCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < SEARCH_TTL) return { city, hotels: cached.data };
+  if (cached && Date.now() - cached.at < SEARCH_TTL) {
+    console.log(`[Agoda] Hotel search cache hit for cityId=${city.cityId}; returning ${cached.data.length} hotels.`);
+    return { city, hotels: cached.data };
+  }
 
   const endpoint = String(process.env.AGODA_API_URL || "http://affiliateapi7643.agoda.com/affiliateservice/lt_v1").trim();
+  let endpointLabel = endpoint;
+  try {
+    const u = new URL(endpoint);
+    endpointLabel = `${u.protocol}//${u.host}${u.pathname}`;
+  } catch { /* keep sanitized raw endpoint */ }
+  console.log(`[Agoda] Starting Affiliate Lite search: cityId=${city.cityId}, endpoint=${endpointLabel}, maxResult=${maxResult}.`);
   const body = {
     criteria: {
       additional: {
@@ -338,6 +361,7 @@ export async function searchAgodaHotels(input: {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 7000);
   let response: Response;
+  const startedAt = Date.now();
   try {
     response = await fetch(endpoint, {
       method: "POST",
@@ -350,17 +374,27 @@ export async function searchAgodaHotels(input: {
       },
       body: JSON.stringify(body)
     });
+  } catch (error: any) {
+    const reason = error?.name === "AbortError" ? "request timed out after 7000ms" : (error?.message || String(error));
+    console.warn(`[Agoda] Network request failed for cityId=${city.cityId}: ${reason}`);
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
+  console.log(`[Agoda] Affiliate Lite response: HTTP ${response.status} ${response.statusText || ""} in ${Date.now() - startedAt}ms.`.trim());
   const text = await response.text();
   let payload: any = null;
   try { payload = text ? JSON.parse(text) : null; } catch { /* handled below */ }
   if (!response.ok) {
     const detail = payload?.error?.message || payload?.message || `HTTP ${response.status}`;
+    console.warn(`[Agoda] Affiliate Lite rejected search: HTTP ${response.status}; detail=${String(detail).slice(0, 240)}.`);
     throw new Error(`Agoda search failed: ${detail}`);
   }
-  if (payload?.error) throw new Error(`Agoda search failed: ${payload.error.message || payload.error.id || "unknown error"}`);
+  if (payload?.error) {
+    const detail = payload.error.message || payload.error.id || "unknown error";
+    console.warn(`[Agoda] Affiliate Lite returned an error payload: ${String(detail).slice(0, 240)}.`);
+    throw new Error(`Agoda search failed: ${detail}`);
+  }
   const hotels: AgodaHotelResult[] = Array.isArray(payload?.results)
     ? payload.results.filter((h: any) => h?.hotelId && h?.hotelName && h?.landingURL).map((h: any) => ({
         hotelId: Number(h.hotelId),
@@ -378,6 +412,7 @@ export async function searchAgodaHotels(input: {
         freeWifi: Boolean(h.freeWifi),
       }))
     : [];
+  console.log(`[Agoda] Live search completed for cityId=${city.cityId}: rawResults=${Array.isArray(payload?.results) ? payload.results.length : 0}, usableHotels=${hotels.length}.`);
   hotelSearchCache.set(cacheKey, { at: Date.now(), data: hotels });
   return { city, hotels };
 }

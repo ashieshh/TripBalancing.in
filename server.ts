@@ -5205,9 +5205,12 @@ app.get("/api/agoda-status", verifyUserAuth, (_req, res) => {
 });
 
 app.post("/api/agoda-hotels", verifyUserAuth, async (req, res) => {
+  const requestStartedAt = Date.now();
   try {
     const { destination, checkInDate, checkOutDate, adults, children, currency, maxResult } = req.body || {};
+    console.log(`[Agoda] /api/agoda-hotels received: destination="${String(destination || "").slice(0, 120)}", dates=${checkInDate || "?"}->${checkOutDate || "?"}.`);
     if (!destination || !checkInDate || !checkOutDate) {
+      console.warn("[Agoda] /api/agoda-hotels rejected: required destination/date field missing.");
       return res.status(400).json({ error: "Destination, check-in date and check-out date are required." });
     }
     const result = await searchAgodaHotels({
@@ -5219,9 +5222,10 @@ app.post("/api/agoda-hotels", verifyUserAuth, async (req, res) => {
       currency: String(currency || "USD"),
       maxResult: Number(maxResult) || 12,
     });
+    console.log(`[Agoda] /api/agoda-hotels success: cityId=${result.city.cityId}, hotels=${result.hotels.length}, elapsed=${Date.now() - requestStartedAt}ms.`);
     return res.json({ source: "agoda", city: result.city, hotels: result.hotels });
   } catch (error: any) {
-    console.warn("[Agoda] Live hotel search unavailable:", error?.message || error);
+    console.warn(`[Agoda] /api/agoda-hotels failed after ${Date.now() - requestStartedAt}ms:`, error?.message || error);
     return res.status(503).json({
       error: "Live Agoda rates are temporarily unavailable. TripBalancing estimates remain available.",
       code: "AGODA_UNAVAILABLE"
