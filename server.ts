@@ -5229,7 +5229,9 @@ async function attachLiveAgodaHotelsToItinerary(itinerary: any): Promise<any> {
     const symbols: Record<string,string> = { INR:"₹", USD:"$", EUR:"€", GBP:"£", JPY:"¥", AUD:"A$", CAD:"C$", SGD:"S$", AED:"د.إ", CHF:"CHF ", THB:"฿", CNY:"¥" };
     const convert = (h: any) => ({
       name: String(h.hotelName || "Agoda Hotel"),
-      pricePerNight: `${symbols[String(h.currency || currency).toUpperCase()] || `${String(h.currency || currency).toUpperCase()} `}${Math.round(Number(h.dailyRate) || 0).toLocaleString("en-US")}/night`,
+      pricePerNight: `${symbols[String(h.currency || currency).toUpperCase()] || `${String(h.currency || currency).toUpperCase()} `}${Math.round(Number(h.dailyRate) || 0).toLocaleString("en-US")}/night estimated`,
+      dailyRate: Number(h.dailyRate) || 0,
+      rateCurrency: String(h.currency || currency).toUpperCase(),
       rating: Math.max(0, Math.min(5, Number(h.starRating) || 0)),
       distanceFromCenter: Number(h.reviewScore) > 0 ? `Guest score ${Number(h.reviewScore).toFixed(1)}/10` : "See Agoda details",
       bookingLink: String(h.landingURL || "#"),

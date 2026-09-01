@@ -105,6 +105,10 @@ export interface HotelRecommend {
   includeBreakfast?: boolean;
   freeWifi?: boolean;
   source?: "agoda" | "estimate";
+  // Original Agoda per-night sell rate for the selected dates. Kept separate
+  // from the display label so TripBalancing never re-bases Agoda rates to budget.
+  dailyRate?: number;
+  rateCurrency?: string;
 }
 
 export interface DetailedTransportationCosts {

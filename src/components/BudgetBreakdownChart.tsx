@@ -177,7 +177,9 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
         const symbolFor = (code: string) => POPULAR_CURRENCIES[String(code || "").toUpperCase()]?.symbol || `${String(code || "").toUpperCase()} `;
         const convert = (h: any): HotelRecommend => ({
           name: String(h.hotelName || "Agoda Hotel"),
-          pricePerNight: `${symbolFor(h.currency)}${Math.round(Number(h.dailyRate) || 0).toLocaleString()}/night`,
+          pricePerNight: `${symbolFor(h.currency)}${Math.round(Number(h.dailyRate) || 0).toLocaleString()}/night estimated`,
+          dailyRate: Number(h.dailyRate) || 0,
+          rateCurrency: String(h.currency || baseCurrency).toUpperCase(),
           rating: Math.max(0, Math.min(5, Number(h.starRating) || 0)),
           distanceFromCenter: Number(h.reviewScore) > 0 ? `Guest score ${Number(h.reviewScore).toFixed(1)}/10` : "See Agoda details",
           bookingLink: String(h.landingURL || "#"),

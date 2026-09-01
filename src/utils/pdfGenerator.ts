@@ -2374,7 +2374,7 @@ export const exportPremiumTravelPDF = async (
   const sectionHasAgodaRates = [hotelData.budget, hotelData.midRange, hotelData.luxury].some((list: any) => Array.isArray(list) && list.some((h: any) => h?.source === "agoda"));
   const lodgingIntro = hasHotelCards
     ? sectionHasAgodaRates
-      ? `Finding the right stay is essential to the itinerary. For your selected ${itinerary.travelStyle || 'travel'} style, TripBalancing prioritizes ${preferredLodging} first, then shows other tiers as reference alternatives. The properties below use live Agoda rates for your selected dates; verify final taxes, availability and cancellation terms on Agoda before booking.`
+      ? `Finding the right stay is essential to the itinerary. For your selected ${itinerary.travelStyle || 'travel'} style, TripBalancing prioritizes ${preferredLodging} first, then shows other tiers as reference alternatives. The properties below use Agoda daily rates returned for your selected dates and show them as estimated references; confirm the final rate, taxes, availability and cancellation terms on Agoda or your preferred booking platform before booking.`
       : `Finding the right stay is essential to the itinerary. For your selected ${itinerary.travelStyle || 'travel'} style, TripBalancing prioritizes ${preferredLodging} first, then shows other tiers as reference alternatives. The properties below are planning references with estimated nightly guidance; verify live rates, availability, taxes, reviews and cancellation terms before booking.`
     : `TripBalancing has calculated an accommodation allowance for this trip, but no sufficiently reliable property-level recommendations were available for this destination. Use the style-appropriate tiers below as a planning guide and verify live hotel options before booking.`;
   doc.text(doc.splitTextToSize(lodgingIntro, 180), marginX, y);
@@ -2414,7 +2414,7 @@ export const exportPremiumTravelPDF = async (
     doc.setFontSize(8);
     doc.setTextColor(13, 148, 136);
     const hasAgodaRates = [hotelData.budget, hotelData.midRange, hotelData.luxury].some((list: any) => Array.isArray(list) && list.some((h: any) => h?.source === "agoda"));
-    doc.text(`Trip accommodation allowance: ${currencySym}${nightlyAllowance.toLocaleString()} per night (${hotelNights} night${hotelNights === 1 ? "" : "s"}). ${hasAgodaRates ? "Hotel prices below are live Agoda rates for the selected dates." : "Recommendations below are planning estimates, not a forced tier."}`, marginX, y);
+    doc.text(`Trip accommodation allowance: ${currencySym}${nightlyAllowance.toLocaleString()} per night (${hotelNights} night${hotelNights === 1 ? "" : "s"}). ${hasAgodaRates ? "Hotel prices below use Agoda daily rates for the selected dates and remain labelled estimated until booking is confirmed." : "Recommendations below are planning estimates, not a forced tier."}`, marginX, y);
     y += 7;
   }
 

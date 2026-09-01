@@ -791,6 +791,11 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       if (!Array.isArray(list)) return;
       const variation = [0.92, 1.00, 1.08];
       list.forEach((h: any, index: number) => {
+        // Agoda hotel prices come directly from Agoda dailyRate for the selected dates.
+        // Preserve that market rate; only planning/fallback hotel cards are reconciled
+        // to TripBalancing's accommodation allowance. We still label Agoda rates as
+        // "estimated" because final price, taxes and availability can change by booking time.
+        if (String(h?.source || "").toLowerCase() === "agoda") return;
         const variedRate = baseNight * factor * variation[index % variation.length];
         h.pricePerNight = `${fmtMoney(variedRate)}/night estimated`;
       });
