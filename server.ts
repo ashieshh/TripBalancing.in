@@ -230,13 +230,17 @@ const GEOCODE_CACHE = new Map<string, CacheEntry>();
 const TRAVEL_TIPS_CACHE = new Map<string, CacheEntry>();
 const WEATHER_CACHE = new Map<string, CacheEntry>();
 const OPEN_WEATHER_CACHE = new Map<string, CacheEntry>();
+const OPEN_WEATHER_INFLIGHT = new Map<string, Promise<any>>();
+const OPEN_WEATHER_COOLDOWN_UNTIL = new Map<string, number>();
 const RATES_CACHE = { data: null as any, timestamp: 0 };
 
 const ITINERARY_TTL = 24 * 60 * 60 * 1000; // Cache itineraries for 24 hours
 const GEOCODE_TTL = 30 * 24 * 60 * 60 * 1000; // Cache coordinates for 30 days
 const TRAVEL_TIPS_TTL = 6 * 60 * 60 * 1000; // Cache travel advisories/tips for 6 hours
 const WEATHER_TTL = 3 * 60 * 60 * 1000; // Cache weather forecast for 3 hours
-const OPEN_WEATHER_TTL = 30 * 60 * 1000; // Cache open weather forecast for 30 minutes
+const OPEN_WEATHER_TTL = 60 * 60 * 1000; // Fresh Open-Meteo forecast cache: 1 hour
+const OPEN_WEATHER_STALE_TTL = 24 * 60 * 60 * 1000; // Safe stale fallback for upstream 429/outages
+const OPEN_WEATHER_429_COOLDOWN = 90 * 1000; // Do not hammer Open-Meteo after a rate-limit response
 const RATES_TTL = 30 * 60 * 1000; // Cache exchange rates for 30 minutes
 
 async function ensureBudgetFxRates(): Promise<void> {
@@ -2057,6 +2061,57 @@ async function repairItineraryForStyle(
     console.warn('[STYLE_REPAIR_FAILED]', repairError?.message || repairError);
     return null;
   }
+}
+
+function deterministicRepairGeneratedItinerary(itinerary: any, destination: string, expectedTravelStyle?: string) {
+  if (!itinerary || typeof itinerary !== 'object') return itinerary;
+  const clone = JSON.parse(JSON.stringify(itinerary));
+  const genericLocation = /^(city center|city centre|downtown|old town|main market|hotel|airport|station|restaurant|cafe|the destination)$/i;
+  const destinationCore = String(destination || clone.destination || '').split(',')[0].trim().toLowerCase();
+  const placeNames = new Set((Array.isArray(clone.placesToVisit) ? clone.placesToVisit : []).map((p:any)=>String(p?.name||'').trim().toLowerCase()).filter(Boolean));
+  clone.placesToVisit = Array.isArray(clone.placesToVisit) ? clone.placesToVisit : [];
+
+  // When Gemini returns only 2-3 attractions, salvage distinct real locations already
+  // present in its daily plan instead of spending another model call or discarding the trip.
+  for (const d of Array.isArray(clone.days) ? clone.days : []) {
+    for (const a of Array.isArray(d?.activities) ? d.activities : []) {
+      const loc = sanitizeGeneratedText(a?.location || '');
+      const title = sanitizeGeneratedText(a?.title || '');
+      if (!loc || loc.length < 4 || loc.length > 100 || genericLocation.test(loc)) continue;
+      const key = loc.toLowerCase();
+      if (key === destinationCore || key.includes('airport') || key.includes('station') || placeNames.has(key)) continue;
+      if (/(lunch|dinner|breakfast|restaurant|cafe|hotel|resort|spa|transfer|check[- ]?in|check[- ]?out)/i.test(`${title} ${loc}`)) continue;
+      clone.placesToVisit.push({
+        name: loc,
+        description: sanitizeGeneratedText(a?.description || `A destination-specific stop included in the ${destination} itinerary.`),
+        bestTimeToVisit: String(a?.time || 'Check current opening hours'),
+        entryFee: String(a?.cost || 'Verify current price')
+      });
+      placeNames.add(key);
+      if (clone.placesToVisit.length >= 4) break;
+    }
+    if (clone.placesToVisit.length >= 4) break;
+  }
+
+  // Fill a thin food list only from named meal/tasting activities already returned by Gemini.
+  clone.localFood = Array.isArray(clone.localFood) ? clone.localFood : [];
+  const foodNames = new Set(clone.localFood.map((f:any)=>String(f?.name||'').trim().toLowerCase()).filter(Boolean));
+  if (clone.localFood.length < 3) {
+    for (const d of Array.isArray(clone.days) ? clone.days : []) {
+      for (const a of Array.isArray(d?.activities) ? d.activities : []) {
+        if (!/(breakfast|brunch|lunch|dinner|culinary|tasting|food|dish|dessert|bakery|cafe)/i.test(String(a?.title||''))) continue;
+        const raw = sanitizeGeneratedText(String(a?.title||'').replace(/^[^:]{1,40}:\s*/, ''));
+        if (!raw || raw.length < 3 || raw.length > 80 || /seasonal|regional|local menu|chef/i.test(raw)) continue;
+        const key=raw.toLowerCase(); if(foodNames.has(key)) continue;
+        clone.localFood.push({ name: raw, description: sanitizeGeneratedText(a?.description||''), type: 'both', mustTryAt: sanitizeGeneratedText(a?.location||destination) });
+        foodNames.add(key);
+        if (clone.localFood.length >= 3) break;
+      }
+      if (clone.localFood.length >= 3) break;
+    }
+  }
+
+  return sanitizeItineraryStrings(clone);
 }
 
 function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string): string[] {
@@ -4567,7 +4622,16 @@ Return the response in strict JSON format.`;
         }
       }
       if (qualityErrors.length) {
-        throw new Error(`AI itinerary failed quality validation after repair: ${qualityErrors.join('; ')}`);
+        const deterministic = deterministicRepairGeneratedItinerary(parsedItinerary, destination, travelStyle);
+        const deterministicErrors = validateGeneratedItinerary(deterministic, travelStyle);
+        if (!deterministicErrors.length) {
+          console.warn(`[STYLE_DETERMINISTIC_REPAIR] ${travelStyle}: repaired without another AI call.`);
+          parsedItinerary = deterministic;
+          qualityErrors = [];
+        } else {
+          qualityErrors = deterministicErrors;
+          throw new Error(`AI itinerary failed quality validation after repair: ${qualityErrors.join('; ')}`);
+        }
       }
     }
     
@@ -5649,141 +5713,105 @@ Return the output in strict JSON format.`;
   }
 });
 
-// Open-Meteo 5-Day Weather Forecast Endpoint (Proxy & Cache)
+// Open-Meteo 5-Day Weather Forecast Endpoint (Proxy, Cache, Dedupe & 429 Protection)
 app.post("/api/open-weather", async (req, res) => {
-  try {
-    const { destination, latitude, longitude } = req.body;
-    if (!destination) {
-      return res.status(400).json({ error: "Missing required parameter: destination" });
-    }
+  const { destination, latitude, longitude } = req.body || {};
+  if (!destination) return res.status(400).json({ error: "Missing required parameter: destination" });
 
-    const cacheKey = `${destination.toLowerCase().trim()}_${latitude || ""}_${longitude || ""}`;
-    const cached = OPEN_WEATHER_CACHE.get(cacheKey);
-    if (cached && (Date.now() - cached.timestamp < OPEN_WEATHER_TTL)) {
-      console.log(`[Cache Hit] Returning cached Open-Meteo weather for: ${destination}`);
-      return res.json(cached.data);
-    }
+  const cacheKey = `${String(destination).toLowerCase().trim()}_${latitude || ""}_${longitude || ""}`;
+  const now = Date.now();
+  const cached = OPEN_WEATHER_CACHE.get(cacheKey);
+  if (cached && (now - cached.timestamp < OPEN_WEATHER_TTL)) {
+    console.log(`[Cache Hit] Returning cached Open-Meteo weather for: ${destination}`);
+    return res.json(cached.data);
+  }
 
+  const staleUsable = cached?.data && (now - cached.timestamp < OPEN_WEATHER_STALE_TTL);
+  const cooldownUntil = OPEN_WEATHER_COOLDOWN_UNTIL.get(cacheKey) || 0;
+  if (now < cooldownUntil && staleUsable) {
+    console.warn(`[Weather 429 cooldown] Serving stale cached forecast for: ${destination}`);
+    return res.json({ ...cached.data, isFallback: true, degraded: true, notice: "Weather provider is rate-limited; showing the last successful forecast." });
+  }
+  if (now < cooldownUntil && !staleUsable) {
+    return res.json({ destination, summary: `Live weather is temporarily rate-limited for ${destination}.`, forecast: [], sources: [{ title: "Open-Meteo", url: "https://open-meteo.com/" }], isFallback: true, degraded: true, weatherUnavailable: true, notice: "Season-aware planning is being shown until live weather refreshes." });
+  }
+
+  const existing = OPEN_WEATHER_INFLIGHT.get(cacheKey);
+  if (existing) {
+    console.log(`[Weather Dedupe] Joining in-flight Open-Meteo request for: ${destination}`);
+    try { return res.json(await existing); }
+    catch { /* fall through to stale/soft fallback below */ }
+  }
+
+  const task = (async () => {
     let lat = latitude ? parseFloat(latitude) : null;
     let lon = longitude ? parseFloat(longitude) : null;
-
-    // If coordinates are missing, let's use our robust geocoder to resolve them
     if (lat === null || lon === null || isNaN(lat) || isNaN(lon)) {
       console.log(`[Geocoding] Missing lat/lon for: ${destination}. Querying geocoding API...`);
       const geoResult = await geocodeDestination(destination);
-      if (geoResult) {
-        lat = geoResult.latitude;
-        lon = geoResult.longitude;
-        console.log(`[Geocoding Success] Resolved "${destination}" to lat: ${lat}, lon: ${lon}`);
-      }
+      if (geoResult) { lat = geoResult.latitude; lon = geoResult.longitude; }
     }
-
-    // Default coordinates fallback if we still don't have them
     if (lat === null || lon === null || isNaN(lat) || isNaN(lon)) {
-      lat = 28.6139; // Delhi fallback
-      lon = 77.2090;
-      console.log(`[Geocoding Fallback] Using default coordinates for ${destination}`);
+      throw new Error(`Could not resolve coordinates for ${destination}`);
     }
 
-    // Query 5-day daily forecast from Open-Meteo
-    console.log(`[Weather Fetch] Fetching 5-day forecast from Open-Meteo for lat: ${lat}, lon: ${lon}...`);
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&hourly=relative_humidity_2m&timezone=auto`;
-    const weatherRes = await fetch(weatherUrl);
-    if (!weatherRes.ok) {
-      throw new Error(`Open-Meteo request failed: ${weatherRes.statusText}`);
+    let weatherRes: Response | null = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      console.log(`[Weather Fetch] Open-Meteo attempt ${attempt}/2 for lat: ${lat}, lon: ${lon}...`);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5500);
+      try { weatherRes = await fetch(weatherUrl, { signal: controller.signal }); }
+      finally { clearTimeout(timer); }
+      if (weatherRes.ok) break;
+      if (weatherRes.status === 429) {
+        OPEN_WEATHER_COOLDOWN_UNTIL.set(cacheKey, Date.now() + OPEN_WEATHER_429_COOLDOWN);
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1200));
+        continue;
+      }
+      throw new Error(`Open-Meteo request failed: HTTP ${weatherRes.status}`);
     }
+    if (!weatherRes?.ok) throw new Error(`Open-Meteo request failed: HTTP ${weatherRes?.status || 'unknown'}`);
 
-    const weatherData = await weatherRes.json();
-    if (!weatherData || !weatherData.daily) {
-      throw new Error("Invalid response format from Open-Meteo API");
-    }
-
+    const weatherData:any = await weatherRes.json();
+    if (!weatherData?.daily) throw new Error("Invalid response format from Open-Meteo API");
     const daily = weatherData.daily;
     const count = Math.min(5, daily.time?.length || 0);
-    const forecast = [];
-
+    const forecast:any[] = [];
     const weatherCodesMap: Record<number, { condition: string; iconType: string }> = {
-      0: { condition: "Clear", iconType: "sunny" },
-      1: { condition: "Mainly Clear", iconType: "partly-cloudy" },
-      2: { condition: "Partly Cloudy", iconType: "partly-cloudy" },
-      3: { condition: "Overcast", iconType: "cloudy" },
-      45: { condition: "Foggy", iconType: "cloudy" },
-      48: { condition: "Depositing Rime Fog", iconType: "cloudy" },
-      51: { condition: "Light Drizzle", iconType: "rainy" },
-      53: { condition: "Moderate Drizzle", iconType: "rainy" },
-      55: { condition: "Dense Drizzle", iconType: "rainy" },
-      56: { condition: "Light Freezing Drizzle", iconType: "snowy" },
-      57: { condition: "Dense Freezing Drizzle", iconType: "snowy" },
-      61: { condition: "Slight Rain", iconType: "rainy" },
-      63: { condition: "Moderate Rain", iconType: "rainy" },
-      65: { condition: "Heavy Rain", iconType: "rainy" },
-      66: { condition: "Light Freezing Rain", iconType: "snowy" },
-      67: { condition: "Heavy Freezing Rain", iconType: "snowy" },
-      71: { condition: "Slight Snowfall", iconType: "snowy" },
-      73: { condition: "Moderate Snowfall", iconType: "snowy" },
-      75: { condition: "Heavy Snowfall", iconType: "snowy" },
-      77: { condition: "Snow Grains", iconType: "snowy" },
-      80: { condition: "Slight Rain Showers", iconType: "rainy" },
-      81: { condition: "Moderate Rain Showers", iconType: "rainy" },
-      82: { condition: "Violent Rain Showers", iconType: "rainy" },
-      85: { condition: "Slight Snow Showers", iconType: "snowy" },
-      86: { condition: "Heavy Snow Showers", iconType: "snowy" },
-      95: { condition: "Thunderstorm", iconType: "stormy" },
-      96: { condition: "Storm with Slight Hail", iconType: "stormy" },
-      99: { condition: "Storm with Heavy Hail", iconType: "stormy" }
+      0:{condition:"Clear",iconType:"sunny"},1:{condition:"Mainly Clear",iconType:"partly-cloudy"},2:{condition:"Partly Cloudy",iconType:"partly-cloudy"},3:{condition:"Overcast",iconType:"cloudy"},45:{condition:"Foggy",iconType:"cloudy"},48:{condition:"Depositing Rime Fog",iconType:"cloudy"},51:{condition:"Light Drizzle",iconType:"rainy"},53:{condition:"Moderate Drizzle",iconType:"rainy"},55:{condition:"Dense Drizzle",iconType:"rainy"},56:{condition:"Light Freezing Drizzle",iconType:"snowy"},57:{condition:"Dense Freezing Drizzle",iconType:"snowy"},61:{condition:"Slight Rain",iconType:"rainy"},63:{condition:"Moderate Rain",iconType:"rainy"},65:{condition:"Heavy Rain",iconType:"rainy"},66:{condition:"Light Freezing Rain",iconType:"snowy"},67:{condition:"Heavy Freezing Rain",iconType:"snowy"},71:{condition:"Slight Snowfall",iconType:"snowy"},73:{condition:"Moderate Snowfall",iconType:"snowy"},75:{condition:"Heavy Snowfall",iconType:"snowy"},77:{condition:"Snow Grains",iconType:"snowy"},80:{condition:"Slight Rain Showers",iconType:"rainy"},81:{condition:"Moderate Rain Showers",iconType:"rainy"},82:{condition:"Violent Rain Showers",iconType:"rainy"},85:{condition:"Slight Snow Showers",iconType:"snowy"},86:{condition:"Heavy Snow Showers",iconType:"snowy"},95:{condition:"Thunderstorm",iconType:"stormy"},96:{condition:"Storm with Slight Hail",iconType:"stormy"},99:{condition:"Storm with Heavy Hail",iconType:"stormy"}
     };
-
-    for (let i = 0; i < count; i++) {
-      const code = daily.weather_code?.[i] ?? 0;
-      const mapping = weatherCodesMap[code] || { condition: "Cloudy", iconType: "cloudy" };
-      const dateStr = daily.time?.[i] || "";
-      let dayName = "Day";
-      if (dateStr) {
-        const d = new Date(dateStr + "T00:00:00");
-        dayName = d.toLocaleDateString("en-US", { weekday: "short" });
-      }
-
-      const dayHumidityValues = Array.isArray(weatherData?.hourly?.relative_humidity_2m)
-        ? weatherData.hourly.relative_humidity_2m.slice(i * 24, i * 24 + 24).filter((v: any) => Number.isFinite(Number(v))).map(Number)
-        : [];
-      const humidityAvg = dayHumidityValues.length
-        ? Math.round(dayHumidityValues.reduce((sum: number, value: number) => sum + value, 0) / dayHumidityValues.length)
-        : null;
-
-      forecast.push({
-        dayName,
-        date: dateStr,
-        tempMax: Math.round(daily.temperature_2m_max?.[i] ?? 25),
-        tempMin: Math.round(daily.temperature_2m_min?.[i] ?? 15),
-        condition: mapping.condition,
-        iconType: mapping.iconType,
-        precipitation: `${Math.round(Number(daily.precipitation_probability_max?.[i] ?? 0))}%`,
-        humidity: humidityAvg == null ? "—" : `${humidityAvg}%`
-      });
+    for (let i=0;i<count;i++) {
+      const mapping=weatherCodesMap[daily.weather_code?.[i] ?? 0] || {condition:"Cloudy",iconType:"cloudy"};
+      const dateStr=daily.time?.[i] || "";
+      const dayName=dateStr ? new Date(dateStr+"T00:00:00").toLocaleDateString("en-US",{weekday:"short"}) : "Day";
+      const hum=Array.isArray(weatherData?.hourly?.relative_humidity_2m) ? weatherData.hourly.relative_humidity_2m.slice(i*24,i*24+24).filter((v:any)=>Number.isFinite(Number(v))).map(Number) : [];
+      const humidityAvg=hum.length ? Math.round(hum.reduce((a:number,b:number)=>a+b,0)/hum.length) : null;
+      forecast.push({dayName,date:dateStr,tempMax:Math.round(daily.temperature_2m_max?.[i] ?? 25),tempMin:Math.round(daily.temperature_2m_min?.[i] ?? 15),condition:mapping.condition,iconType:mapping.iconType,precipitation:`${Math.round(Number(daily.precipitation_probability_max?.[i] ?? 0))}%`,humidity:humidityAvg==null?"—":`${humidityAvg}%`});
     }
+    const rainy=forecast.filter((d:any)=>/rain|drizzle|storm|shower/i.test(String(d.condition))).length;
+    const maxTemp=forecast.length?Math.max(...forecast.map((d:any)=>Number(d.tempMax)||0)):null;
+    const minTemp=forecast.length?Math.min(...forecast.map((d:any)=>Number(d.tempMin)||0)):null;
+    const result={destination,summary:forecast.length?`${forecast.length}-day outlook: ${rainy?`${rainy} day${rainy===1?"":"s"} with rain/showers possible. `:"Mostly dry conditions expected. "}${minTemp}°C to ${maxTemp}°C.`:`Weather forecast for ${destination}.`,forecast,sources:[{title:"Open-Meteo",url:"https://open-meteo.com/"}],isFallback:false};
+    OPEN_WEATHER_CACHE.set(cacheKey,{data:result,timestamp:Date.now()});
+    OPEN_WEATHER_COOLDOWN_UNTIL.delete(cacheKey);
+    return result;
+  })();
 
-    const rainy = forecast.filter((d: any) => /rain|drizzle|storm|shower/i.test(String(d.condition))).length;
-    const maxTemp = forecast.length ? Math.max(...forecast.map((d: any) => Number(d.tempMax) || 0)) : null;
-    const minTemp = forecast.length ? Math.min(...forecast.map((d: any) => Number(d.tempMin) || 0)) : null;
-    const result = {
-      destination,
-      summary: forecast.length
-        ? `${forecast.length}-day outlook: ${rainy ? `${rainy} day${rainy === 1 ? "" : "s"} with rain/showers possible. ` : "Mostly dry conditions expected. "}${minTemp}°C to ${maxTemp}°C.`
-        : `Weather forecast for ${destination}.`,
-      forecast,
-      sources: [{ title: "Open-Meteo", url: "https://open-meteo.com/" }],
-      isFallback: false
-    };
-
-    OPEN_WEATHER_CACHE.set(cacheKey, {
-      data: result,
-      timestamp: Date.now()
-    });
-
-    return res.json(result);
-  } catch (error: any) {
-    console.error("Open-Meteo weather fetch error:", error);
-    return res.status(500).json({ error: "Failed to fetch 5-day weather forecast" });
+  OPEN_WEATHER_INFLIGHT.set(cacheKey, task);
+  try {
+    return res.json(await task);
+  } catch (error:any) {
+    const latest=OPEN_WEATHER_CACHE.get(cacheKey);
+    const canUse=latest?.data && (Date.now()-latest.timestamp < OPEN_WEATHER_STALE_TTL);
+    if (canUse) {
+      console.warn(`[Weather fallback] Serving stale forecast for ${destination}: ${error?.message || error}`);
+      return res.json({...latest.data,isFallback:true,degraded:true,notice:"Live weather refresh is temporarily unavailable; showing the last successful forecast."});
+    }
+    console.warn(`[Weather fallback] Live weather unavailable for ${destination}: ${error?.message || error}`);
+    return res.json({destination,summary:`Live weather is temporarily unavailable for ${destination}.`,forecast:[],sources:[{title:"Open-Meteo",url:"https://open-meteo.com/"}],isFallback:true,degraded:true,weatherUnavailable:true,notice:"Season-aware planning is being shown until live weather refreshes."});
+  } finally {
+    OPEN_WEATHER_INFLIGHT.delete(cacheKey);
   }
 });
 
