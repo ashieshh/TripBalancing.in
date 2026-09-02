@@ -30,6 +30,75 @@ let cityIndexError = "";
 const hotelSearchCache = new Map<string, { at: number; data: AgodaHotelResult[] }>();
 const SEARCH_TTL = 15 * 60 * 1000;
 
+const CITY_INDEX_CACHE_VERSION = 1;
+const DEFAULT_CITY_INDEX_CACHE_PATH = path.join(os.tmpdir(), "tripbalancing-agoda-city-index-v1.json.gz");
+
+function getCityIndexCachePath(): string {
+  return String(process.env.AGODA_CITY_INDEX_CACHE_PATH || DEFAULT_CITY_INDEX_CACHE_PATH).trim();
+}
+
+function uniqueCityRecords(): CityRecord[] {
+  const seen = new Set<string>();
+  const out: CityRecord[] = [];
+  for (const records of cityIndex.values()) {
+    for (const record of records) {
+      const key = `${record.cityId}|${record.cityName}|${record.country || ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(record);
+    }
+  }
+  return out;
+}
+
+function loadCityIndexCache(): boolean {
+  const cachePath = getCityIndexCachePath();
+  if (!cachePath || !fs.existsSync(cachePath)) return false;
+  try {
+    const startedAt = Date.now();
+    const compressed = fs.readFileSync(cachePath);
+    const parsed = JSON.parse(zlib.gunzipSync(compressed).toString("utf8"));
+    if (!parsed || parsed.version !== CITY_INDEX_CACHE_VERSION || !Array.isArray(parsed.cities)) {
+      return false;
+    }
+    cityIndex.clear();
+    for (const raw of parsed.cities) {
+      const cityId = Number(raw?.cityId);
+      const cityName = String(raw?.cityName || "").trim();
+      const country = String(raw?.country || "").trim();
+      if (Number.isFinite(cityId) && cityId > 0 && cityName) addCity({ cityId, cityName, country });
+    }
+    if (!cityIndex.size) return false;
+    cityIndexReady = true;
+    cityIndexError = "";
+    console.log(`[Agoda] City index restored from compact cache with ${cityIndex.size} searchable keys in ${Date.now() - startedAt}ms.`);
+    return true;
+  } catch (err: any) {
+    console.warn(`[Agoda] Compact city index cache could not be loaded: ${err?.message || err}`);
+    return false;
+  }
+}
+
+function saveCityIndexCache(): void {
+  const cachePath = getCityIndexCachePath();
+  if (!cachePath || !cityIndex.size) return;
+  try {
+    const payload = Buffer.from(JSON.stringify({
+      version: CITY_INDEX_CACHE_VERSION,
+      generatedAt: new Date().toISOString(),
+      cities: uniqueCityRecords(),
+    }), "utf8");
+    const compressed = zlib.gzipSync(payload, { level: 9 });
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tempPath = `${cachePath}.tmp-${process.pid}`;
+    fs.writeFileSync(tempPath, compressed);
+    fs.renameSync(tempPath, cachePath);
+    console.log(`[Agoda] Compact city index cache saved (${Math.round(compressed.length / 1024)} KB).`);
+  } catch (err: any) {
+    console.warn(`[Agoda] Compact city index cache could not be saved: ${err?.message || err}`);
+  }
+}
+
 function normalizeName(value: string): string {
   return String(value || "")
     .normalize("NFD")
@@ -247,6 +316,13 @@ export async function warmAgodaCityIndex(force = false): Promise<void> {
       cityIndex.clear();
       cityIndexReady = false;
       cityIndexError = "";
+
+      // Fast path: after the first successful Agoda feed parse, restore the much
+      // smaller city-only cache instead of re-reading the full hotel inventory.
+      // This is especially useful when Render wakes a sleeping service on the
+      // same filesystem. A normal feed rebuild remains the automatic fallback.
+      if (!force && loadCityIndexCache()) return;
+
       if (force || !fs.existsSync(zipPath)) await downloadHotelData(feedUrl, zipPath);
       const entries = readZipEntries(zipPath)
         .filter((e) => /\.(csv|txt|tsv)$/i.test(e.name) && e.uncompressedSize > 0)
@@ -263,6 +339,7 @@ export async function warmAgodaCityIndex(force = false): Promise<void> {
       if (!parsed) throw lastError || new Error("Could not build the Agoda city index.");
       cityIndexReady = true;
       console.log(`[Agoda] City index ready with ${cityIndex.size} searchable keys.`);
+      saveCityIndexCache();
     } catch (err: any) {
       cityIndexError = err?.message || String(err);
       console.warn("[Agoda] City index unavailable:", cityIndexError);
