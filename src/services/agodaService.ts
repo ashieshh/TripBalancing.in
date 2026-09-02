@@ -31,6 +31,7 @@ const hotelSearchCache = new Map<string, { at: number; data: AgodaHotelResult[] 
 const SEARCH_TTL = 15 * 60 * 1000;
 
 const CITY_INDEX_CACHE_VERSION = 1;
+const BUNDLED_CITY_INDEX_CACHE_PATH = path.join(process.cwd(), "data", "agoda-city-index-v1.json.gz");
 const DEFAULT_CITY_INDEX_CACHE_PATH = path.join(os.tmpdir(), "tripbalancing-agoda-city-index-v1.json.gz");
 
 function getCityIndexCachePath(): string {
@@ -52,8 +53,13 @@ function uniqueCityRecords(): CityRecord[] {
 }
 
 function loadCityIndexCache(): boolean {
-  const cachePath = getCityIndexCachePath();
-  if (!cachePath || !fs.existsSync(cachePath)) return false;
+  // Prefer a cache generated during the Render build. This file is part of the
+  // deployed build filesystem, so cold starts do not need to parse Agoda's
+  // large hotel feed. Fall back to the runtime cache for local/dev use.
+  const configuredPath = getCityIndexCachePath();
+  const candidates = Array.from(new Set([BUNDLED_CITY_INDEX_CACHE_PATH, configuredPath].filter(Boolean)));
+  const cachePath = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!cachePath) return false;
   try {
     const startedAt = Date.now();
     const compressed = fs.readFileSync(cachePath);
