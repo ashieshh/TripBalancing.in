@@ -528,6 +528,62 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
 
   const currencySym = calculated.currencySymbol;
 
+  // When Agoda has already returned live hotel options, price the accommodation
+  // category from the first recommended hotel in the selected travel-style tier.
+  // This replaces only the generic hotel allowance; every other trip category keeps
+  // the deterministic calculator as its source. Agoda dailyRate is requested in the
+  // trip display currency, but we still honor rateCurrency when conversion is needed.
+  const styleText = String(travelStyle || "Mid-range").toLowerCase();
+  const preferredHotelTier: "budget" | "midRange" | "luxury" =
+    styleText.includes("smart luxury") ? "midRange"
+      : (styleText.includes("luxury") || styleText.includes("premium") || styleText.includes("vip")) ? "luxury"
+        : (styleText.includes("budget") || styleText.includes("solo") || styleText.includes("backpacker")) ? "budget"
+          : "midRange";
+  const preferredHotels = Array.isArray(itinerary?.hotelRecommendations?.[preferredHotelTier])
+    ? itinerary.hotelRecommendations[preferredHotelTier]
+    : [];
+  const recommendedAgodaHotel = preferredHotels.find((hotel:any) =>
+    hotel?.source === "agoda" && Number.isFinite(Number(hotel?.dailyRate)) && Number(hotel.dailyRate) > 0
+  );
+  if (recommendedAgodaHotel) {
+    const nights = calculateHotelNights(itinerary.startDate, itinerary.endDate, days);
+    const rooms = Math.ceil(travelers / 2);
+    const tripCurrency = detectCurrencyCode(userBudgetInput, destination);
+    const sourceCurrency = String(recommendedAgodaHotel.rateCurrency || tripCurrency).toUpperCase();
+    const rawNightly = Number(recommendedAgodaHotel.dailyRate) || 0;
+    const nightlyInTripCurrency = sourceCurrency === tripCurrency
+      ? rawNightly
+      : rawNightly * getLiveCrossRate(sourceCurrency, tripCurrency);
+    const liveHotelTotal = Math.max(0, Math.round(nightlyInTripCurrency * nights * rooms));
+    if (liveHotelTotal > 0) {
+      calculated.hotel = liveHotelTotal;
+      // Miscellaneous is intentionally recalculated from the visible on-trip categories
+      // after substituting the live accommodation amount so totals remain exact.
+      calculated.miscellaneous = Math.round((calculated.hotel + calculated.food + calculated.localTransport + calculated.sightseeing) * 0.06);
+      calculated.grandTotal = calculated.flight + calculated.hotel + calculated.food + calculated.localTransport + calculated.sightseeing + calculated.visaAndInsurance + calculated.miscellaneous;
+      calculated.expectedMin = Math.round(calculated.grandTotal * 0.92);
+      calculated.expectedMax = Math.round(calculated.grandTotal * 1.08);
+      calculated.averageDailyBudgetNum = Math.round(calculated.grandTotal / days);
+      const liveFmt = (n:number) => `${currencySym}${Math.max(0, Math.round(n)).toLocaleString()}`;
+      calculated.formatted.hotel = liveFmt(calculated.hotel);
+      calculated.formatted.miscellaneous = liveFmt(calculated.miscellaneous);
+      calculated.formatted.grandTotal = liveFmt(calculated.grandTotal);
+      calculated.formatted.expectedRange = `${liveFmt(calculated.expectedMin)} – ${liveFmt(calculated.expectedMax)}`;
+      calculated.formatted.averageDailyBudget = liveFmt(calculated.averageDailyBudgetNum);
+      itinerary.hotelBudgetSource = "agoda";
+      itinerary.budgetHotelName = String(recommendedAgodaHotel.name || "Agoda recommended hotel");
+      itinerary.budgetHotelNightlyRate = liveFmt(Math.round(nightlyInTripCurrency));
+      itinerary.budgetHotelNights = nights;
+      itinerary.budgetHotelRooms = rooms;
+    }
+  } else {
+    itinerary.hotelBudgetSource = "estimate";
+    delete itinerary.budgetHotelName;
+    delete itinerary.budgetHotelNightlyRate;
+    delete itinerary.budgetHotelNights;
+    delete itinerary.budgetHotelRooms;
+  }
+
   // Itinerary-informed activity costing. The destination/style baseline remains a guardrail,
   // but the visible Activities & Experiences category is now derived from the actual blocks
   // in the itinerary instead of blindly charging a fixed per-day sightseeing allowance.

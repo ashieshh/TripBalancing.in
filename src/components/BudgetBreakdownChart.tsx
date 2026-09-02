@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { BudgetBreakdown, LoggedExpense, Itinerary, HotelRecommend } from "../types";
 import { supabase } from "../lib/supabase";
+import { reconcileItineraryBudget } from "../utils/budgetCalculator";
 
 interface BudgetBreakdownChartProps {
   breakdown: BudgetBreakdown;
@@ -221,6 +222,12 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
           // this fetch can use the live Agoda cards instead of stale planning estimates.
           itinerary.hotelRecommendations = mapped;
           (itinerary as any).hotelRateSource = "agoda";
+          // Rare fallback path: if Agoda became ready only after the initial trip response,
+          // immediately synchronize the visible budget with the newly received live rate.
+          reconcileItineraryBudget(itinerary);
+          if (itinerary.estimatedBudgetBreakdown && breakdown) {
+            Object.assign(breakdown as any, itinerary.estimatedBudgetBreakdown);
+          }
         }
       } catch {
         if (!cancelled) setHotelRateSource("estimate");

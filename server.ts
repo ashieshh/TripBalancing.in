@@ -4120,6 +4120,9 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
       cachedItinerary.travelStyle = travelStyle;
       cachedItinerary.travelers = Number(travelers) || 1;
       await attachLiveAgodaHotelsToItinerary(cachedItinerary);
+      // Agoda is attached after structural finalization; reconcile once more so the
+      // realistic estimate uses the recommended live Agoda nightly rate when available.
+      reconcileItineraryBudget(cachedItinerary);
       const cachedSource = cached.data?.generationSource || "gemini";
       cachedItinerary.generationSource = cachedSource;
       let entitlementAfter = authoritativeEntitlement;
@@ -4601,6 +4604,8 @@ Return the response in strict JSON format.`;
     // Store in cache for future identical requests
     const reconciledItinerary = finalizeItineraryForUser(pricedItinerary, diffDays);
     await attachLiveAgodaHotelsToItinerary(reconciledItinerary);
+    // Re-price accommodation from the selected-style Agoda recommendation.
+    reconcileItineraryBudget(reconciledItinerary);
     const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
     if (finalUserFacingErrors.length) console.warn(`[FINAL_ITINERARY_QUALITY] ${finalUserFacingErrors.join('; ')}`);
 
@@ -5153,6 +5158,8 @@ Return the response in strict JSON format.`;
     const pricedFallback = await attachMarketFlightEstimate({ ...fallbackItinerary, plannedBudget: budgetAmount }, origin || "", destination, startDate, endDate, travelers);
     const reconciledFallback = finalizeItineraryForUser(pricedFallback, diffDays);
     await attachLiveAgodaHotelsToItinerary(reconciledFallback);
+    // The fallback itinerary follows the same live-hotel budget rule when Agoda is available.
+    reconcileItineraryBudget(reconciledFallback);
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,
