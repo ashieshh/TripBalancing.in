@@ -5336,6 +5336,17 @@ async function attachLiveAgodaHotelsToItinerary(itinerary: any): Promise<any> {
     }
     const currency = detectCurrencyCode(String(itinerary.budgetAmount || itinerary.plannedBudget || "USD"), itinerary.destination);
     console.log(`[Agoda] Itinerary enrichment starting: destination="${String(itinerary.destination).slice(0, 120)}", dates=${itinerary.startDate}->${itinerary.endDate}, currency=${currency}.`);
+    // Never hold the main trip-generation response open while the large Agoda city
+    // feed is warming on a cold Render instance. Start/continue the warm-up in the
+    // background and return the existing planning hotels immediately. The client
+    // will automatically retry the dedicated Agoda endpoint and replace these
+    // estimates once the index is ready.
+    const agodaStatus = getAgodaStatus();
+    if (!agodaStatus.cityIndexReady) {
+      console.log("[Agoda] Itinerary enrichment deferred: city index is warming; trip will return now and client will retry live hotels automatically.");
+      void warmAgodaCityIndex(false).catch((err: any) => console.warn("[Agoda] Background city-index warm-up failed:", err?.message || err));
+      return itinerary;
+    }
     const result = await searchAgodaHotels({
       destination: String(itinerary.destination),
       checkInDate: String(itinerary.startDate),
@@ -5401,6 +5412,14 @@ app.post("/api/agoda-hotels", verifyUserAuth, async (req, res) => {
     if (!destination || !checkInDate || !checkOutDate) {
       console.warn("[Agoda] /api/agoda-hotels rejected: required destination/date field missing.");
       return res.status(400).json({ error: "Destination, check-in date and check-out date are required." });
+    }
+    // Cold-start safe behavior: do not make one browser request wait minutes for
+    // the large city feed. Tell the client that Agoda is warming and let it retry.
+    const status = getAgodaStatus();
+    if (!status.cityIndexReady) {
+      console.log("[Agoda] /api/agoda-hotels pending: city index warming; client should retry.");
+      void warmAgodaCityIndex(false).catch((err: any) => console.warn("[Agoda] Background city-index warm-up failed:", err?.message || err));
+      return res.status(202).json({ pending: true, code: "AGODA_INDEX_WARMING", retryAfterSeconds: 8 });
     }
     const result = await searchAgodaHotels({
       destination: String(destination),

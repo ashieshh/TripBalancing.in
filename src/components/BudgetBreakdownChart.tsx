@@ -158,21 +158,34 @@ export default function BudgetBreakdownChart({ breakdown, loggedExpenses = [], i
         const baseCurrency = detectBaseCurrencyCode(
           breakdown.total || breakdown.accommodation || breakdown.food || breakdown.activities || breakdown.transport
         );
-        const response = await fetch("/api/agoda-hotels", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            destination: itinerary.destination,
-            checkInDate: itinerary.startDate,
-            checkOutDate: itinerary.endDate,
-            adults: Math.max(1, Number(itinerary.travelers) || 1),
-            children: 0,
-            currency: baseCurrency,
-            maxResult: 18,
-          }),
-        });
-        if (!response.ok) throw new Error("Agoda unavailable");
-        const payload = await response.json();
+        let response: Response | null = null;
+        let payload: any = null;
+        // On a free Render cold start the Agoda city feed can take a while to
+        // rebuild. Retry quietly in the background instead of making the user
+        // refresh the whole trip. Planning estimates remain visible meanwhile.
+        for (let attempt = 0; attempt < 24 && !cancelled; attempt++) {
+          response = await fetch("/api/agoda-hotels", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              destination: itinerary.destination,
+              checkInDate: itinerary.startDate,
+              checkOutDate: itinerary.endDate,
+              adults: Math.max(1, Number(itinerary.travelers) || 1),
+              children: 0,
+              currency: baseCurrency,
+              maxResult: 18,
+            }),
+          });
+          payload = await response.json().catch(() => ({}));
+          if (response.status === 202 && payload?.pending) {
+            const waitMs = Math.max(3000, Math.min(12000, Number(payload?.retryAfterSeconds || 8) * 1000));
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+            continue;
+          }
+          break;
+        }
+        if (!response || !response.ok) throw new Error("Agoda unavailable");
         const hotels = Array.isArray(payload?.hotels) ? payload.hotels : [];
         if (!hotels.length) throw new Error("No Agoda hotels");
 
