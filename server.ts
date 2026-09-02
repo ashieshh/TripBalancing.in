@@ -4088,6 +4088,7 @@ app.post('/api/travelpayouts/hotel-links', verifyUserAuth, async (req, res) => {
       }
 
       const created = Array.isArray(payload?.result?.links) ? payload.result.links : [];
+      let firstFailureLogged = false;
       misses.forEach((item, index) => {
         const row = created[index] || {};
         const partnerUrl = String(row?.partner_url || '').trim();
@@ -4095,9 +4096,24 @@ app.post('/api/travelpayouts/hotel-links', verifyUserAuth, async (req, res) => {
         const message = String(row?.message || '').trim();
         if (partnerUrl) {
           TP_HOTEL_LINK_CACHE.set(item.cacheKey, { url: partnerUrl, expires: Date.now() + 6 * 60 * 60 * 1000 });
+        } else if (!firstFailureLogged) {
+          // Safe diagnostic: log only Travelpayouts' status/code/message for the
+          // first failed conversion. Never log the API token, marker credentials,
+          // request headers, or full response payload.
+          const safeCode = code.slice(0, 80) || 'failed';
+          const safeMessage = (message || String(row?.error || payload?.error || payload?.message || 'No partner URL returned')).slice(0, 240);
+          console.warn(`[Travelpayouts hotels] First failed link: HTTP ${response.status}, code=${safeCode}, message=${safeMessage}`);
+          firstFailureLogged = true;
         }
         results.push({ hotelName: item.hotelName, partnerUrl, code, ...(message ? { message } : {}) });
       });
+
+      // Some API responses can be HTTP 200 while containing no per-link rows.
+      // Surface that condition explicitly so 0/N results are diagnosable.
+      if (!created.length && misses.length && !firstFailureLogged) {
+        const safeMessage = String(payload?.error || payload?.message || payload?.result?.message || 'HTTP 200 returned no link result rows').slice(0, 240);
+        console.warn(`[Travelpayouts hotels] First failed link: HTTP ${response.status}, code=no_result_rows, message=${safeMessage}`);
+      }
     }
 
     const successful = results.filter((x) => x.partnerUrl).length;
