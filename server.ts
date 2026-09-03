@@ -2093,6 +2093,33 @@ function deterministicRepairGeneratedItinerary(itinerary: any, destination: stri
     if (clone.placesToVisit.length >= 4) break;
   }
 
+  // Repair meal semantics locally before asking Gemini to regenerate anything.
+  // Desserts, drinks, paan, lassi, tea/coffee, alcohol, sweets and snack tastings
+  // remain valid itinerary activities, but they must never be presented as lunch/dinner.
+  const snackOrDrinkSignal = /(dessert|cake|pastr(?:y|ies)|sweet|ice cream|gelato|pudding|cookie|biscuit|macaron|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni|coffee|tea|juice|lassi|\bpaan\b|betel[- ]?leaf|mouth freshener|digestive|tasting|snack)/i;
+  const mealSignal = /\b(lunch|dinner)\b/i;
+  let mealSemanticRepairs = 0;
+  for (const d of Array.isArray(clone.days) ? clone.days : []) {
+    for (const a of Array.isArray(d?.activities) ? d.activities : []) {
+      const combined = `${a?.title || ''} ${a?.description || ''}`;
+      if (!mealSignal.test(combined) || !snackOrDrinkSignal.test(combined)) continue;
+
+      const originalTitle = sanitizeGeneratedText(a?.title || '');
+      const cleanedTitle = originalTitle
+        .replace(/\b(?:luxury|upscale|signature|fine[- ]?dining)?\s*(?:lunch|dinner)\s*[:\-–—]?\s*/ig, '')
+        .replace(/^[:\-–—\s]+|[:\-–—\s]+$/g, '')
+        .trim();
+      a.title = `Dessert / Beverage Tasting${cleanedTitle ? `: ${cleanedTitle}` : ''}`;
+      a.description = sanitizeGeneratedText(String(a?.description || '')
+        .replace(/\b(?:full|complete|main)\s+(?:lunch|dinner|meal)\b/ig, 'tasting')
+        .replace(/\b(?:lunch|dinner)\b/ig, 'tasting'));
+      mealSemanticRepairs++;
+    }
+  }
+  if (mealSemanticRepairs > 0) {
+    console.warn(`[STYLE_MEAL_SEMANTIC_REPAIR] ${expectedTravelStyle || clone.travelStyle || 'Unknown'}: reclassified ${mealSemanticRepairs} dessert/beverage meal slot(s) locally.`);
+  }
+
   // Fill a thin food list only from named meal/tasting activities already returned by Gemini.
   clone.localFood = Array.isArray(clone.localFood) ? clone.localFood : [];
   const foodNames = new Set(clone.localFood.map((f:any)=>String(f?.name||'').trim().toLowerCase()).filter(Boolean));
@@ -4611,27 +4638,40 @@ Return the response in strict JSON format.`;
     let qualityErrors = validateGeneratedItinerary(parsedItinerary, travelStyle);
     if (qualityErrors.length) {
       console.warn(`[STYLE_QUALITY_REPAIR] ${travelStyle}: ${qualityErrors.join('; ')}`);
-      const repaired = await repairItineraryForStyle(ai, parsedItinerary, destination, travelStyle, travelerType, diffDays, qualityErrors);
-      if (repaired) {
-        const repairedErrors = validateGeneratedItinerary(repaired, travelStyle);
-        if (!repairedErrors.length) {
-          parsedItinerary = repaired;
-          qualityErrors = [];
-        } else {
-          qualityErrors = repairedErrors;
+
+      // First repair deterministic issues locally. This specifically fixes meal
+      // semantics (dessert/beverage labelled as lunch/dinner), thin attraction
+      // lists and thin food lists without spending another Gemini request.
+      const deterministic = deterministicRepairGeneratedItinerary(parsedItinerary, destination, travelStyle);
+      const deterministicErrors = validateGeneratedItinerary(deterministic, travelStyle);
+      if (!deterministicErrors.length) {
+        console.warn(`[STYLE_DETERMINISTIC_REPAIR] ${travelStyle}: repaired locally without another AI call.`);
+        parsedItinerary = deterministic;
+        qualityErrors = [];
+      } else {
+        parsedItinerary = deterministic;
+        qualityErrors = deterministicErrors;
+      }
+
+      // Only use the AI repair pass when the deterministic repair cannot satisfy
+      // the remaining quality rules. This prevents a harmless dessert/drink
+      // classification mistake from discarding an otherwise good itinerary.
+      if (qualityErrors.length) {
+        const repaired = await repairItineraryForStyle(ai, parsedItinerary, destination, travelStyle, travelerType, diffDays, qualityErrors);
+        if (repaired) {
+          const repairedDeterministic = deterministicRepairGeneratedItinerary(repaired, destination, travelStyle);
+          const repairedErrors = validateGeneratedItinerary(repairedDeterministic, travelStyle);
+          if (!repairedErrors.length) {
+            parsedItinerary = repairedDeterministic;
+            qualityErrors = [];
+          } else {
+            qualityErrors = repairedErrors;
+          }
         }
       }
+
       if (qualityErrors.length) {
-        const deterministic = deterministicRepairGeneratedItinerary(parsedItinerary, destination, travelStyle);
-        const deterministicErrors = validateGeneratedItinerary(deterministic, travelStyle);
-        if (!deterministicErrors.length) {
-          console.warn(`[STYLE_DETERMINISTIC_REPAIR] ${travelStyle}: repaired without another AI call.`);
-          parsedItinerary = deterministic;
-          qualityErrors = [];
-        } else {
-          qualityErrors = deterministicErrors;
-          throw new Error(`AI itinerary failed quality validation after repair: ${qualityErrors.join('; ')}`);
-        }
+        throw new Error(`AI itinerary failed quality validation after repair: ${qualityErrors.join('; ')}`);
       }
     }
     
