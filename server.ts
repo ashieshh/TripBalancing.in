@@ -3401,6 +3401,98 @@ function repairFinalLuxuryMealSemantics(itinerary:any) {
   return itinerary;
 }
 
+
+/**
+ * Final content-trust repair.
+ * Correct reverse meal labels and soften unverified premium-access claims.
+ */
+function repairFinalContentTrust(itinerary:any) {
+  if (!itinerary || typeof itinerary !== 'object') return itinerary;
+
+  const parseClock=(value:any)=>{
+    const m=String(value||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);
+    if(!m) return null;
+    let h=Number(m[1])%12; if(m[3]==='PM') h+=12;
+    return h*60+Number(m[2]||0);
+  };
+  const fullMealSignal=/multi[- ]?course|complete savory|full (?:main )?meal|main course|degustation|thali|platter|curr(?:y|ies)|breads?|rice|kebab|grill|entree|entrée|chef(?:'s)? menu|dining menu/i;
+  const tastingTitle=/dessert\s*\/\s*beverage tasting|dessert tasting|beverage tasting|culinary tasting/i;
+  let reverseMealRepairs=0;
+
+  for (const day of Array.isArray(itinerary.days)?itinerary.days:[]) {
+    const acts=Array.isArray(day?.activities)?day.activities:[];
+    for (const a of acts) {
+      const title=String(a?.title||'');
+      const desc=String(a?.description||'');
+      if(!tastingTitle.test(title) || !fullMealSignal.test(desc)) continue;
+      const mins=parseClock(a?.time);
+      const role=(mins!==null && mins>=16*60+30)?'dinner':'lunch';
+      const hasOtherPrimary=acts.some((x:any)=>x!==a && (role==='lunch'?/\blunch\b/i:/\bdinner\b|fine dining|signature dining|evening meal/i).test(String(x?.title||'')));
+      if(!hasOtherPrimary){
+        const pretty=role==='lunch'?'Lunch':'Dinner';
+        const venue=sanitizeGeneratedText(String(a?.location||''));
+        a.title=`Upscale Regional ${pretty}${venue?` at ${venue}`:''}`;
+      } else {
+        a.title='Optional Culinary Tasting';
+        a.description=sanitizeGeneratedText(desc
+          .replace(/multi[- ]?course/ig,'curated')
+          .replace(/\b(full|complete|main)\s+meal\b/ig,'tasting'));
+      }
+      reverseMealRepairs++;
+    }
+  }
+  if(reverseMealRepairs>0) console.warn(`[FINAL_REVERSE_MEAL_REPAIR] Corrected ${reverseMealRepairs} full-meal/tasting label mismatch(es) before final validation.`);
+
+  const soften=(input:any)=>{
+    let t=String(input||'');
+    if(!t) return t;
+    const replacements:[RegExp,string][]=[
+      [/\bVIP\s+Darshan\b/gi,'Darshan visit'],
+      [/\bVIP\s+(?:entry|access|slot|tickets?)\b/gi,'official entry option'],
+      [/\bfast[- ]?track(?:ed)?\s+VIP\s+(?:entry|access|protocol)\b/gi,'official priority option, if available'],
+      [/\bfast[- ]?track(?:ed)?\s+(?:entry|access|protocol)\b/gi,'priority entry option, if officially available'],
+      [/\bskip[- ]?the[- ]?line\s+(?:entry|access|tickets?|option)\b/gi,'advance-entry option, where officially available'],
+      [/\bprivate\s+entrance\b/gi,'guided admission'],
+      [/\bprivate\s+access\b/gi,'guided access, subject to availability'],
+      [/\bpriority\s+access\b/gi,'advance access, where available'],
+      [/\bpriority\s+visit\b/gi,'advance-planned visit'],
+      [/\bclosed[- ]?door\s+(?:private\s+)?(?:concert|performance|show)\b/gi,'curated performance, subject to private availability'],
+      [/\bprivate\s+concert\b/gi,'curated classical performance, with private booking if available'],
+      [/\bprivate\s+performance\b/gi,'curated performance, with private booking if available'],
+      [/\breserved\s+solely\s+for\s+you\b/gi,'booked privately, subject to availability'],
+      [/\bfront[- ]?row,?\s+unobstructed\s+view\b/gi,'preferred viewing position, subject to conditions'],
+      [/\bpre[- ]?book\s+VIP\s+tickets?\b/gi,'check official booking options'],
+      [/\bVIP\s+tickets?\b/gi,'official booking options'],
+      [/\bVIP\s+temple\s+entr(?:y|ies)\b/gi,'official temple entry option'],
+      [/\bspecial\s+prayers?\s+session\b/gi,'prayer visit, subject to temple rules'],
+      [/\bexpert\s+priest\b/gi,'temple assistance where officially permitted'],
+      [/\bauthorized\s+temple\s+priest\b/gi,'temple assistance where officially permitted']
+    ];
+    for(const [rx,repl] of replacements) t=t.replace(rx,repl);
+    return sanitizeGeneratedText(t);
+  };
+
+  let claimRepairs=0;
+  const softenField=(obj:any,key:string)=>{
+    if(!obj || typeof obj[key]!=='string') return;
+    const before=obj[key], after=soften(before);
+    if(after!==before){ obj[key]=after; claimRepairs++; }
+  };
+  softenField(itinerary,'summary');
+  for(const p of Array.isArray(itinerary.placesToVisit)?itinerary.placesToVisit:[]){ softenField(p,'name'); softenField(p,'description'); softenField(p,'bestTimeToVisit'); }
+  for(const d of Array.isArray(itinerary.days)?itinerary.days:[]){
+    softenField(d,'title');
+    for(const a of Array.isArray(d?.activities)?d.activities:[]){ softenField(a,'title'); softenField(a,'description'); }
+  }
+  if(Array.isArray(itinerary.localTips)) itinerary.localTips=itinerary.localTips.map((tip:any)=>{
+    if(typeof tip==='string') return soften(tip);
+    softenField(tip,'title'); softenField(tip,'description'); softenField(tip,'tip'); return tip;
+  });
+  if(Array.isArray(itinerary.safetyTips)) itinerary.safetyTips=itinerary.safetyTips.map((tip:any)=>typeof tip==='string'?soften(tip):tip);
+  if(claimRepairs>0) console.warn(`[FINAL_CONTENT_TRUST_REPAIR] Softened ${claimRepairs} unsupported access/availability claim(s) before output.`);
+  return itinerary;
+}
+
 function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const errors:string[] = [];
   const days = Array.isArray(itinerary?.days) ? itinerary.days : [];
@@ -4764,6 +4856,7 @@ Return the response in strict JSON format.`;
     // snack, dessert, beverage or breakfast item occupying a Luxury lunch/dinner slot.
     // Repair locally before budget reconciliation and the final customer-facing gate.
     repairFinalLuxuryMealSemantics(reconciledItinerary);
+    repairFinalContentTrust(reconciledItinerary);
     // Re-price accommodation from the selected-style Agoda recommendation.
     reconcileItineraryBudget(reconciledItinerary);
     const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
