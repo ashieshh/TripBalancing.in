@@ -16,7 +16,8 @@ import {
   generateRefundApprovedEmail,
   generateRefundRejectedEmail,
   generateSupportTicketEmail,
-  generateBuddyInviteEmail
+  generateBuddyInviteEmail,
+  generateReviewNotificationEmail
 } from "./src/services/emailService";
 import { reconcileItineraryBudget, setLiveUsdRates, getLiveCrossRate, detectCurrencyCode, parseNumericValue } from "./src/utils/budgetCalculator";
 import { getAgodaStatus, searchAgodaHotels, warmAgodaCityIndex } from "./src/services/agodaService";
@@ -1547,6 +1548,60 @@ app.post("/api/support-tickets", verifyUserAuth, async (req, res) => {
     res.json({ success: true, ticketRef });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Failed to log support ticket" });
+  }
+});
+
+// Authenticated traveler reviews. The trip remains the source of truth in the
+// client, while this endpoint records a review event and notifies the app owner.
+app.post("/api/reviews", verifyUserAuth, async (req, res) => {
+  try {
+    const authUser = (req as any).authenticatedUser as { id: string; email: string };
+    const tripId = String(req.body?.tripId || "").trim();
+    const destination = String(req.body?.destination || "").trim().slice(0, 160);
+    const reviewText = String(req.body?.reviewText || "").trim();
+    const rating = Number(req.body?.rating);
+    if (!tripId || !destination) return res.status(400).json({ error: "Trip and destination are required." });
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: "Rating must be between 1 and 5." });
+    if (reviewText.length < 10 || reviewText.length > 3000) return res.status(400).json({ error: "Review must be between 10 and 3000 characters." });
+
+    if (supabaseAdmin) {
+      const { data: ownedTrip, error: tripError } = await supabaseAdmin
+        .from("trips")
+        .select("id")
+        .eq("id", tripId)
+        .eq("user_id", authUser.id)
+        .maybeSingle();
+      if (tripError || !ownedTrip) return res.status(403).json({ error: "You can only review your own saved trip." });
+
+      const { error: reviewError } = await supabaseAdmin.from("trip_reviews").upsert([{
+        trip_id: tripId,
+        user_id: authUser.id,
+        user_email: authUser.email,
+        destination,
+        rating,
+        review_text: reviewText,
+        updated_at: new Date().toISOString()
+      }], { onConflict: "trip_id,user_id" });
+      if (reviewError) console.warn("[Review API] Database write warning:", reviewError.message);
+    }
+
+    const notificationEmail = String(
+      process.env.REVIEW_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || process.env.SMTP_REPLY_TO || process.env.BREVO_SMTP_USER || ""
+    ).trim();
+    if (!notificationEmail) {
+      return res.status(503).json({ error: "Review notifications are not configured yet." });
+    }
+    const emailData = generateReviewNotificationEmail({ reviewerEmail: authUser.email, destination, rating, reviewText, tripId });
+    await sendBrevoEmail({
+      to: notificationEmail,
+      replyTo: authUser.email || undefined,
+      subject: emailData.subject,
+      html: emailData.html
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("[Review API] Submission failed:", err);
+    res.status(500).json({ error: err?.message || "Failed to submit review." });
   }
 });
 

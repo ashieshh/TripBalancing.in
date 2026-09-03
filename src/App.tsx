@@ -590,6 +590,24 @@ export default function App() {
     }
   };
 
+  const handleSubmitTripReview = async (tripId: string, rating: number, reviewText: string) => {
+    const trip = trips.find((item) => item.id === tripId);
+    if (!trip) throw new Error("Save this trip before submitting a review.");
+
+    const accessToken = await db.getAccessToken();
+    if (!accessToken) throw new Error("Your session has expired. Please sign in again.");
+    const response = await fetch("/api/reviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ tripId, destination: trip.destination, rating, reviewText })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result?.error || "Could not submit your review.");
+
+    // Persist locally only after the server accepted the review and email notification.
+    await handleUpdateTripNotesAndRating(tripId, rating, trip.itinerary.privateNote || "", undefined, reviewText);
+  };
+
   // Update entire itinerary for a trip (or active unsaved itinerary)
   const handleUpdateItinerary = async (tripId: string | null, updatedItinerary: Itinerary) => {
     if (!tripId) {
@@ -949,6 +967,7 @@ export default function App() {
                 isDeleting={deletingId === activeTripId}
                 tripId={activeTripId}
                 onUpdateNotesAndRating={handleUpdateTripNotesAndRating}
+                onSubmitReview={handleSubmitTripReview}
                 onUpdateItinerary={handleUpdateItinerary}
                 isReadOnly={activeTripIsReadOnly}
                 onInviteBuddy={() => setShowBuddyInviteModal(true)}
