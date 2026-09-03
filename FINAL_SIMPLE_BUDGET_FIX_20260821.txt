@@ -1,5 +1,0 @@
-Final simple budget fix:
-1. AI-budget mode Budget tab now shows Expected Trip Cost + Recommended Safety Buffer + AI Recommended Safe Budget.
-2. PDF daily total is exactly the sum of Stay + Food + Local transport + Activities + Other.
-3. PDF financial table includes Recommended Safety Buffer and ends with AI Recommended Safe Budget.
-4. Alternate budget engine now uses actual hotel nights and writes the same daily breakdown.

@@ -1,7 +1,0 @@
-Flight API pipeline fix
-
-- Explicit market=in on Travelpayouts fare requests.
-- show_to_affiliates=false on matrix/latest cache fallbacks to avoid unnecessarily filtering valid cached fares.
-- get_latest_prices normalizer accepts both data[] and prices[] response shapes.
-- Fallback UI now accurately states that Travelpayouts/Aviasales cache had no usable recent fare.
-- No changes to affiliate widgets or hotel/cab phases.
