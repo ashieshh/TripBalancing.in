@@ -208,6 +208,7 @@ export interface Itinerary {
   privateNote?: string;
   reviewText?: string;
   loggedExpenses?: LoggedExpense[];
+  costSplitParticipants?: string[];
   category?: string;
   hotelRecommendations?: {
     budget: HotelRecommend[];
@@ -232,6 +233,10 @@ export interface LoggedExpense {
   category: "Accommodation" | "Food" | "Activities" | "Transport" | "Other";
   amount: number;
   description: string;
+  /** Traveler who paid this expense. Older records default to the first participant. */
+  paidBy?: string;
+  /** Travelers sharing this expense equally. Older records default to every participant. */
+  splitAmong?: string[];
 }
 
 export interface TripRecord {
