@@ -1972,9 +1972,16 @@ export const exportPremiumTravelPDF = async (
     });
 
     daysData.forEach((day, dIdx) => {
-      // Calculate estimated space needed for day header, stats and initial activities.
-      // If we are on the first day, start on a fresh page. Otherwise, flow continuously if space permits.
-      if (dIdx === 0 || y + 70 > 262) {
+      // Keep a short day together when it fits on one clean page. Long days may
+      // still continue naturally using the per-card page-break guard below.
+      const estimatedActivityHeight = (day.activities || []).reduce((sum: number, activity: any) => {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        const lines = doc.splitTextToSize(String(activity?.description || ""), 138);
+        return sum + 20 + (lines.length * 3.5);
+      }, 0);
+      const estimatedWholeDayHeight = 13 + 19 + estimatedActivityHeight + 71;
+      if (dIdx === 0 || y + Math.min(estimatedWholeDayHeight, 238) > 262) {
         doc.addPage();
         y = 25;
         pageSectionNames[doc.getNumberOfPages()] = currentSectionName;
@@ -2200,11 +2207,15 @@ export const exportPremiumTravelPDF = async (
         doc.text(simulatedTransit, transitUnitStartX + 4.2, badgeY2 - 0.1, { align: "left" });
 
         // Row 2 - Badge 5: Cost (Perfect Centering)
-        const rawCostVal = String(act.cost || "Included")
+        let rawCostVal = String(act.cost || "Included")
           .replace(/vehicleCheck/ig, "vehicle • Check")
           .replace(/transitCheck/ig, "transit • Check")
           .replace(/taxiFine/ig, "taxi • Fine")
           .trim();
+        const transferLike = /transfer|chauffeur|pick[- ]?up|pickup|drop[- ]?off|departure/i.test(`${act.title || ""} ${act.description || ""}`);
+        if (transferLike && /^(?:free|free\s*\/\s*included|included)$/i.test(rawCostVal)) {
+          rawCostVal = "Included in transport budget";
+        }
         // Leading separator keeps adjacent metadata badges visually and textually distinct in exported PDFs.
         const costVal = `\u00A0• ${rawCostVal}`;
         doc.setFillColor(254, 243, 199);
@@ -2985,8 +2996,12 @@ export const exportPremiumTravelPDF = async (
           doc.setTextColor(71, 85, 105);
         }
 
+        const itemText = String(item || "");
+        const availableItemWidth = colW - 15;
         doc.setFontSize(8);
-        doc.text(item, currentItemX + 11, currentItemY + 5.5);
+        const itemWidth = Math.max(1, doc.getTextWidth(itemText));
+        doc.setFontSize(Math.max(4.6, Math.min(8, 8 * availableItemWidth / itemWidth)));
+        doc.text(itemText, currentItemX + 11, currentItemY + 5.5, { maxWidth: availableItemWidth });
 
         if (leftCol) leftY += 12;
         else rightY += 12;

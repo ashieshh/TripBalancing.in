@@ -3599,10 +3599,10 @@ function alignLodgingLogisticsToBudgetHotel(itinerary:any) {
   const namedHotel = /\b[A-Z][A-Za-z0-9&' -]{1,60}\s(?:Hotel|Palace|Resort|Haveli)\b/g;
   for (const day of itinerary.days) {
     for (const activity of Array.isArray(day?.activities) ? day.activities : []) {
-      const logistics = /arrival|airport transfer|hotel check[- ]?in|check[- ]?out|departure preparation|packing/i.test(`${activity?.title || ''} ${activity?.description || ''}`);
+      const logistics = /arrival|landing|airport (?:transfer|pick[- ]?up|pickup)|hotel check[- ]?in|check[- ]?out|departure preparation|packing/i.test(`${activity?.title || ''} ${activity?.description || ''}`);
       if (!logistics) continue;
       activity.description = String(activity.description || '').replace(namedHotel, selected);
-      if (/arrival|check[- ]?in/i.test(String(activity.title || ''))) activity.location = selected;
+      if (/arrival|airport (?:pick[- ]?up|pickup)|check[- ]?in/i.test(`${activity?.title || ''} ${activity?.description || ''}`)) activity.location = selected;
     }
   }
   return itinerary;
