@@ -21,7 +21,8 @@ interface ItineraryViewProps {
   onDelete?: () => void;
   isDeleting?: boolean;
   tripId?: string | null;
-  onUpdateNotesAndRating?: (tripId: string, rating: number, privateNote: string, category?: string, reviewText?: string) => void;
+  onUpdateNotesAndRating?: (tripId: string, rating: number, privateNote: string, category?: string, reviewText?: string) => void | Promise<void>;
+  onSubmitReview?: (tripId: string, rating: number, reviewText: string) => Promise<void>;
   onUpdateItinerary?: (tripId: string | null, updatedItinerary: Itinerary) => void;
   isReadOnly?: boolean;
   onInviteBuddy?: () => void;
@@ -36,6 +37,7 @@ export default function ItineraryView({
   isDeleting = false,
   tripId = null,
   onUpdateNotesAndRating,
+  onSubmitReview,
   onUpdateItinerary,
   isReadOnly = false,
   onInviteBuddy
@@ -294,12 +296,24 @@ export default function ItineraryView({
   const [localReview, setLocalReview] = useState(itinerary.reviewText || "");
   const [noteSavedFeedback, setNoteSavedFeedback] = useState(false);
   const [reviewSavedFeedback, setReviewSavedFeedback] = useState(false);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState("");
 
   // States for logging new actual daily expenses
   const [showExpenseFormDay, setShowExpenseFormDay] = useState<number | null>(null);
   const [expenseAmount, setExpenseAmount] = useState<string>("");
   const [expenseDesc, setExpenseDesc] = useState<string>("");
   const [expenseCategory, setExpenseCategory] = useState<"Accommodation" | "Food" | "Activities" | "Transport" | "Other">("Food");
+  const defaultParticipants = Array.from(
+    { length: Math.max(1, itinerary.travelers || 1) },
+    (_, index) => `Traveler ${index + 1}`
+  );
+  const splitParticipants = itinerary.costSplitParticipants?.length
+    ? itinerary.costSplitParticipants
+    : defaultParticipants;
+  const [expensePaidBy, setExpensePaidBy] = useState(splitParticipants[0]);
+  const [expenseSplitAmong, setExpenseSplitAmong] = useState<string[]>(splitParticipants);
+  const [newParticipantName, setNewParticipantName] = useState("");
 
   // States for camera access and daily photos
   const [activeCameraDay, setActiveCameraDay] = useState<number | null>(null);
@@ -521,6 +535,52 @@ export default function ItineraryView({
     setLocalReview(itinerary.reviewText || "");
   }, [itinerary.reviewText]);
 
+  useEffect(() => {
+    if (!splitParticipants.includes(expensePaidBy)) setExpensePaidBy(splitParticipants[0]);
+    setExpenseSplitAmong((current) => {
+      const valid = current.filter((name) => splitParticipants.includes(name));
+      return valid.length ? valid : splitParticipants;
+    });
+  }, [itinerary.costSplitParticipants, itinerary.travelers]);
+
+  const saveSplitParticipants = (participants: string[]) => {
+    const clean = participants.map((name) => name.trim()).filter(Boolean);
+    if (!clean.length || !onUpdateItinerary) return;
+    onUpdateItinerary(tripId, { ...itinerary, costSplitParticipants: clean });
+  };
+
+  const renameSplitParticipant = (index: number, nextName: string) => {
+    const previousName = splitParticipants[index];
+    const participants = [...splitParticipants];
+    participants[index] = nextName;
+    if (!onUpdateItinerary) return;
+    const loggedExpenses = (itinerary.loggedExpenses || []).map((expense) => ({
+      ...expense,
+      paidBy: expense.paidBy === previousName ? nextName : expense.paidBy,
+      splitAmong: expense.splitAmong?.map((name) => name === previousName ? nextName : name)
+    }));
+    onUpdateItinerary(tripId, { ...itinerary, costSplitParticipants: participants, loggedExpenses });
+  };
+
+  const addSplitParticipant = () => {
+    const name = newParticipantName.trim();
+    if (!name || splitParticipants.some((item) => item.toLowerCase() === name.toLowerCase())) return;
+    saveSplitParticipants([...splitParticipants, name]);
+    setExpenseSplitAmong((current) => [...current, name]);
+    setNewParticipantName("");
+  };
+
+  const removeSplitParticipant = (name: string) => {
+    if (splitParticipants.length <= 1) return;
+    const participants = splitParticipants.filter((item) => item !== name);
+    const loggedExpenses = (itinerary.loggedExpenses || []).map((expense) => ({
+      ...expense,
+      paidBy: expense.paidBy === name ? participants[0] : expense.paidBy,
+      splitAmong: expense.splitAmong?.filter((item) => item !== name)
+    }));
+    if (onUpdateItinerary) onUpdateItinerary(tripId, { ...itinerary, costSplitParticipants: participants, loggedExpenses });
+  };
+
   const toggleDay = (dayNum: number) => {
     setExpandedDays(prev => ({
       ...prev,
@@ -559,7 +619,9 @@ export default function ItineraryView({
       dayNumber,
       category: expenseCategory,
       amount: amountNum,
-      description: expenseDesc.trim()
+      description: expenseDesc.trim(),
+      paidBy: expensePaidBy || splitParticipants[0],
+      splitAmong: expenseSplitAmong.length ? expenseSplitAmong : splitParticipants
     };
 
     const updatedExpenses = [...(itinerary.loggedExpenses || []), newExpense];
@@ -576,6 +638,8 @@ export default function ItineraryView({
     setExpenseAmount("");
     setExpenseDesc("");
     setExpenseCategory("Food");
+    setExpensePaidBy(splitParticipants[0]);
+    setExpenseSplitAmong(splitParticipants);
     setShowExpenseFormDay(null);
   };
 
@@ -1016,14 +1080,30 @@ export default function ItineraryView({
                     <button
                       id="itinerary-review-save-btn"
                       type="button"
-                      onClick={() => {
-                        if (tripId && onUpdateNotesAndRating) {
-                          onUpdateNotesAndRating(tripId, itinerary.rating || 0, itinerary.privateNote || "", undefined, localReview);
+                      disabled={reviewSubmitting}
+                      onClick={async () => {
+                        if (!tripId || !onSubmitReview) return;
+                        if (!itinerary.rating) {
+                          setReviewError("Please choose a star rating before submitting your review.");
+                          return;
+                        }
+                        if (localReview.trim().length < 10) {
+                          setReviewError("Please share at least 10 characters about your experience.");
+                          return;
+                        }
+                        setReviewSubmitting(true);
+                        setReviewError("");
+                        try {
+                          await onSubmitReview(tripId, itinerary.rating, localReview.trim());
                           setReviewSavedFeedback(true);
-                          setTimeout(() => setReviewSavedFeedback(false), 2000);
+                          setTimeout(() => setReviewSavedFeedback(false), 2500);
+                        } catch (error: any) {
+                          setReviewError(error?.message || "Could not submit your review. Please try again.");
+                        } finally {
+                          setReviewSubmitting(false);
                         }
                       }}
-                      className="px-4 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-2xl transition-all cursor-pointer shadow-sm flex flex-col justify-center items-center gap-1 min-w-[75px]"
+                      className="px-4 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white text-xs font-bold rounded-2xl transition-all cursor-pointer shadow-sm flex flex-col justify-center items-center gap-1 min-w-[85px]"
                     >
                       {reviewSavedFeedback ? (
                         <>
@@ -1033,11 +1113,13 @@ export default function ItineraryView({
                       ) : (
                         <>
                           <Save className="w-4 h-4" />
-                          <span>Save</span>
+                          <span>{reviewSubmitting ? "Sending…" : "Submit"}</span>
                         </>
                       )}
                     </button>
                   </div>
+                  {reviewError && <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">{reviewError}</p>}
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500">Submitting saves the review and notifies the TripBalancing team by email. Private notes are never included.</p>
                 </div>
               </div>
 
@@ -1250,6 +1332,91 @@ export default function ItineraryView({
                 )}
               </div>
             )}
+
+            {/* Trip-wide cost splitting. Existing expenses automatically split equally. */}
+            <div className="p-5 bg-gradient-to-br from-teal-50/80 to-cyan-50/50 dark:from-teal-950/20 dark:to-cyan-950/10 border border-teal-100 dark:border-teal-900/40 rounded-3xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                    <Users className="w-5 h-5 text-teal-600" /> Split Trip Costs
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">Choose who paid and who shared each expense. Balances update automatically.</p>
+                </div>
+                <span className="text-xs font-black text-teal-700 dark:text-teal-300 bg-white/80 dark:bg-slate-950/60 px-3 py-1.5 rounded-xl border border-teal-100 dark:border-teal-900/50">
+                  {splitParticipants.length} traveler{splitParticipants.length === 1 ? "" : "s"}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {splitParticipants.map((name, index) => (
+                  <div key={`${name}-${index}`} className="flex items-center gap-1.5 bg-white dark:bg-slate-950 border border-teal-100 dark:border-teal-900/50 rounded-xl px-2.5 py-1.5">
+                    <input
+                      aria-label={`Traveler ${index + 1} name`}
+                      value={name}
+                      disabled={isReadOnly}
+                      onChange={(event) => renameSplitParticipant(index, event.target.value)}
+                      onBlur={(event) => {
+                        if (!event.target.value.trim()) renameSplitParticipant(index, `Traveler ${index + 1}`);
+                      }}
+                      className="w-24 sm:w-28 bg-transparent text-xs font-bold text-slate-700 dark:text-slate-200 outline-none disabled:opacity-100"
+                    />
+                    {!isReadOnly && splitParticipants.length > 1 && (
+                      <button type="button" onClick={() => removeSplitParticipant(name)} title={`Remove ${name}`} className="text-slate-400 hover:text-rose-500">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {!isReadOnly && (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      value={newParticipantName}
+                      onChange={(event) => setNewParticipantName(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSplitParticipant(); } }}
+                      placeholder="Add traveler"
+                      className="w-28 bg-white dark:bg-slate-950 border border-teal-100 dark:border-teal-900/50 rounded-xl px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-teal-500/20"
+                    />
+                    <button type="button" onClick={addSplitParticipant} className="p-1.5 rounded-lg bg-teal-600 text-white hover:bg-teal-700" title="Add traveler"><Plus className="w-4 h-4" /></button>
+                  </div>
+                )}
+              </div>
+
+              {(() => {
+                const balances = Object.fromEntries(splitParticipants.map((name) => [name, 0])) as Record<string, number>;
+                (itinerary.loggedExpenses || []).forEach((expense) => {
+                  const payer = splitParticipants.includes(expense.paidBy || "") ? expense.paidBy! : splitParticipants[0];
+                  const members = (expense.splitAmong || splitParticipants).filter((name) => splitParticipants.includes(name));
+                  const sharedBy = members.length ? members : splitParticipants;
+                  balances[payer] += expense.amount;
+                  sharedBy.forEach((name) => { balances[name] -= expense.amount / sharedBy.length; });
+                });
+                const creditors = Object.entries(balances).filter(([, value]) => value > 0.005).map(([name, value]) => ({ name, value }));
+                const debtors = Object.entries(balances).filter(([, value]) => value < -0.005).map(([name, value]) => ({ name, value: -value }));
+                const settlements: Array<{ from: string; to: string; amount: number }> = [];
+                let creditorIndex = 0;
+                let debtorIndex = 0;
+                while (creditorIndex < creditors.length && debtorIndex < debtors.length) {
+                  const amount = Math.min(creditors[creditorIndex].value, debtors[debtorIndex].value);
+                  settlements.push({ from: debtors[debtorIndex].name, to: creditors[creditorIndex].name, amount });
+                  creditors[creditorIndex].value -= amount;
+                  debtors[debtorIndex].value -= amount;
+                  if (creditors[creditorIndex].value < 0.005) creditorIndex++;
+                  if (debtors[debtorIndex].value < 0.005) debtorIndex++;
+                }
+                return settlements.length ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    {settlements.map((item, index) => (
+                      <div key={`${item.from}-${item.to}-${index}`} className="bg-white/90 dark:bg-slate-950/60 border border-teal-100 dark:border-teal-900/40 rounded-xl px-3 py-2 text-[11px] text-slate-600 dark:text-slate-300">
+                        <strong>{item.from}</strong> pays <strong>{item.to}</strong>
+                        <span className="block text-sm font-black text-teal-650 dark:text-teal-400">{getCurrencySymbol()}{item.amount.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Add expenses below to see who owes whom.</p>
+                );
+              })()}
+            </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-900 pb-4">
               <div className="space-y-1">
@@ -1523,6 +1690,8 @@ export default function ItineraryView({
                                       setExpenseAmount("");
                                       setExpenseDesc("");
                                       setExpenseCategory("Food");
+                                      setExpensePaidBy(splitParticipants[0]);
+                                      setExpenseSplitAmong(splitParticipants);
                                     }
                                   }}
                                   className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/20 rounded-lg transition-all cursor-pointer border border-teal-200/50 dark:border-teal-900/45"
@@ -1565,6 +1734,9 @@ export default function ItineraryView({
                                       </div>
                                       <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate mt-0.5">
                                         {highlightText(exp.description, searchQuery)}
+                                      </p>
+                                      <p className="text-[10px] text-teal-600 dark:text-teal-400 mt-0.5">
+                                        Paid by {exp.paidBy || splitParticipants[0]} · split {(exp.splitAmong || splitParticipants).length} way{(exp.splitAmong || splitParticipants).length === 1 ? "" : "s"}
                                       </p>
                                     </div>
 
@@ -1644,6 +1816,26 @@ export default function ItineraryView({
                                     onChange={(e) => setExpenseDesc(e.target.value)}
                                     className="w-full p-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 text-slate-800 dark:text-slate-100 placeholder-slate-400 font-medium transition-all"
                                   />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 border-t border-slate-200 dark:border-slate-800 pt-3">
+                                <div className="sm:col-span-3 space-y-1">
+                                  <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400">Paid by</label>
+                                  <select value={expensePaidBy} onChange={(event) => setExpensePaidBy(event.target.value)} className="w-full p-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-bold">
+                                    {splitParticipants.map((name) => <option key={name} value={name}>{name}</option>)}
+                                  </select>
+                                </div>
+                                <div className="sm:col-span-9 space-y-1">
+                                  <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400">Split equally between</label>
+                                  <div className="flex flex-wrap gap-2 min-h-9 items-center">
+                                    {splitParticipants.map((name) => (
+                                      <label key={name} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2 py-1.5 cursor-pointer">
+                                        <input type="checkbox" checked={expenseSplitAmong.includes(name)} onChange={(event) => setExpenseSplitAmong((current) => event.target.checked ? [...current, name] : current.filter((item) => item !== name))} className="accent-teal-600" />
+                                        {name}
+                                      </label>
+                                    ))}
+                                  </div>
                                 </div>
                               </div>
 
