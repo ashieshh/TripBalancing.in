@@ -3493,6 +3493,83 @@ function repairFinalContentTrust(itinerary:any) {
   return itinerary;
 }
 
+
+/**
+ * Final diversity repair.
+ * Keeps safe deterministic fallbacks from becoming repetitive across a multi-day trip.
+ * It never invents a named restaurant or attraction: meal replacements use unused
+ * localFood records when available, and generic premium placeholders are anchored to
+ * a real place already present on that day / in placesToVisit.
+ */
+function repairFinalItineraryDiversity(itinerary:any) {
+  if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+  const destination=sanitizeGeneratedText(String(itinerary.destination||'the destination'))||'the destination';
+  const foods=Array.isArray(itinerary.localFood)?itinerary.localFood:[];
+  const places=Array.isArray(itinerary.placesToVisit)?itinerary.placesToVisit:[];
+  const norm=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+  const foodKey=(f:any)=>norm(f?.name);
+  const usedFoods=new Set<string>();
+  const usedMealVenues=new Set<string>();
+  let mealRepairs=0, placeholderRepairs=0;
+
+  const suitableMeal=(f:any)=>{
+    const text=`${f?.name||''} ${f?.description||''}`;
+    return !!f?.name && !/lassi|paan|chaat|dessert|sweet|tea|coffee|juice|drink|beverage|snack|ice cream|gelato|betel/i.test(text);
+  };
+
+  for (const day of itinerary.days) {
+    const acts=Array.isArray(day?.activities)?day.activities:[];
+    for (const a of acts) {
+      const title=String(a?.title||'');
+      const isPrimary=/\blunch\b|\bdinner\b|signature dining|signature dinner|regional meal/i.test(title);
+      if(!isPrimary) continue;
+      const activityText=norm(`${a?.title||''} ${a?.description||''}`);
+      const recognized=foods.find((f:any)=>{const k=foodKey(f);return k&&activityText.includes(k);});
+      const venueKey=norm(a?.location);
+      const duplicateFood=recognized && usedFoods.has(foodKey(recognized));
+      const duplicateVenue=venueKey && usedMealVenues.has(venueKey) && venueKey!==norm(destination);
+      if(!duplicateFood && !duplicateVenue){
+        if(recognized) usedFoods.add(foodKey(recognized));
+        if(venueKey) usedMealVenues.add(venueKey);
+        continue;
+      }
+      const replacement=foods.find((f:any)=>suitableMeal(f)&&!usedFoods.has(foodKey(f)));
+      const role=/dinner/i.test(title)?'Dinner':'Lunch';
+      if(replacement){
+        a.title=`Upscale Regional ${role}: ${replacement.name}`;
+        a.description=`${sanitizeGeneratedText(String(replacement.description||`Enjoy ${replacement.name} as a complete regional meal.`))} Serve it as a complete ${role.toLowerCase()} at a reputable, well-reviewed venue; confirm the current menu and price.`;
+        a.location=sanitizeGeneratedText(String(replacement.mustTryAt||destination))||destination;
+        usedFoods.add(foodKey(replacement));
+        usedMealVenues.add(norm(a.location));
+      } else {
+        a.title=`Upscale Regional ${role}: Different Local Seasonal Menu`;
+        a.description=`Choose a complete destination-appropriate ${role.toLowerCase()} at a reputable, well-reviewed venue in ${destination}, different from restaurants and named dishes already used on this trip. Confirm the current menu, reservation availability and price.`;
+        a.location=destination;
+      }
+      mealRepairs++;
+    }
+
+    // Replace vague premium placeholders using a real landmark context already on the day.
+    const dayPlace=acts.map((a:any)=>places.find((p:any)=>{
+      const k=norm(p?.name), t=norm(`${a?.title||''} ${a?.location||''}`);
+      return k && (t.includes(k)||k.includes(t));
+    })).find(Boolean);
+    for(const a of acts){
+      if(!/destination-specific premium experience|morning premium cultural experience|elevated leisure/i.test(String(a?.title||''))) continue;
+      const p=dayPlace || places.find((x:any)=>x?.name);
+      if(!p) continue;
+      const placeName=sanitizeGeneratedText(String(p.name));
+      a.title=`Cultural Context & Local Exploration near ${placeName}`;
+      a.description=`Use this flexible block to explore the public surroundings, local streets, crafts and cultural context around ${placeName} at a relaxed pace. Keep access to ticketed or restricted areas subject to current official rules and availability.`;
+      a.location=placeName;
+      a.cost='Flexible local experience - check current price';
+      placeholderRepairs++;
+    }
+  }
+  if(mealRepairs||placeholderRepairs) console.warn(`[FINAL_DIVERSITY_REPAIR] Replaced ${mealRepairs} repeated meal/venue block(s) and ${placeholderRepairs} generic premium placeholder(s).`);
+  return itinerary;
+}
+
 function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const errors:string[] = [];
   const days = Array.isArray(itinerary?.days) ? itinerary.days : [];
@@ -3768,7 +3845,7 @@ function applySmartRouteAndTransport(itinerary: any) {
     return h*60+min;
   };
   const textOf=(a:any)=>`${a?.title||''} ${a?.location||''} ${a?.description||''}`.toLowerCase();
-  const isRemote=(a:any)=>/(airport|gobustan|mud volcano|ateshgah|yanar dag|national park|peninsula|day trip|excursion|safari|countryside|outside the city|waterfall|rice terrace|uluwatu|tanah lot)/.test(textOf(a));
+  const isRemote=(a:any)=>/(airport|gobustan|mud volcano|ateshgah|yanar dag|national park|peninsula|day trip|excursion|safari|countryside|outside the city|waterfall|rice terrace|uluwatu|tanah lot|sarnath|ramnagar fort)/.test(textOf(a));
   const isOldCity=(a:any)=>/(old city|icherisheher|maiden tower|shirvanshah|ghat|vishwanath gali)/.test(textOf(a));
   const destinationText=String(itinerary?.destination||'').toLowerCase();
   const transportProfile = destinationText.includes('bali') || destinationText.includes('indonesia')
@@ -4857,6 +4934,11 @@ Return the response in strict JSON format.`;
     // Repair locally before budget reconciliation and the final customer-facing gate.
     repairFinalLuxuryMealSemantics(reconciledItinerary);
     repairFinalContentTrust(reconciledItinerary);
+    repairFinalItineraryDiversity(reconciledItinerary);
+    // Diversity repair can change a location anchor. Re-run route enrichment so
+    // visible route distance/transport is calculated from the final customer itinerary.
+    const finalRoutedItinerary = applySmartRouteAndTransport(reconciledItinerary);
+    Object.assign(reconciledItinerary, finalRoutedItinerary);
     // Re-price accommodation from the selected-style Agoda recommendation.
     reconcileItineraryBudget(reconciledItinerary);
     const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
