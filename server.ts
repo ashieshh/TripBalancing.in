@@ -1557,7 +1557,7 @@ app.post("/api/reviews", verifyUserAuth, async (req, res) => {
   try {
     const authUser = (req as any).authenticatedUser as { id: string; email: string };
     const tripId = String(req.body?.tripId || "").trim();
-    const destination = String(req.body?.destination || "").trim().slice(0, 160);
+    let destination = String(req.body?.destination || "").trim().slice(0, 160);
     const reviewText = String(req.body?.reviewText || "").trim();
     const rating = Number(req.body?.rating);
     if (!tripId || !destination) return res.status(400).json({ error: "Trip and destination are required." });
@@ -1567,11 +1567,12 @@ app.post("/api/reviews", verifyUserAuth, async (req, res) => {
     if (supabaseAdmin) {
       const { data: ownedTrip, error: tripError } = await supabaseAdmin
         .from("trips")
-        .select("id")
+        .select("id,destination")
         .eq("id", tripId)
         .eq("user_id", authUser.id)
         .maybeSingle();
       if (tripError || !ownedTrip) return res.status(403).json({ error: "You can only review your own saved trip." });
+      destination = String(ownedTrip.destination || destination).trim().slice(0, 160);
 
       const { error: reviewError } = await supabaseAdmin.from("trip_reviews").upsert([{
         trip_id: tripId,
