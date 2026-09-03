@@ -2091,14 +2091,17 @@ export const exportPremiumTravelPDF = async (
         // Dynamic height based on lines
         const actHeight = 6 + (actLines.length * 3.5) + 10;
 
-        if (currentTimelineY + actHeight > 258) {
+        const isLastActivity = actIdx === day.activities.length - 1;
+        // If the route panels would otherwise be orphaned, move the final
+        // activity with them so the continuation page remains useful and full.
+        const finalBlockReserve = isLastActivity ? 71 : 0;
+        if (currentTimelineY + actHeight + finalBlockReserve > 258 && currentTimelineY > 25) {
           doc.addPage();
           pageSectionNames[doc.getNumberOfPages()] = currentSectionName;
           currentTimelineY = 25;
         }
 
         // Solid Connecting Line - stops cleanly at last activity marker
-        const isLastActivity = actIdx === day.activities.length - 1;
         doc.setDrawColor(13, 148, 136);
         doc.setLineWidth(0.6);
         if (!isLastActivity) {
