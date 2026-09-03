@@ -125,6 +125,45 @@ const COMMON_FOOTER = `
 </html>
 `;
 
+function escapeHtml(value: string): string {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+export function generateReviewNotificationEmail(data: {
+  reviewerEmail: string;
+  destination: string;
+  rating: number;
+  reviewText: string;
+  tripId: string;
+}) {
+  const destination = escapeHtml(data.destination);
+  const reviewerEmail = escapeHtml(data.reviewerEmail);
+  const reviewText = escapeHtml(data.reviewText).replace(/\n/g, "<br />");
+  const rating = Math.max(1, Math.min(5, Math.round(data.rating)));
+  const tripId = escapeHtml(data.tripId);
+  const html = `
+    ${COMMON_HEADER}
+      <h2 style="color:#f8fafc;font-size:20px;margin-top:0;">New traveler experience received</h2>
+      <p style="color:#cbd5e1;font-size:14px;line-height:1.6;">A traveler submitted a review for <strong>${destination}</strong>.</p>
+      <div class="card-box">
+        <table class="data-table">
+          <tr><td class="data-label">Rating</td><td class="data-value" style="color:#fbbf24;">${"★".repeat(rating)}${"☆".repeat(5 - rating)} (${rating}/5)</td></tr>
+          <tr><td class="data-label">Traveler</td><td class="data-value">${reviewerEmail}</td></tr>
+          <tr><td class="data-label">Trip ID</td><td class="data-value" style="font-family:monospace;">${tripId}</td></tr>
+        </table>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid #334155;color:#cbd5e1;font-size:14px;line-height:1.6;">${reviewText}</div>
+      </div>
+      <p style="color:#94a3b8;font-size:12px;">Private trip notes are not included in review notifications.</p>
+    ${COMMON_FOOTER}
+  `;
+  return { subject: `New ${rating}-star review for ${data.destination}`, html };
+}
+
 // 1. Welcome Email
 export function generateWelcomeEmail(userName: string, appUrl: string = "https://tripbalancing.in") {
   const name = userName || "Traveler";
