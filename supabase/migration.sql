@@ -110,3 +110,22 @@ CREATE POLICY "Users can update invitations they sent or received" ON public.bud
   FOR UPDATE USING (
     lower(recipient_email) = lower(auth.jwt() ->> 'email') OR lower(sender_email) = lower(auth.jwt() ->> 'email')
   );
+
+-- 4. Public trip experiences/reviews (written through the authenticated API)
+CREATE TABLE IF NOT EXISTS public.trip_reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  trip_id TEXT NOT NULL REFERENCES public.trips(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_email TEXT NOT NULL,
+  destination TEXT NOT NULL,
+  rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  review_text TEXT NOT NULL CHECK (char_length(review_text) BETWEEN 10 AND 3000),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (trip_id, user_id)
+);
+
+ALTER TABLE public.trip_reviews ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view own reviews" ON public.trip_reviews;
+CREATE POLICY "Users can view own reviews" ON public.trip_reviews
+  FOR SELECT USING (auth.uid() = user_id);
