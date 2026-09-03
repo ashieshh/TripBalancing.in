@@ -3349,6 +3349,58 @@ function enforceImmutableJourneyAnchors(itinerary:any) {
   return {...itinerary,days};
 }
 
+/**
+ * Last-mile Luxury meal repair.
+ *
+ * The itinerary goes through several enrichment/polish passes after Gemini quality
+ * validation. A later pass can therefore leave a lunch/dinner title attached to a
+ * breakfast, snack, dessert or beverage description. Do not spend another Gemini
+ * call or discard the whole itinerary for this deterministic semantic problem.
+ * Replace only the invalid primary-meal block with honest destination-level savory
+ * meal guidance, preserving its time/cost/transport anchors wherever possible.
+ */
+function repairFinalLuxuryMealSemantics(itinerary:any) {
+  if (!itinerary || String(itinerary?.travelStyle || '').toLowerCase().trim() !== 'luxury' || !Array.isArray(itinerary.days)) return itinerary;
+
+  const invalidPrimaryMeal = /breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette|small plate|croissant|pain au chocolat|pastr(?:y|ies)|macaron|dessert|sweet|ice cream|gelato|beverage|drink|coffee|tea|juice|lassi|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|tasting/i;
+  const trustedMealVenue = /restaurant|dining|hotel|resort|palace|bistro|brasserie|kitchen|cafe|café/i;
+  const destination = sanitizeGeneratedText(String(itinerary.destination || 'the destination')) || 'the destination';
+  let repaired = 0;
+
+  for (let dayIndex = 0; dayIndex < itinerary.days.length; dayIndex++) {
+    const day = itinerary.days[dayIndex];
+    const activities = Array.isArray(day?.activities) ? day.activities : [];
+    for (const activity of activities) {
+      const title = String(activity?.title || '');
+      const role = /\blunch\b/i.test(title) ? 'lunch' : /\bdinner\b|signature dining|evening meal|upscale regional dining/i.test(title) ? 'dinner' : '';
+      if (!role) continue;
+
+      const combined = `${activity?.title || ''} ${activity?.description || ''}`;
+      if (!invalidPrimaryMeal.test(combined)) continue;
+
+      const prettyRole = role === 'lunch' ? 'Lunch' : 'Dinner';
+      activity.title = `Upscale Regional ${prettyRole}: Chef's Local Seasonal Menu`;
+      activity.description = `Enjoy a complete savory regional ${role} at a reputable, well-reviewed restaurant in ${destination}. Choose a full main meal appropriate to the destination; desserts, beverages and snack tastings remain separate optional stops. Confirm the current menu, reservation availability and final price before dining.`;
+
+      // A snack stall / dessert shop is not a safe venue anchor for the replacement
+      // full meal. Keep an existing restaurant/hotel venue; otherwise use the
+      // destination as an honest location placeholder rather than inventing a venue.
+      const currentLocation = sanitizeGeneratedText(String(activity?.location || ''));
+      if (!currentLocation || !trustedMealVenue.test(currentLocation)) activity.location = destination;
+
+      if (!activity.visitDuration || /30\s*[–-]\s*60\s*min/i.test(String(activity.visitDuration))) {
+        activity.visitDuration = role === 'lunch' ? '1h 30m' : '1h 30m';
+      }
+      repaired++;
+    }
+  }
+
+  if (repaired > 0) {
+    console.warn(`[FINAL_MEAL_SEMANTIC_REPAIR] Luxury: replaced ${repaired} invalid breakfast/light/snack primary meal slot(s) locally before final validation.`);
+  }
+  return itinerary;
+}
+
 function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const errors:string[] = [];
   const days = Array.isArray(itinerary?.days) ? itinerary.days : [];
@@ -4708,6 +4760,10 @@ Return the response in strict JSON format.`;
     // Store in cache for future identical requests
     const reconciledItinerary = finalizeItineraryForUser(pricedItinerary, diffDays);
     await attachLiveAgodaHotelsToItinerary(reconciledItinerary);
+    // Last-mile deterministic repair: enrichment/final polish must not leave a
+    // snack, dessert, beverage or breakfast item occupying a Luxury lunch/dinner slot.
+    // Repair locally before budget reconciliation and the final customer-facing gate.
+    repairFinalLuxuryMealSemantics(reconciledItinerary);
     // Re-price accommodation from the selected-style Agoda recommendation.
     reconcileItineraryBudget(reconciledItinerary);
     const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
