@@ -5536,8 +5536,20 @@ Return the response in strict JSON format.`;
     const pricedFallback = await attachMarketFlightEstimate({ ...fallbackItinerary, plannedBudget: budgetAmount }, origin || "", destination, startDate, endDate, travelers);
     const reconciledFallback = finalizeItineraryForUser(pricedFallback, diffDays);
     await attachLiveAgodaHotelsToItinerary(reconciledFallback);
-    // The fallback itinerary follows the same live-hotel budget rule when Agoda is available.
+    // Run curated fallback trips through the exact same final quality pipeline
+    // as AI-generated trips. No destination or degraded mode may bypass hotel,
+    // duplication, route, content-trust or budget consistency checks.
     reconcileItineraryBudget(reconciledFallback);
+    alignLodgingLogisticsToBudgetHotel(reconciledFallback);
+    removeRedundantGenericActivities(reconciledFallback);
+    repairFinalLuxuryMealSemantics(reconciledFallback);
+    repairFinalContentTrust(reconciledFallback);
+    repairFinalItineraryDiversity(reconciledFallback);
+    const routedFallback = applySmartRouteAndTransport(reconciledFallback);
+    Object.assign(reconciledFallback, routedFallback);
+    reconcileItineraryBudget(reconciledFallback);
+    const fallbackUserFacingErrors = validateFinalUserFacingItinerary(reconciledFallback);
+    if (fallbackUserFacingErrors.length) console.warn(`[FINAL_FALLBACK_QUALITY] ${fallbackUserFacingErrors.join('; ')}`);
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,
