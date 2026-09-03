@@ -664,6 +664,6 @@ function FieldLabel({ label, icon, children }: { label: string; icon?: ReactNode
   return <div className="block space-y-2"><div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">{icon}{label}</div>{children}</div>;
 }
 
-function ChoiceButton({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: ReactNode }) {
+function ChoiceButton({ selected, onClick, children }: { key?: string; selected: boolean; onClick: () => void; children: ReactNode }) {
   return <button type="button" onClick={onClick} className={`rounded-xl border-2 px-3 py-3 text-sm font-bold transition ${selected ? "border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-950/20 dark:text-teal-300" : "border-slate-200 bg-white text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"}`}>{children}</button>;
 }
