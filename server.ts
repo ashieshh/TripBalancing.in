@@ -3570,6 +3570,44 @@ function repairFinalItineraryDiversity(itinerary:any) {
   return itinerary;
 }
 
+/** Remove generic filler when the same day already contains a real equivalent. */
+function removeRedundantGenericActivities(itinerary:any) {
+  if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+  for (const day of itinerary.days) {
+    const activities = Array.isArray(day?.activities) ? day.activities : [];
+    day.activities = activities.filter((activity:any, index:number) => {
+      const text = `${activity?.title || ''} ${activity?.description || ''}`;
+      const otherText = activities
+        .filter((_:any, otherIndex:number) => otherIndex !== index)
+        .map((other:any) => `${other?.title || ''} ${other?.description || ''}`)
+        .join(' ');
+      const genericSpa = /premium leisure\s*\/\s*spa|destination-appropriate elevated experience|add an unhurried.*spa/i.test(text);
+      const genericDinner = /signature dinner:\s*(?:chef'?s|seasonal)|choose a complete savory regional dinner/i.test(text);
+      if (genericSpa && /\bspa\b|wellness treatment|massage|ayurvedic treatment/i.test(otherText)) return false;
+      if (genericDinner && /\bdinner\b|evening dining|fine dining/i.test(otherText)) return false;
+      return true;
+    });
+  }
+  return itinerary;
+}
+
+/** Make arrival/check-in logistics use the same hotel that funds the budget. */
+function alignLodgingLogisticsToBudgetHotel(itinerary:any) {
+  const selected = sanitizeGeneratedText(String(itinerary?.budgetHotelName || ''));
+  if (!selected || !Array.isArray(itinerary?.days)) return itinerary;
+  itinerary.selectedHotelName = selected;
+  const namedHotel = /\b[A-Z][A-Za-z0-9&' -]{1,60}\s(?:Hotel|Palace|Resort|Haveli)\b/g;
+  for (const day of itinerary.days) {
+    for (const activity of Array.isArray(day?.activities) ? day.activities : []) {
+      const logistics = /arrival|airport transfer|hotel check[- ]?in|check[- ]?out|departure preparation|packing/i.test(`${activity?.title || ''} ${activity?.description || ''}`);
+      if (!logistics) continue;
+      activity.description = String(activity.description || '').replace(namedHotel, selected);
+      if (/arrival|check[- ]?in/i.test(String(activity.title || ''))) activity.location = selected;
+    }
+  }
+  return itinerary;
+}
+
 function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const errors:string[] = [];
   const days = Array.isArray(itinerary?.days) ? itinerary.days : [];
@@ -4929,6 +4967,11 @@ Return the response in strict JSON format.`;
     // Store in cache for future identical requests
     const reconciledItinerary = finalizeItineraryForUser(pricedItinerary, diffDays);
     await attachLiveAgodaHotelsToItinerary(reconciledItinerary);
+    // Select the budgeted Agoda hotel before final content repair so arrival,
+    // check-in and departure logistics use the same working accommodation.
+    reconcileItineraryBudget(reconciledItinerary);
+    alignLodgingLogisticsToBudgetHotel(reconciledItinerary);
+    removeRedundantGenericActivities(reconciledItinerary);
     // Last-mile deterministic repair: enrichment/final polish must not leave a
     // snack, dessert, beverage or breakfast item occupying a Luxury lunch/dinner slot.
     // Repair locally before budget reconciliation and the final customer-facing gate.
