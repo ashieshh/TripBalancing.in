@@ -2084,6 +2084,12 @@ export const exportPremiumTravelPDF = async (
         // Dynamic height based on lines
         const actHeight = 6 + (actLines.length * 3.5) + 10;
 
+        if (currentTimelineY + actHeight > 258) {
+          doc.addPage();
+          pageSectionNames[doc.getNumberOfPages()] = currentSectionName;
+          currentTimelineY = 25;
+        }
+
         // Solid Connecting Line - stops cleanly at last activity marker
         const isLastActivity = actIdx === day.activities.length - 1;
         doc.setDrawColor(13, 148, 136);
@@ -2132,7 +2138,9 @@ export const exportPremiumTravelPDF = async (
         doc.setFont("helvetica", "bold");
         doc.setFontSize(9);
         doc.setTextColor(15, 23, 42);
-        doc.text(act.title, cardX + 4, currentTimelineY + 4.5);
+        const activityTitle = String(act.title || "Activity");
+        doc.setFontSize(doc.getTextWidth(activityTitle) > cardW - 8 ? 7.2 : 9);
+        doc.text(activityTitle, cardX + 4, currentTimelineY + 4.5, { maxWidth: cardW - 8 });
 
         doc.setFont("helvetica", "normal");
         doc.setFontSize(7.5);
@@ -2234,8 +2242,16 @@ export const exportPremiumTravelPDF = async (
       });
 
       // Side-by-side bottom panels (MOBILE NAVIGATION on Left, ROUTE TIMELINE on Right)
-      const panelY = currentTimelineY + 6;
+      let panelY = currentTimelineY + 6;
       const panelH = 32;
+
+      // Keep the route panels and day total together. This prevents the day
+      // total from becoming the only content on a nearly blank page.
+      if (panelY + panelH + 35 > 262) {
+        doc.addPage();
+        pageSectionNames[doc.getNumberOfPages()] = currentSectionName;
+        panelY = 25;
+      }
 
       // Draw MOBILE NAVIGATION Card on the Left (width 87)
       drawPremiumCard(doc, marginX, panelY, 87, panelH, 2, 2, [13, 148, 136], [248, 250, 252]);
@@ -2377,8 +2393,9 @@ export const exportPremiumTravelPDF = async (
       ? `Finding the right stay is essential to the itinerary. For your selected ${itinerary.travelStyle || 'travel'} style, TripBalancing prioritizes ${preferredLodging} first, then shows other tiers as reference alternatives. The properties below use Agoda daily rates returned for your selected dates and show them as estimated references; confirm the final rate, taxes, availability and cancellation terms on Agoda or your preferred booking platform before booking.`
       : `Finding the right stay is essential to the itinerary. For your selected ${itinerary.travelStyle || 'travel'} style, TripBalancing prioritizes ${preferredLodging} first, then shows other tiers as reference alternatives. The properties below are planning references with estimated nightly guidance; verify live rates, availability, taxes, reviews and cancellation terms before booking.`
     : `TripBalancing has calculated an accommodation allowance for this trip, but no sufficiently reliable property-level recommendations were available for this destination. Use the style-appropriate tiers below as a planning guide and verify live hotel options before booking.`;
-  doc.text(doc.splitTextToSize(lodgingIntro, 180), marginX, y);
-  y += 24;
+  const lodgingIntroLines = doc.splitTextToSize(lodgingIntro, 180);
+  doc.text(lodgingIntroLines, marginX, y);
+  y += Math.max(24, lodgingIntroLines.length * 4.2 + 5);
 
   // Render tiny teaser preview boxes for hotel classes on cover page
   const allHotelTiers = [
@@ -2414,8 +2431,13 @@ export const exportPremiumTravelPDF = async (
     doc.setFontSize(8);
     doc.setTextColor(13, 148, 136);
     const hasAgodaRates = [hotelData.budget, hotelData.midRange, hotelData.luxury].some((list: any) => Array.isArray(list) && list.some((h: any) => h?.source === "agoda"));
-    doc.text(`Trip accommodation allowance: ${currencySym}${nightlyAllowance.toLocaleString()} per night (${hotelNights} night${hotelNights === 1 ? "" : "s"}). ${hasAgodaRates ? "Hotel prices below use Agoda daily rates for the selected dates and remain labelled estimated until booking is confirmed." : "Recommendations below are planning estimates, not a forced tier."}`, marginX, y);
-    y += 7;
+    const selectedHotelText = (itinerary as any).budgetHotelName
+      ? ` Budgeted stay: ${(itinerary as any).budgetHotelName}.`
+      : "";
+    const allowanceText = `Trip accommodation allowance: ${currencySym}${nightlyAllowance.toLocaleString()} per night (${hotelNights} night${hotelNights === 1 ? "" : "s"}).${selectedHotelText} ${hasAgodaRates ? "Rates below are Agoda estimates for the selected dates; confirm room type, taxes, availability and cancellation terms before booking." : "Recommendations below are planning estimates, not a forced tier."}`;
+    const allowanceLines = doc.splitTextToSize(allowanceText, 180);
+    doc.text(allowanceLines, marginX, y);
+    y += allowanceLines.length * 3.4 + 4;
   }
 
   const renderTier = (tierName: string, list: any[], color: [number, number, number], comfortLabel: string) => {
