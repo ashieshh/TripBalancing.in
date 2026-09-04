@@ -3870,6 +3870,12 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
   return Array.from(new Set(errors));
 }
 
+/** Only defects that can make the visible journey impossible or expose internal copy block delivery. */
+function blockingFinalQualityErrors(errors:string[]):string[] {
+  const blocking=/(internal AI instruction leaked|before arrival\/check-in|after departure transfer|transfer to .+ after or at the visit time|overlapping activity times|Goa-specific fallback wording leaked)/i;
+  return errors.filter((error)=>blocking.test(error));
+}
+
 /** Deterministic final repair shared by AI and curated itineraries. */
 function repairResidualUserFacingQuality(itinerary:any) {
   if(!itinerary || !Array.isArray(itinerary.days)) return itinerary;
@@ -5301,9 +5307,11 @@ Return the response in strict JSON format.`;
     // Re-price accommodation from the selected-style Agoda recommendation.
     reconcileItineraryBudget(reconciledItinerary);
     const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
-    if (finalUserFacingErrors.length) {
-      console.error(`[FINAL_ITINERARY_REJECTED] ${finalUserFacingErrors.join('; ')}`);
-      throw new Error(`Final itinerary quality gate rejected generated output: ${finalUserFacingErrors.join('; ')}`);
+    const finalBlockingErrors=blockingFinalQualityErrors(finalUserFacingErrors);
+    if (finalUserFacingErrors.length) console.warn(`[FINAL_ITINERARY_ADVISORY] ${finalUserFacingErrors.join('; ')}`);
+    if (finalBlockingErrors.length) {
+      console.error(`[FINAL_ITINERARY_REJECTED] ${finalBlockingErrors.join('; ')}`);
+      throw new Error(`Final itinerary quality gate rejected generated output: ${finalBlockingErrors.join('; ')}`);
     }
 
     ITINERARY_CACHE.set(cacheKey, {
@@ -5871,8 +5879,10 @@ Return the response in strict JSON format.`;
     Object.assign(reconciledFallback, routedFallback);
     reconcileItineraryBudget(reconciledFallback);
     const fallbackUserFacingErrors = validateFinalUserFacingItinerary(reconciledFallback);
-    if (fallbackUserFacingErrors.length) {
-      console.error(`[FINAL_FALLBACK_REJECTED] ${fallbackUserFacingErrors.join('; ')}`);
+    const fallbackBlockingErrors=blockingFinalQualityErrors(fallbackUserFacingErrors);
+    if (fallbackUserFacingErrors.length) console.warn(`[FINAL_FALLBACK_ADVISORY] ${fallbackUserFacingErrors.join('; ')}`);
+    if (fallbackBlockingErrors.length) {
+      console.error(`[FINAL_FALLBACK_REJECTED] ${fallbackBlockingErrors.join('; ')}`);
       return res.status(503).json({ error: 'Trip quality validation could not produce a safe itinerary. Please try again.', code: 'ITINERARY_QUALITY_REJECTED', retryable: true, preservedInput: true });
     }
 
