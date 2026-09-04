@@ -449,6 +449,29 @@ async function generateContentWithRetry(
   }
 }
 
+const ITINERARY_AI_TIMEOUT_MS = 50_000;
+
+async function generateItineraryContentWithDeadline(
+  ai: GoogleGenAI,
+  options: Parameters<typeof generateContentWithRetry>[1]
+): Promise<any> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      generateContentWithRetry(ai, options, 1, 750),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new GeminiServiceError(
+          "Itinerary generation exceeded the safe response deadline.",
+          "overloaded",
+          true
+        )), ITINERARY_AI_TIMEOUT_MS);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 // Highly robust multi-tier geocoding function
 async function geocodeDestination(destination: string): Promise<{ latitude: number; longitude: number } | null> {
   const geoKey = destination.toLowerCase().trim();
@@ -4791,7 +4814,9 @@ Please tailor the recommendations explicitly:
 Return the response in strict JSON format.`;
     }
 
-    const response = await generateContentWithRetry(ai, {
+    // Keep enough time for the verified local fallback to finish before Render's
+    // request deadline. A slow AI response must never become a host-level 502/504.
+    const response = await generateItineraryContentWithDeadline(ai, {
       model: "gemini-3.5-flash",
       contents: prompt,
       config: {
