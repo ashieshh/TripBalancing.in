@@ -818,7 +818,7 @@ const getPackingCategory = (item: string): string => {
   if (l.includes("phone") || l.includes("charger") || l.includes("camera") || l.includes("adapter") || l.includes("laptop") || l.includes("cable") || l.includes("power bank") || l.includes("electronics") || l.includes("plug") || l.includes("earbuds") || l.includes("headphones") || l.includes("kindle")) {
     return "Electronics";
   }
-  if (l.includes("passport") || l.includes("visa") || l.includes("ticket") || l.includes("id") || l.includes("insurance") || l.includes("booking") || l.includes("license") || l.includes("wallet") || l.includes("cash") || l.includes("documents") || l.includes("credit card") || l.includes("itinerary")) {
+  if (l.includes("passport") || l.includes("visa") || l.includes("ticket") || l.includes("id") || l.includes("insurance") || l.includes("booking") || l.includes("license") || l.includes("documents") || l.includes("itinerary")) {
     return "Documents";
   }
   if (l.includes("med") || l.includes("pill") || l.includes("kit") || l.includes("bandage") || l.includes("prescription") || l.includes("sunscreen") || l.includes("hygiene") || l.includes("health") || l.includes("toiletries") || l.includes("brush") || l.includes("soap") || l.includes("sanitizer") || l.includes("paste")) {
@@ -872,9 +872,9 @@ const estimateFoodPriceRange = (
   if (/michelin|ritz|ducasse|fine dining|gastronomic|truffle|tasting menu|luxury|premium/.test(text)) {
     lowFactor = 1.15;
     highFactor = 2.25;
-  } else if (/street|croissant|pastry|bakery|boulangerie|crepe|sandwich|snack|macaron/.test(text)) {
-    lowFactor = 0.18;
-    highFactor = 0.48;
+  } else if (/chaat|kachori|lassi|paan|vada pav|street|croissant|pastry|bakery|boulangerie|crepe|sandwich|snack|macaron/.test(text)) {
+    lowFactor = 0.05;
+    highFactor = 0.18;
   } else if (/dessert|coffee|tea|beverage|soup/.test(text)) {
     lowFactor = 0.30;
     highFactor = 0.70;
@@ -892,24 +892,11 @@ const estimateFoodPriceRange = (
 };
 
 
-// Prevent Truncation: Restrict location names and landmarks to a maximum of 40 characters
+// Preserve full customer-facing names. Individual PDF cards handle wrapping/scaling;
+// permanently replacing meaningful hotel and attraction names with ellipses does not.
 const sanitizeLocation = (loc: string): string => {
   if (!loc) return "";
-  let clean = loc.trim();
-  if (clean.length > 40) {
-    const parts = clean.split(",");
-    if (parts.length > 1) {
-      const firstPart = parts[0].trim();
-      // Keep real named venues compact (e.g. "Fisherman's Wharf, Cavelossim"),
-      // but do not collapse descriptive fallback locations to meaningless text such
-      // as "A licensed" or "A traditional".
-      if (firstPart.length <= 40 && !/^(a|an|the)\s+(licensed|traditional|well[- ]reviewed|local|busy|reputable|upscale|premium)\b/i.test(firstPart)) {
-        return firstPart;
-      }
-    }
-    return clean.substring(0, 37) + "...";
-  }
-  return clean;
+  return loc.trim();
 };
 
 // Deep clone and recursively replace raw Rupee symbol with "Rs. " to prevent font rendering breaks
@@ -2026,15 +2013,13 @@ export const exportPremiumTravelPDF = async (
       let weatherLabel = "Season-aware planning";
       if (headerWeather && headerWeather[dIdx]) {
         let cond = headerWeather[dIdx].condition || "Clear";
-        if (cond.length > 24) {
-          cond = cond.substring(0, 21) + "...";
-        }
+        if (/storm with (?:slight|heavy) hail/i.test(cond)) cond = "Thunderstorm risk";
         weatherLabel = `${cond}, ${headerWeather[dIdx].tempMax || "24"}°C`;
       }
 
       const dStats = [
         { label: "EST. DAILY REQUIREMENT", value: displayBudget, bg: [236, 253, 245], border: [13, 148, 136], txt: [13, 148, 136], icon: "budget" },
-        { label: headerWeather && headerWeather[dIdx] ? "WEATHER FORECAST" : "WEATHER GUIDANCE", value: weatherLabel, bg: [240, 249, 255], border: [2, 132, 199], txt: [2, 132, 199], icon: "weather" },
+        { label: headerWeather && headerWeather[dIdx] ? "WEATHER OUTLOOK" : "WEATHER GUIDANCE", value: weatherLabel, bg: [240, 249, 255], border: [2, 132, 199], txt: [2, 132, 199], icon: "weather" },
         { label: "ROUTE DISTANCE", value: dist === "N/A" ? "N/A" : `${dist} km`, bg: [255, 241, 242], border: [225, 29, 72], txt: [225, 29, 72], icon: "distance" },
         { label: "TRANSIT TIME", value: travTime, bg: [238, 242, 255], border: [79, 70, 229], txt: [79, 70, 229], icon: "time" }
       ];
@@ -2231,7 +2216,8 @@ export const exportPremiumTravelPDF = async (
         // Row 2 - Badge 6: Weather (Proportional Center Grouping based on forecast length)
         let weatherVal = "Season-aware";
         if (headerWeather && headerWeather[dIdx]) {
-          const cond = headerWeather[dIdx].condition || "Clear";
+          const rawCondition = headerWeather[dIdx].condition || "Clear";
+          const cond = /storm with (?:slight|heavy) hail/i.test(rawCondition) ? "Thunderstorm risk" : rawCondition;
           const temp = headerWeather[dIdx].tempMax || "24";
           weatherVal = `${cond}, ${temp}°C`;
         }
@@ -2476,7 +2462,9 @@ export const exportPremiumTravelPDF = async (
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
       doc.setTextColor(15, 23, 42);
-      doc.text(String(hotel.name || ""), contentX, y + 6.5);
+      const hotelName=String(hotel.name||"");
+      doc.setFontSize(doc.getTextWidth(hotelName)>126?7.5:10);
+      doc.text(hotelName, contentX, y + 6.5, { maxWidth: 126 });
 
       const ratingValue = Number(hotel.rating);
       if (Number.isFinite(ratingValue) && ratingValue > 0) {
