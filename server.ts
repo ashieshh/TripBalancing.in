@@ -4103,14 +4103,81 @@ function applySmartRouteAndTransport(itinerary: any) {
       let km=distanceKm(ordered[i-1],a);
       // Remote excursions are often returned by the model with missing or city-centre coordinates.
       // Never let a waterfall/national-park/day-trip leg collapse to an impossible 1-3 km total.
-      if ((isRemote(ordered[i-1]) || isRemote(a)) && (km == null || km < 8)) km = 25;
+      const previousIsRemote = isRemote(ordered[i-1]);
+      const currentIsRemote = isRemote(a);
+      // Only enforce a minimum when entering or leaving a remote zone. Applying a
+      // 25 km minimum to every stop inside Sarnath/Ramnagar/Gobustan multiplied a
+      // single excursion into impossible 75-100 km day totals.
+      if (previousIsRemote !== currentIsRemote && (km == null || km < 8)) km = 8;
       const r=routeMode(ordered[i-1],a,km);
-      return {...a,visitDuration:a.visitDuration||visitDuration(a),transportFromPrevious:r.mode,travelTimeFromPrevious:fmt(r.minutes),distanceFromPreviousKm:km==null?undefined:Math.round(km*10)/10};
+      const promisedPrivateTransfer = /chauffeur|private (?:car|transfer)|pre-arranged private/i.test(textOf(a));
+      return {...a,visitDuration:a.visitDuration||visitDuration(a),transportFromPrevious:promisedPrivateTransfer?'Private car / pre-booked transfer':r.mode,travelTimeFromPrevious:fmt(r.minutes),distanceFromPreviousKm:km==null?undefined:Math.round(km*10)/10};
     });
     const tips=activities.slice(1).map((a:any)=>`${a.transportFromPrevious}: about ${a.travelTimeFromPrevious} from the previous stop${a.distanceFromPreviousKm!=null?` (${a.distanceFromPreviousKm} km)`:''}.`);
     return {...day,activities,transportationSuggestions:tips.length?tips:day.transportationSuggestions};
   });
   return {...itinerary,days};
+}
+
+/**
+ * Last customer-copy pass shared by Gemini and curated fallback trips. It replaces
+ * planning instructions and unnamed placeholders with the real places, dishes,
+ * venues and selected hotel already present in the itinerary. It never invents a
+ * property or attraction.
+ */
+function finalizeCustomerSpecificity(itinerary: any) {
+  if (!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+  const destination = String(itinerary.destination || 'the destination');
+  const places = (Array.isArray(itinerary.placesToVisit) ? itinerary.placesToVisit : []).filter((p:any)=>p?.name);
+  const foods = (Array.isArray(itinerary.localFood) ? itinerary.localFood : []).filter((f:any)=>f?.name);
+  const selectedHotel = String(itinerary.budgetHotelName || '').trim();
+  const currency = detectCurrencyCode(String(itinerary.plannedBudget || itinerary.budgetAmount || 'USD'), destination);
+  const symbols:Record<string,string>={INR:'₹',USD:'$',EUR:'€',GBP:'£',JPY:'¥',AED:'AED ',AUD:'A$',CAD:'C$',SGD:'S$',THB:'฿'};
+  const sym=symbols[currency]||`${currency} `;
+  const style=String(itinerary.travelStyle||'').toLowerCase();
+  const travelers=Math.max(1,Number(itinerary.travelers)||1);
+  const mealEstimate=(style==='luxury'?45:style==='smart luxury'?28:style==='budget'||style==='backpacker'?8:18)*travelers;
+  const activityEstimate=(style==='luxury'?55:style==='smart luxury'?35:style==='budget'||style==='backpacker'?10:25)*travelers;
+  const transferEstimate=(style==='luxury'?40:style==='smart luxury'?25:12)*Math.max(1,Math.ceil(travelers/3));
+  const estimate=(n:number,label='group estimate')=>`${sym}${Math.max(1,Math.round(n)).toLocaleString('en-US')} ${label}`;
+  const vague=/check current|verify (?:live |current )?(?:rate|price|menu)|per person$|fine dining - per person|premium dining - per person|premium experience|premium service|mid-premium|low cost$|optional$|calculated by/i;
+  let foodCursor=0, placeCursor=0;
+
+  itinerary.days=itinerary.days.map((day:any,dayIndex:number)=>{
+    const activities=(Array.isArray(day.activities)?day.activities:[]).map((activity:any)=>{
+      const a={...activity};
+      const text=`${a.title||''} ${a.description||''} ${a.location||''}`;
+      const isMeal=/breakfast|brunch|lunch|dinner|dining|meal|culinary|tasting|cafe/i.test(text);
+      const isTransfer=/transfer|chauffeur|pick[- ]?up|drop[- ]?off|airport|station/i.test(text);
+      const isSpa=/spa|wellness|massage/i.test(text);
+      const isGenericPlace=/private\s*\/\s*(?:priority|advance-planned)|cultural context|second sight|selective premium experience|destination experience/i.test(text);
+      const isGenericMeal=/different local|chef'?s local|signature dinner(?!: [A-Z])|boutique dining|complete destination-appropriate|acclaimed fine-dining/i.test(text);
+
+      if (isGenericMeal && foods.length) {
+        const food=foods[(dayIndex*2+foodCursor++)%foods.length];
+        const dinner=/dinner/i.test(text);
+        a.title=`${dinner?'Regional Dinner':'Regional Meal'}: ${food.name}`;
+        a.description=String(food.description||`Enjoy ${food.name}, a local specialty of ${destination}.`);
+        a.location=String(food.mustTryAt||destination);
+      } else if (isGenericPlace && places.length) {
+        const place=places[(dayIndex+placeCursor++)%places.length];
+        a.title=`Guided Visit: ${place.name}`;
+        a.description=String(place.description||`Explore ${place.name} with a local guide.`);
+        a.location=String(place.name);
+      } else if (isSpa && selectedHotel) {
+        a.title=`Spa & Wellness Session at ${selectedHotel}`;
+        a.description=`Reserve a wellness treatment at ${selectedHotel}; confirm the treatment menu and availability before arrival.`;
+        a.location=selectedHotel;
+      }
+
+      if (!a.cost || vague.test(String(a.cost))) {
+        a.cost=isTransfer?estimate(transferEstimate):isMeal?estimate(mealEstimate,'for all travelers'):estimate(activityEstimate);
+      }
+      return a;
+    });
+    return {...day,activities};
+  });
+  return itinerary;
 }
 
 // Resolve a user-facing city/place name to a Travelpayouts IATA city/airport code.
@@ -5153,6 +5220,7 @@ Return the response in strict JSON format.`;
     repairFinalLuxuryMealSemantics(reconciledItinerary);
     repairFinalContentTrust(reconciledItinerary);
     repairFinalItineraryDiversity(reconciledItinerary);
+    finalizeCustomerSpecificity(reconciledItinerary);
     // Diversity repair can change a location anchor. Re-run route enrichment so
     // visible route distance/transport is calculated from the final customer itinerary.
     const finalRoutedItinerary = applySmartRouteAndTransport(reconciledItinerary);
@@ -5720,6 +5788,7 @@ Return the response in strict JSON format.`;
     repairFinalLuxuryMealSemantics(reconciledFallback);
     repairFinalContentTrust(reconciledFallback);
     repairFinalItineraryDiversity(reconciledFallback);
+    finalizeCustomerSpecificity(reconciledFallback);
     const routedFallback = applySmartRouteAndTransport(reconciledFallback);
     Object.assign(reconciledFallback, routedFallback);
     reconcileItineraryBudget(reconciledFallback);
@@ -5829,14 +5898,17 @@ async function attachLiveAgodaHotelsToItinerary(itinerary: any): Promise<any> {
       source: "agoda" as const,
     });
     const byPrice = hotels.slice().sort((a,b) => Number(a.dailyRate)-Number(b.dailyRate));
-    const budget = byPrice.filter(h => Number(h.starRating) < 3.5);
+    const budget = byPrice.filter(h => Number(h.starRating) > 0 && Number(h.starRating) < 3.5);
     const mid = byPrice.filter(h => Number(h.starRating) >= 3.5 && Number(h.starRating) < 4.5);
     const luxury = byPrice.filter(h => Number(h.starRating) >= 4.5);
-    const fill = (preferred: any[], fallback: any[]) => (preferred.length >= 3 ? preferred : [...preferred, ...fallback.filter(x => !preferred.includes(x))]).slice(0,3).map(convert);
+    // Never pad a sparse tier with hotels from another class. Showing one or two
+    // genuine luxury choices is more trustworthy than labelling a budget hotel
+    // "Luxury" merely to fill three cards.
+    const take = (items:any[]) => items.slice(0,3).map(convert);
     itinerary.hotelRecommendations = {
-      budget: fill(budget, byPrice),
-      midRange: fill(mid, hotels.slice().sort((a,b) => Math.abs(Number(a.starRating)-4)-Math.abs(Number(b.starRating)-4))),
-      luxury: fill(luxury, hotels.slice().sort((a,b) => Number(b.starRating)-Number(a.starRating))),
+      budget: take(budget),
+      midRange: take(mid),
+      luxury: take(luxury.slice().sort((a,b) => Number(b.reviewScore||0)-Number(a.reviewScore||0))),
     };
     itinerary.hotelRateSource = "agoda";
     itinerary.agodaCityId = result.city.cityId;
