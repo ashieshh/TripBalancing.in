@@ -708,8 +708,9 @@ const drawMiniRouteMap = (doc: any, x: number, y: number, w: number, h: number, 
     }
 
     // Stop Label
-    const rawTitle = activities[i].title || "Stop";
-    const label = rawTitle.length > labelMax + 2 ? rawTitle.substring(0, labelMax) + ".." : rawTitle;
+    // Full activity names are already printed directly above. Use stable numbered
+    // markers here instead of clipping names with ellipses inside the compact map.
+    const label = `STOP ${i + 1}`;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(labelFont);
     doc.setTextColor(51, 65, 85);
