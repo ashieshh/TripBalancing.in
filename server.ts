@@ -1587,19 +1587,16 @@ app.post("/api/reviews", verifyUserAuth, async (req, res) => {
     }
 
     const notificationEmail = String(
-      process.env.REVIEW_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || process.env.SMTP_REPLY_TO || process.env.BREVO_SMTP_USER || ""
+      process.env.REVIEW_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || process.env.SMTP_REPLY_TO || process.env.BREVO_SMTP_USER || "support@tripbalancing.in"
     ).trim();
-    if (!notificationEmail) {
-      return res.status(503).json({ error: "Review notifications are not configured yet." });
-    }
     const emailData = generateReviewNotificationEmail({ reviewerEmail: authUser.email, destination, rating, reviewText, tripId });
-    await sendBrevoEmail({
+    sendBrevoEmail({
       to: notificationEmail,
       replyTo: authUser.email || undefined,
       subject: emailData.subject,
       html: emailData.html
-    });
-    res.json({ success: true });
+    }).catch((emailError) => console.warn("[Review API] Notification email failed:", emailError?.message || emailError));
+    res.json({ success: true, notificationQueued: true });
   } catch (err: any) {
     console.error("[Review API] Submission failed:", err);
     res.status(500).json({ error: err?.message || "Failed to submit review." });

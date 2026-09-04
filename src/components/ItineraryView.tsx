@@ -311,6 +311,7 @@ export default function ItineraryView({
   const splitParticipants = itinerary.costSplitParticipants?.length
     ? itinerary.costSplitParticipants
     : defaultParticipants;
+  const [participantDrafts, setParticipantDrafts] = useState<string[]>(splitParticipants);
   const [expensePaidBy, setExpensePaidBy] = useState(splitParticipants[0]);
   const [expenseSplitAmong, setExpenseSplitAmong] = useState<string[]>(splitParticipants);
   const [newParticipantName, setNewParticipantName] = useState("");
@@ -536,6 +537,7 @@ export default function ItineraryView({
   }, [itinerary.reviewText]);
 
   useEffect(() => {
+    setParticipantDrafts(splitParticipants);
     if (!splitParticipants.includes(expensePaidBy)) setExpensePaidBy(splitParticipants[0]);
     setExpenseSplitAmong((current) => {
       const valid = current.filter((name) => splitParticipants.includes(name));
@@ -1352,12 +1354,19 @@ export default function ItineraryView({
                   <div key={`${name}-${index}`} className="flex items-center gap-1.5 bg-white dark:bg-slate-950 border border-teal-100 dark:border-teal-900/50 rounded-xl px-2.5 py-1.5">
                     <input
                       aria-label={`Traveler ${index + 1} name`}
-                      value={name}
+                      value={participantDrafts[index] ?? name}
                       disabled={isReadOnly}
-                      onChange={(event) => renameSplitParticipant(index, event.target.value)}
-                      onBlur={(event) => {
-                        if (!event.target.value.trim()) renameSplitParticipant(index, `Traveler ${index + 1}`);
+                      onChange={(event) => {
+                        const next = [...participantDrafts];
+                        next[index] = event.target.value;
+                        setParticipantDrafts(next);
                       }}
+                      onBlur={(event) => {
+                        const nextName = event.target.value.trim() || `Traveler ${index + 1}`;
+                        const duplicate = splitParticipants.some((item, itemIndex) => itemIndex !== index && item.toLowerCase() === nextName.toLowerCase());
+                        renameSplitParticipant(index, duplicate ? name : nextName);
+                      }}
+                      onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
                       className="w-24 sm:w-28 bg-transparent text-xs font-bold text-slate-700 dark:text-slate-200 outline-none disabled:opacity-100"
                     />
                     {!isReadOnly && splitParticipants.length > 1 && (
