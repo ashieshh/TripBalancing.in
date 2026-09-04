@@ -4143,6 +4143,16 @@ function finalizeCustomerSpecificity(itinerary: any) {
   const vague=/check current|verify (?:live |current )?(?:rate|price|menu)|per person$|fine dining - per person|premium dining - per person|premium experience|premium service|mid-premium|low cost$|optional$|calculated by/i;
   let foodCursor=0, placeCursor=0;
 
+  const usedMajorPlaces=new Set<string>();
+  const placeIdentity=(activity:any)=>{
+    const text=`${activity?.title||''} ${activity?.location||''}`.toLowerCase();
+    const match=places.find((p:any)=>{
+      const name=String(p.name||'').toLowerCase().replace(/\b(archaeological|site|park|the|temple|fort|ghat)\b/g,' ').replace(/\s+/g,' ').trim();
+      return name.length>=4 && text.includes(name);
+    });
+    return match?String(match.name).toLowerCase().replace(/\b(archaeological|site|park|the)\b/g,' ').replace(/\s+/g,' ').trim():'';
+  };
+
   itinerary.days=itinerary.days.map((day:any,dayIndex:number)=>{
     const activities=(Array.isArray(day.activities)?day.activities:[]).map((activity:any)=>{
       const a={...activity};
@@ -4170,12 +4180,28 @@ function finalizeCustomerSpecificity(itinerary: any) {
         a.location=selectedHotel;
       }
 
-      if (!a.cost || vague.test(String(a.cost))) {
+      const incorrectlyFree=(isTransfer||/boat|cruise|guided tour|spa|massage/i.test(text))&&/^free(?:\s*\/\s*included)?$/i.test(String(a.cost||'').trim());
+      if (!a.cost || vague.test(String(a.cost)) || incorrectlyFree) {
         a.cost=isTransfer?estimate(transferEstimate):isMeal?estimate(mealEstimate,'for all travelers'):estimate(activityEstimate);
       }
       return a;
+    }).filter((activity:any)=>{
+      const identity=placeIdentity(activity);
+      if(!identity) return true;
+      // Museums, performances and other clearly distinct sub-experiences remain
+      // valid even when they share a district with a previously used landmark.
+      if(/museum|performance|aarti|food|weav|market/i.test(`${activity.title||''} ${activity.location||''}`)) return true;
+      if(usedMajorPlaces.has(identity)) return false;
+      usedMajorPlaces.add(identity);
+      return true;
     });
-    return {...day,activities};
+    const themeText=String(day.theme||'');
+    const promisesBoat=/boat|cruise/i.test(themeText);
+    const hasBoat=activities.some((a:any)=>/boat|cruise/i.test(`${a.title||''} ${a.description||''}`));
+    const honestTheme=promisesBoat&&!hasBoat
+      ? activities.filter((a:any)=>!/breakfast|lunch|dinner|meal/i.test(String(a.title||''))).slice(0,2).map((a:any)=>String(a.title||'').replace(/^(?:Explore|Excursion to|Sacred|Guided Visit:)\s*/i,'')).join(' & ')
+      : themeText;
+    return {...day,theme:honestTheme||`Day ${dayIndex+1} Exploration`,activities};
   });
   return itinerary;
 }
@@ -5898,9 +5924,11 @@ async function attachLiveAgodaHotelsToItinerary(itinerary: any): Promise<any> {
       source: "agoda" as const,
     });
     const byPrice = hotels.slice().sort((a,b) => Number(a.dailyRate)-Number(b.dailyRate));
-    const budget = byPrice.filter(h => Number(h.starRating) > 0 && Number(h.starRating) < 3.5);
-    const mid = byPrice.filter(h => Number(h.starRating) >= 3.5 && Number(h.starRating) < 4.5);
-    const luxury = byPrice.filter(h => Number(h.starRating) >= 4.5);
+    const lowerCut=Math.max(1,Math.ceil(byPrice.length*0.4));
+    const upperCut=Math.max(lowerCut+1,Math.ceil(byPrice.length*0.72));
+    const budget = byPrice.slice(0,lowerCut).filter(h => Number(h.starRating) > 0 && Number(h.starRating) < 4);
+    const mid = byPrice.slice(lowerCut,upperCut).filter(h => Number(h.starRating) >= 3 && Number(h.starRating) < 4.5);
+    const luxury = byPrice.slice(upperCut).filter(h => Number(h.starRating) >= 4.5);
     // Never pad a sparse tier with hotels from another class. Showing one or two
     // genuine luxury choices is more trustworthy than labelling a budget hotel
     // "Luxury" merely to fill three cards.
