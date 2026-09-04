@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS public.trip_reviews (
   destination TEXT NOT NULL,
   rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
   review_text TEXT NOT NULL CHECK (char_length(review_text) BETWEEN 10 AND 3000),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (trip_id, user_id)
@@ -129,3 +130,5 @@ ALTER TABLE public.trip_reviews ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users can view own reviews" ON public.trip_reviews;
 CREATE POLICY "Users can view own reviews" ON public.trip_reviews
   FOR SELECT USING (auth.uid() = user_id);
+
+ALTER TABLE public.trip_reviews ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending';

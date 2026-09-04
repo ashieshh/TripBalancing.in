@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { 
   Globe, LogOut, ArrowLeft, Sparkles, Database, WifiOff, MapPin, 
-  ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users, ShieldCheck
+  ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users, ShieldCheck, Star
 } from "lucide-react";
 import { TripBalancingLogo } from "./components/TripBalancingLogo";
 import { Itinerary, TripInput, TripRecord } from "./types";
@@ -213,6 +213,14 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [publicReviews, setPublicReviews] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch("/api/reviews/public")
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((data) => setPublicReviews(Array.isArray(data?.reviews) ? data.reviews : []))
+      .catch(() => setPublicReviews([]));
+  }, []);
   // Only auto-scroll after a newly generated itinerary. Opening a saved/shared trip
   // should preserve the user's normal navigation behavior.
   const pendingGeneratedResultScroll = useRef(false);
@@ -605,7 +613,16 @@ export default function App() {
     if (!response.ok) throw new Error(result?.error || "Could not submit your review.");
 
     // Persist locally only after the server accepted the review and email notification.
-    await handleUpdateTripNotesAndRating(tripId, rating, trip.itinerary.privateNote || "", undefined, reviewText);
+    const updatedItinerary = {
+      ...trip.itinerary,
+      rating,
+      reviewText,
+      reviewModerationStatus: "pending" as const,
+      reviewerEmail: user?.email || trip.itinerary.reviewerEmail
+    };
+    await db.updateTrip(tripId, updatedItinerary);
+    setTrips(prev => prev.map(item => item.id === tripId ? { ...item, itinerary: updatedItinerary } : item));
+    if (activeTripId === tripId) setActiveItinerary(updatedItinerary);
   };
 
   // Update entire itinerary for a trip (or active unsaved itinerary)
@@ -1061,6 +1078,26 @@ export default function App() {
                 </Suspense>
               )}
             </section>
+
+            {publicReviews.length > 0 && (
+              <section className="space-y-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-teal-600 dark:text-teal-400">Traveler experiences</p>
+                  <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-900 dark:text-white">What travelers are saying</h2>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {publicReviews.slice(0, 6).map((review) => (
+                    <article key={review.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map((star) => <Star key={star} className={`h-4 w-4 ${star <= review.rating ? "fill-amber-400 text-amber-400" : "text-slate-200 dark:text-slate-800"}`} />)}
+                      </div>
+                      <p className="mt-3 text-sm font-medium leading-relaxed text-slate-600 dark:text-slate-300">“{review.reviewText}”</p>
+                      <p className="mt-4 text-xs font-extrabold text-teal-600 dark:text-teal-400">Verified trip · {review.destination}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         )}
 

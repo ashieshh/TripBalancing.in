@@ -207,6 +207,8 @@ export interface Itinerary {
   rating?: number;
   privateNote?: string;
   reviewText?: string;
+  reviewModerationStatus?: "pending" | "approved" | "rejected";
+  reviewerEmail?: string;
   loggedExpenses?: LoggedExpense[];
   costSplitParticipants?: string[];
   category?: string;

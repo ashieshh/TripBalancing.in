@@ -4,7 +4,7 @@ import {
   ShieldCheck, ShieldAlert, Users, CreditCard, RefreshCw, HelpCircle, 
   Lock, AlertTriangle, Search, Filter, ChevronLeft, ChevronRight, 
   CheckCircle2, XCircle, Clock, ArrowLeft, Database, Activity, Server,
-  Sparkles, Zap, Crown, DollarSign, Calendar, Eye, Mail, FileText
+  Sparkles, Zap, Crown, DollarSign, Calendar, Eye, Mail, FileText, Star, MessageSquare, Trash2
 } from "lucide-react";
 
 interface AdminDashboardProps {
@@ -12,7 +12,7 @@ interface AdminDashboardProps {
   sessionToken?: string | null;
 }
 
-type AdminTab = "overview" | "users" | "payments" | "subscriptions" | "tickets" | "refunds" | "security" | "emails";
+type AdminTab = "overview" | "users" | "payments" | "subscriptions" | "tickets" | "reviews" | "refunds" | "security" | "emails";
 
 export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
@@ -29,6 +29,7 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
   const [subsData, setSubsData] = useState<any>({ subscriptions: [], total: 0 });
   const [ticketsData, setTicketsData] = useState<any>({ tickets: [], total: 0 });
   const [refundsData, setRefundsData] = useState<any>({ requests: [], total: 0 });
+  const [reviewsData, setReviewsData] = useState<any>({ reviews: [], total: 0, pending: 0, approved: 0, rejected: 0, averageRating: 0 });
   const [securityData, setSecurityData] = useState<any>({ tables: [], failedAccessLogs: [] });
 
   // Filters & Search
@@ -46,6 +47,28 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
   const [testEmailSending, setTestEmailSending] = useState(false);
   const [testEmailStatus, setTestEmailStatus] = useState<string | null>(null);
   const [refActionLoading, setRefActionLoading] = useState<string | null>(null);
+  const [reviewActionLoading, setReviewActionLoading] = useState<string | null>(null);
+
+  const handleReviewAction = async (review: any, action: "approve" | "reject" | "delete") => {
+    if (action === "delete" && !window.confirm("Permanently delete this review and rating?")) return;
+    setReviewActionLoading(review.id);
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/reviews/action", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ tripId: review.trip_id, action })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error || "Review action failed");
+      const refreshed = await fetch("/api/admin/reviews", { headers });
+      if (refreshed.ok) setReviewsData(await refreshed.json());
+    } catch (err: any) {
+      alert(err?.message || "Could not update this review.");
+    } finally {
+      setReviewActionLoading(null);
+    }
+  };
 
   const handleRefundDecision = async (r: any, action: "approve" | "reject") => {
     setRefActionLoading(r.id);
@@ -224,6 +247,11 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
           setRefundsData(data);
+        } else if (activeTab === "reviews") {
+          const res = await fetch("/api/admin/reviews", { headers });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+          setReviewsData(data);
         } else if (activeTab === "security") {
           const res = await fetch("/api/admin/security-audit", { headers });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -344,7 +372,7 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
               <Lock className="w-4 h-4" />
             </div>
             <p className="text-slate-300">
-              <strong className="text-teal-300 font-bold">Initial Admin Release (Read-Only Mode):</strong> All administrative metrics, user accounts, payments, support tickets, and security audits are live and secure. Data modification actions are restricted in this version.
+              <strong className="text-teal-300 font-bold">Secure Admin Operations:</strong> Account, payment, support, review moderation, email, and security data are restricted to verified administrators.
             </p>
           </div>
         </div>
@@ -357,6 +385,7 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
             { id: "payments", label: "Payments", icon: CreditCard },
             { id: "subscriptions", label: "Subscriptions", icon: Crown },
             { id: "tickets", label: "Support Tickets", icon: HelpCircle },
+            { id: "reviews", label: "Reviews", icon: MessageSquare },
             { id: "refunds", label: "Refund Requests", icon: RefreshCw },
             { id: "emails", label: "Brevo Email Operations", icon: Mail },
             { id: "security", label: "Security Audit", icon: Server }
@@ -447,6 +476,14 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
                 subtitle="Within 7-day policy window"
                 icon={RefreshCw}
                 color="purple"
+              />
+
+              <MetricCard
+                title="Traveler Reviews"
+                value={overview.totalReviews || 0}
+                subtitle={`${overview.pendingReviews || 0} pending · ${overview.averageReviewRating || 0}/5 average`}
+                icon={Star}
+                color="amber"
               />
             </div>
 
@@ -715,6 +752,58 @@ export default function AdminDashboard({ onBackToApp, sessionToken }: AdminDashb
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TRAVELER REVIEWS */}
+        {activeTab === "reviews" && !tabLoading && reviewsData && (
+          <div className="space-y-4 animate-in fade-in duration-200">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+              {[
+                ["Total", reviewsData.total, "text-white"],
+                ["Pending", reviewsData.pending, "text-amber-300"],
+                ["Approved", reviewsData.approved, "text-emerald-300"],
+                ["Rejected", reviewsData.rejected, "text-rose-300"],
+                ["Average", `${reviewsData.averageRating || 0}/5`, "text-teal-300"]
+              ].map(([label, value, color]) => (
+                <div key={String(label)} className="p-4 bg-slate-900 border border-slate-800 rounded-2xl">
+                  <p className="text-[10px] uppercase tracking-wider font-extrabold text-slate-500">{label}</p>
+                  <p className={`text-xl font-black mt-1 ${color}`}>{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {reviewsData.reviews.length === 0 ? (
+              <EmptyState title="No traveler reviews" description="Submitted trip experiences will appear here." />
+            ) : (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {reviewsData.reviews.map((review: any) => (
+                  <article key={review.id} className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="font-extrabold text-white">{review.destination}</h3>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{review.user_email} · {new Date(review.created_at).toLocaleString()}</p>
+                      </div>
+                      <span className={`px-2.5 py-1 rounded-lg text-[10px] uppercase font-extrabold ${
+                        review.status === "approved" ? "bg-emerald-500/15 text-emerald-300" :
+                        review.status === "rejected" ? "bg-rose-500/15 text-rose-300" :
+                        "bg-amber-500/15 text-amber-300"
+                      }`}>{review.status}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4, 5].map((star) => <Star key={star} className={`w-4 h-4 ${star <= review.rating ? "fill-amber-400 text-amber-400" : "text-slate-700"}`} />)}
+                      <span className="ml-1 text-xs font-bold text-amber-300">{review.rating}/5</span>
+                    </div>
+                    <p className="text-sm leading-relaxed text-slate-300 whitespace-pre-wrap bg-slate-950/60 border border-slate-800 rounded-xl p-3">{review.review_text}</p>
+                    <div className="flex flex-wrap justify-end gap-2 pt-1">
+                      <button disabled={reviewActionLoading === review.id} onClick={() => handleReviewAction(review, "approve")} className="px-3 py-1.5 rounded-lg text-[10px] font-extrabold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 disabled:opacity-50">Approve & Publish</button>
+                      <button disabled={reviewActionLoading === review.id} onClick={() => handleReviewAction(review, "reject")} className="px-3 py-1.5 rounded-lg text-[10px] font-extrabold bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25 disabled:opacity-50">Reject</button>
+                      <button disabled={reviewActionLoading === review.id} onClick={() => handleReviewAction(review, "delete")} className="p-1.5 rounded-lg text-slate-400 border border-slate-700 hover:text-rose-300 hover:border-rose-500/40 disabled:opacity-50" title="Delete review"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  </article>
+                ))}
               </div>
             )}
           </div>
