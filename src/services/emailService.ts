@@ -4,7 +4,8 @@ import nodemailer from "nodemailer";
 const SMTP_HOST = process.env.BREVO_SMTP_HOST || "smtp-relay.brevo.com";
 const SMTP_PORT = parseInt(process.env.BREVO_SMTP_PORT || "587", 10);
 const SMTP_USER = process.env.BREVO_SMTP_USER || "";
-const SMTP_PASS = process.env.BREVO_SMTP_PASS || process.env.BREVO_API_KEY || "";
+const SMTP_PASS = process.env.BREVO_SMTP_PASS || "";
+const BREVO_API_KEY = process.env.BREVO_API_KEY || "";
 
 const DEFAULT_FROM = process.env.SMTP_FROM || "TripBalancing <noreply@tripbalancing.in>";
 const DEFAULT_REPLY_TO = process.env.SMTP_REPLY_TO || "support@tripbalancing.in";
@@ -43,6 +44,7 @@ export interface SendEmailOptions {
  */
 export async function sendBrevoEmail(options: SendEmailOptions) {
   const mailTransporter = getTransporter();
+  const text = options.text || options.html.replace(/<[^>]+>/g, " ").trim();
 
   const mailOptions = {
     from: DEFAULT_FROM,
@@ -50,8 +52,35 @@ export async function sendBrevoEmail(options: SendEmailOptions) {
     to: options.to,
     subject: options.subject,
     html: options.html,
-    text: options.text || options.html.replace(/<[^>]+>/g, " ").trim(),
+    text,
   };
+
+  // Prefer Brevo's HTTPS API when an API key is configured. Render and other
+  // cloud hosts can intermittently block or delay outbound SMTP port 587.
+  if (BREVO_API_KEY) {
+    try {
+      const fromMatch = DEFAULT_FROM.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+      const sender = fromMatch
+        ? { name: fromMatch[1] || "TripBalancing", email: fromMatch[2] }
+        : { name: "TripBalancing", email: DEFAULT_FROM.trim() };
+      const recipients = options.to.split(/[;,]/).map((email) => email.trim()).filter(Boolean).map((email) => ({ email }));
+      const replyEmail = options.replyTo || DEFAULT_REPLY_TO;
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "api-key": BREVO_API_KEY, Accept: "application/json" },
+        body: JSON.stringify({ sender, to: recipients, replyTo: { email: replyEmail }, subject: options.subject, htmlContent: options.html, textContent: text }),
+        signal: AbortSignal.timeout(12000)
+      });
+      if (!response.ok) throw new Error(`Brevo API HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
+      const result: any = await response.json().catch(() => ({}));
+      console.log(`[Brevo API Success] Email sent to ${options.to}. MessageID: ${result.messageId || "accepted"}`);
+      return { success: true, simulated: false, messageId: result.messageId || `brevo_api_${Date.now()}` };
+    } catch (apiError: any) {
+      console.error(`[Brevo API Error] Failed to send email to ${options.to}:`, apiError?.message || apiError);
+      if (!mailTransporter) throw apiError;
+      console.warn("[Email Service] Retrying through Brevo SMTP.");
+    }
+  }
 
   if (!mailTransporter) {
     console.log(`[Email Service Simulation] Brevo credentials not set. Simulating email to: ${options.to}`);

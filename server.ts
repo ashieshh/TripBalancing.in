@@ -1587,7 +1587,7 @@ app.post("/api/reviews", verifyUserAuth, async (req, res) => {
     }
 
     const notificationEmail = String(
-      process.env.REVIEW_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || process.env.SMTP_REPLY_TO || process.env.BREVO_SMTP_USER || "support@tripbalancing.in"
+      process.env.REVIEW_NOTIFICATION_EMAIL || process.env.ADMIN_EMAIL || process.env.SMTP_REPLY_TO || "support@tripbalancing.in"
     ).trim();
     const emailData = generateReviewNotificationEmail({ reviewerEmail: authUser.email, destination, rating, reviewText, tripId });
     sendBrevoEmail({
