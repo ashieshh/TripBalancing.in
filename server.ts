@@ -722,6 +722,23 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
 
+app.get("/api/reviews/public", async (_req, res) => {
+  try {
+    if (!supabaseAdmin) return res.json({ reviews: [], total: 0, averageRating: 0 });
+    const { data, error } = await supabaseAdmin.from("trips").select("id,destination,itinerary,updated_at").order("updated_at", { ascending: false }).limit(100);
+    if (error) throw error;
+    const reviews = (data || [])
+      .filter((trip: any) => trip.itinerary?.reviewText && trip.itinerary?.reviewModerationStatus === "approved")
+      .slice(0, 12)
+      .map((trip: any) => ({ id: trip.id, destination: trip.destination, rating: Number(trip.itinerary.rating), reviewText: String(trip.itinerary.reviewText), createdAt: trip.updated_at }));
+    const averageRating = reviews.length ? reviews.reduce((sum: number, review: any) => sum + review.rating, 0) / reviews.length : 0;
+    res.json({ reviews, total: reviews.length, averageRating: Number(averageRating.toFixed(1)) });
+  } catch (err: any) {
+    console.warn("[Public Reviews] Fetch failed:", err?.message || err);
+    res.json({ reviews: [], total: 0, averageRating: 0 });
+  }
+});
+
 // Helper to get sanitized Razorpay keys from environment
 const getRazorpayKeys = () => {
   const rawKeyId = process.env.RAZORPAY_KEY_ID;
@@ -1262,6 +1279,9 @@ app.get("/api/admin/overview", verifyAdminAuth, async (req, res) => {
     let totalRevenue = IN_MEMORY_PAYMENTS.reduce((sum, p) => sum + (p.amount || 0), 0);
     let openSupportTickets = IN_MEMORY_SUPPORT_TICKETS.filter(t => t.status === "open" || t.status === "in_progress").length;
     let pendingRefundRequests = IN_MEMORY_REFUND_REQUESTS.filter(r => r.status === "pending").length;
+    let totalReviews = 0;
+    let pendingReviews = 0;
+    let averageReviewRating = 0;
 
     if (supabaseAdmin) {
       try {
@@ -1284,6 +1304,12 @@ app.get("/api/admin/overview", verifyAdminAuth, async (req, res) => {
 
         const { count: rCount } = await supabaseAdmin.from("refund_requests").select("*", { count: "exact", head: true }).eq("status", "pending");
         if (rCount !== null && rCount > 0) pendingRefundRequests = rCount;
+
+        const { data: reviewTrips } = await supabaseAdmin.from("trips").select("itinerary");
+        const reviews = (reviewTrips || []).map((row: any) => row.itinerary).filter((item: any) => item?.reviewText && Number(item?.rating) > 0);
+        totalReviews = reviews.length;
+        pendingReviews = reviews.filter((item: any) => (item.reviewModerationStatus || "pending") === "pending").length;
+        averageReviewRating = reviews.length ? reviews.reduce((sum: number, item: any) => sum + Number(item.rating || 0), 0) / reviews.length : 0;
       } catch (e) {
         console.warn("[Admin Overview] DB query exception fallback to store:", e);
       }
@@ -1298,7 +1324,10 @@ app.get("/api/admin/overview", verifyAdminAuth, async (req, res) => {
       totalSuccessfulPayments,
       totalRevenue,
       openSupportTickets,
-      pendingRefundRequests
+      pendingRefundRequests,
+      totalReviews,
+      pendingReviews,
+      averageReviewRating: Number(averageReviewRating.toFixed(1))
     });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || "Failed to fetch overview metrics" });
@@ -1448,6 +1477,72 @@ app.get("/api/admin/refund-requests", verifyAdminAuth, async (req, res) => {
   }
 });
 
+app.get("/api/admin/reviews", verifyAdminAuth, async (_req, res) => {
+  try {
+    if (!supabaseAdmin) return res.json({ reviews: [], total: 0, pending: 0, approved: 0, rejected: 0, averageRating: 0 });
+    const { data, error } = await supabaseAdmin
+      .from("trips")
+      .select("id,user_id,destination,itinerary,created_at,updated_at")
+      .order("updated_at", { ascending: false });
+    if (error) throw error;
+    const reviews = (data || [])
+      .filter((trip: any) => trip.itinerary?.reviewText && Number(trip.itinerary?.rating) > 0)
+      .map((trip: any) => ({
+        id: trip.id,
+        trip_id: trip.id,
+        user_id: trip.user_id,
+        user_email: trip.itinerary?.reviewerEmail || "Signed-in traveler",
+        destination: trip.destination,
+        rating: Number(trip.itinerary.rating),
+        review_text: String(trip.itinerary.reviewText),
+        status: trip.itinerary.reviewModerationStatus || "pending",
+        created_at: trip.updated_at || trip.created_at
+      }));
+    const averageRating = reviews.length ? reviews.reduce((sum: number, review: any) => sum + review.rating, 0) / reviews.length : 0;
+    res.json({
+      reviews,
+      total: reviews.length,
+      pending: reviews.filter((review: any) => review.status === "pending").length,
+      approved: reviews.filter((review: any) => review.status === "approved").length,
+      rejected: reviews.filter((review: any) => review.status === "rejected").length,
+      averageRating: Number(averageRating.toFixed(1))
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to fetch reviews" });
+  }
+});
+
+app.post("/api/admin/reviews/action", verifyAdminAuth, async (req, res) => {
+  try {
+    const tripId = String(req.body?.tripId || "").trim();
+    const action = String(req.body?.action || "").trim();
+    if (!tripId || !["approve", "reject", "delete"].includes(action)) return res.status(400).json({ error: "Valid trip and action are required." });
+    if (!supabaseAdmin) return res.status(503).json({ error: "Review database is unavailable." });
+    const { data: trip, error } = await supabaseAdmin.from("trips").select("itinerary").eq("id", tripId).maybeSingle();
+    if (error || !trip) return res.status(404).json({ error: "Review trip not found." });
+    const itinerary = { ...(trip.itinerary || {}) };
+    if (action === "delete") {
+      delete itinerary.reviewText;
+      delete itinerary.rating;
+      delete itinerary.reviewModerationStatus;
+    } else {
+      itinerary.reviewModerationStatus = action === "approve" ? "approved" : "rejected";
+    }
+    const { error: updateError } = await supabaseAdmin.from("trips").update({ itinerary, updated_at: new Date().toISOString() }).eq("id", tripId);
+    if (updateError) throw updateError;
+    // Keep the optional normalized review table synchronized when it exists.
+    try {
+      if (action === "delete") await supabaseAdmin.from("trip_reviews").delete().eq("trip_id", tripId);
+      else await supabaseAdmin.from("trip_reviews").update({ status: itinerary.reviewModerationStatus, updated_at: new Date().toISOString() }).eq("trip_id", tripId);
+    } catch (syncError) {
+      console.warn("[Admin Reviews] Optional review table sync warning:", syncError);
+    }
+    res.json({ success: true, status: action === "delete" ? "deleted" : itinerary.reviewModerationStatus });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Failed to update review" });
+  }
+});
+
 app.get("/api/admin/security-audit", verifyAdminAuth, async (req, res) => {
   try {
     const rlsTables = [
@@ -1457,6 +1552,7 @@ app.get("/api/admin/security-audit", verifyAdminAuth, async (req, res) => {
       { tableName: "subscriptions", rlsEnabled: true },
       { tableName: "support_tickets", rlsEnabled: true },
       { tableName: "refund_requests", rlsEnabled: true },
+      { tableName: "trip_reviews", rlsEnabled: true },
       { tableName: "failed_admin_access_logs", rlsEnabled: true }
     ];
 
@@ -1581,6 +1677,7 @@ app.post("/api/reviews", verifyUserAuth, async (req, res) => {
         destination,
         rating,
         review_text: reviewText,
+        status: "pending",
         updated_at: new Date().toISOString()
       }], { onConflict: "trip_id,user_id" });
       if (reviewError) console.warn("[Review API] Database write warning:", reviewError.message);
