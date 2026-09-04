@@ -3870,6 +3870,51 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
   return Array.from(new Set(errors));
 }
 
+/** Deterministic final repair shared by AI and curated itineraries. */
+function repairResidualUserFacingQuality(itinerary:any) {
+  if(!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+  const places=Array.isArray(itinerary.placesToVisit)?itinerary.placesToVisit:[];
+  const stopWords=new Set(['the','private','priority','guided','vip','visit','experience','tour','walk','corridor','complex','archaeological','site','park','temple','fort','ghat','museum','and']);
+  const tokens=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter((x:string)=>x.length>2&&!stopWords.has(x));
+  const canonical=(v:any)=>tokens(v).join(' ');
+  const matchPlace=(a:any)=>{
+    const activityTokens=new Set(tokens(`${a?.title||''} ${a?.location||''}`));
+    let best:any=null, score=0;
+    for(const p of places){const pt=tokens(p?.name);if(!pt.length)continue;const overlap=pt.filter((x:string)=>activityTokens.has(x)).length,ratio=overlap/pt.length;if(overlap>=1&&ratio>score){best=p;score=ratio;}}
+    return score>=0.6?best:null;
+  };
+  const parseTime=(v:any,idx=0)=>{const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return 9*60+idx*150;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0)};
+  const fmtTime=(mins:number)=>{mins=Math.max(5*60,Math.min(23*60+30,Math.round(mins/15)*15));const h24=Math.floor(mins/60),mm=mins%60,ap=h24>=12?'PM':'AM',h=h24%12||12;return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`};
+  const duration=(a:any)=>{const raw=String(a?.visitDuration||'').toLowerCase();const r=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(r)return /min/.test(r[3])?Number(r[2]):Number(r[2])*60;const one=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(one)return /min/.test(one[2])?Number(one[1]):Number(one[1])*60;return /meal|breakfast|lunch|dinner/i.test(String(a?.title||''))?75:60};
+  const isTransfer=(a:any)=>/(transfer|chauffeur|drive|travel to)/i.test(String(a?.title||''));
+  const isBoundary=(a:any)=>/(arrival|departure|airport|station|check[- ]?in|check[- ]?out|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const seenPlaces=new Set<string>();
+  let removedDuplicates=0,removedWindowConflicts=0,closedGaps=0;
+  itinerary.days=itinerary.days.map((day:any)=>{
+    let acts=(Array.isArray(day?.activities)?day.activities:[]).map((a:any)=>({...a}));
+    acts=acts.filter((a:any)=>{
+      if(isTransfer(a))return true;
+      const p=matchPlace(a);if(!p)return true;const key=canonical(p.name);if(!key)return true;
+      if(seenPlaces.has(key)){if(/aarti|museum|performance|food|weav|market/i.test(`${a.title||''} ${a.location||''}`))return true;removedDuplicates++;return false;}
+      seenPlaces.add(key);return true;
+    });
+    for(const a of acts){
+      if(isTransfer(a))continue;const p=matchPlace(a);if(!p)continue;const bt=String(p.bestTimeToVisit||'').toLowerCase();let target:number|null=null;
+      if(/early morning/.test(bt)&&parseTime(a.time)>12*60)target=8*60+30;
+      else if(/late afternoon/.test(bt)&&(parseTime(a.time)<14*60||parseTime(a.time)>19*60))target=16*60;
+      const range=bt.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+      if(range){const cv=(h:string,m:string|undefined,ap:string)=>{let n=Number(h)%12;if(ap.toLowerCase()==='pm')n+=12;return n*60+Number(m||0)};const lo=cv(range[1],range[2],range[3]),hi=cv(range[4],range[5],range[6]);if(parseTime(a.time)<lo||parseTime(a.time)>hi)target=Math.round((lo+hi)/2);}
+      if(target==null)continue;
+      if(acts.some((x:any)=>isBoundary(x)&&Math.abs(parseTime(x.time)-target)<90)){(a as any).__removeWindowConflict=true;removedWindowConflicts++;}else a.time=fmtTime(target);
+    }
+    acts=acts.filter((a:any)=>!a.__removeWindowConflict).sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
+    for(let i=1;i<acts.length;i++){const previous=acts[i-1],current=acts[i],previousStart=parseTime(previous.time,i-1),currentStart=parseTime(current.time,i);if(currentStart-previousStart>300&&!isBoundary(current)){current.time=fmtTime(previousStart+Math.max(30,duration(previous))+60);closedGaps++;}}
+    return {...day,activities:acts};
+  });
+  if(removedDuplicates||removedWindowConflicts||closedGaps) console.warn(`[FINAL_RESIDUAL_REPAIR] Removed ${removedDuplicates} duplicate landmark visit(s), removed ${removedWindowConflicts} incompatible window visit(s), and closed ${closedGaps} excessive schedule gap(s).`);
+  return itinerary;
+}
+
 
 /**
  * Final global meal-density and same-day variety polish.
@@ -5243,10 +5288,12 @@ Return the response in strict JSON format.`;
     // Last-mile deterministic repair: enrichment/final polish must not leave a
     // snack, dessert, beverage or breakfast item occupying a Luxury lunch/dinner slot.
     // Repair locally before budget reconciliation and the final customer-facing gate.
-    repairFinalLuxuryMealSemantics(reconciledItinerary);
     repairFinalContentTrust(reconciledItinerary);
     repairFinalItineraryDiversity(reconciledItinerary);
     finalizeCustomerSpecificity(reconciledItinerary);
+    repairFinalLuxuryMealSemantics(reconciledItinerary);
+    repairFinalItineraryDiversity(reconciledItinerary);
+    repairResidualUserFacingQuality(reconciledItinerary);
     // Diversity repair can change a location anchor. Re-run route enrichment so
     // visible route distance/transport is calculated from the final customer itinerary.
     const finalRoutedItinerary = applySmartRouteAndTransport(reconciledItinerary);
@@ -5254,7 +5301,10 @@ Return the response in strict JSON format.`;
     // Re-price accommodation from the selected-style Agoda recommendation.
     reconcileItineraryBudget(reconciledItinerary);
     const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
-    if (finalUserFacingErrors.length) console.warn(`[FINAL_ITINERARY_QUALITY] ${finalUserFacingErrors.join('; ')}`);
+    if (finalUserFacingErrors.length) {
+      console.error(`[FINAL_ITINERARY_REJECTED] ${finalUserFacingErrors.join('; ')}`);
+      throw new Error(`Final itinerary quality gate rejected generated output: ${finalUserFacingErrors.join('; ')}`);
+    }
 
     ITINERARY_CACHE.set(cacheKey, {
       data: reconciledItinerary,
@@ -5811,15 +5861,20 @@ Return the response in strict JSON format.`;
     reconcileItineraryBudget(reconciledFallback);
     alignLodgingLogisticsToBudgetHotel(reconciledFallback);
     removeRedundantGenericActivities(reconciledFallback);
-    repairFinalLuxuryMealSemantics(reconciledFallback);
     repairFinalContentTrust(reconciledFallback);
     repairFinalItineraryDiversity(reconciledFallback);
     finalizeCustomerSpecificity(reconciledFallback);
+    repairFinalLuxuryMealSemantics(reconciledFallback);
+    repairFinalItineraryDiversity(reconciledFallback);
+    repairResidualUserFacingQuality(reconciledFallback);
     const routedFallback = applySmartRouteAndTransport(reconciledFallback);
     Object.assign(reconciledFallback, routedFallback);
     reconcileItineraryBudget(reconciledFallback);
     const fallbackUserFacingErrors = validateFinalUserFacingItinerary(reconciledFallback);
-    if (fallbackUserFacingErrors.length) console.warn(`[FINAL_FALLBACK_QUALITY] ${fallbackUserFacingErrors.join('; ')}`);
+    if (fallbackUserFacingErrors.length) {
+      console.error(`[FINAL_FALLBACK_REJECTED] ${fallbackUserFacingErrors.join('; ')}`);
+      return res.status(503).json({ error: 'Trip quality validation could not produce a safe itinerary. Please try again.', code: 'ITINERARY_QUALITY_REJECTED', retryable: true, preservedInput: true });
+    }
 
     ITINERARY_CACHE.set(fallbackCacheKey, {
       data: reconciledFallback,
