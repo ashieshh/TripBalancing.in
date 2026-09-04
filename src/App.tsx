@@ -210,6 +210,7 @@ export default function App() {
   
   // API generation & DB saving states
   const [generating, setGenerating] = useState(false);
+  const [generationElapsed, setGenerationElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -221,9 +222,22 @@ export default function App() {
       .then((data) => setPublicReviews(Array.isArray(data?.reviews) ? data.reviews : []))
       .catch(() => setPublicReviews([]));
   }, []);
-  // Only auto-scroll after a newly generated itinerary. Opening a saved/shared trip
-  // should preserve the user's normal navigation behavior.
-  const pendingGeneratedResultScroll = useRef(false);
+  const pendingTripResultScroll = useRef(false);
+  const dashboardScrollPosition = useRef(0);
+  const lastTripInput = useRef<TripInput | null>(null);
+  const tripHistoryEntry = useRef(false);
+
+  useEffect(() => {
+    if (!generating) {
+      setGenerationElapsed(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const updateElapsed = () => setGenerationElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [generating]);
 
   // Always bring a generation error into view. This is especially important
   // on the long trip form where the user may be several screens below it.
@@ -237,13 +251,10 @@ export default function App() {
     });
   }, [apiError]);
 
-  // A newly generated result replaces a long planner form. Position the viewport
-  // synchronously before the browser paints the result, so users never see the
-  // page open in the middle and then animate upward. Saved/shared trips keep
-  // their normal navigation behavior.
+  // Every trip opens at its header, whether it is newly generated, saved or shared.
   useLayoutEffect(() => {
-    if (generating || !activeItinerary || !pendingGeneratedResultScroll.current) return;
-    pendingGeneratedResultScroll.current = false;
+    if (generating || !activeItinerary || !pendingTripResultScroll.current) return;
+    pendingTripResultScroll.current = false;
 
     const target = document.getElementById("generated-trip-result-top");
     if (!target) return;
@@ -254,12 +265,47 @@ export default function App() {
     target.focus({ preventScroll: true });
   }, [generating, activeItinerary]);
 
+  useEffect(() => {
+    const handleBrowserBack = () => {
+      if (!tripHistoryEntry.current) return;
+      tripHistoryEntry.current = false;
+      setActiveItinerary(null);
+      setActiveTripId(null);
+      requestAnimationFrame(() => window.scrollTo({
+        top: dashboardScrollPosition.current,
+        left: 0,
+        behavior: "auto",
+      }));
+    };
+    window.addEventListener("popstate", handleBrowserBack);
+    return () => window.removeEventListener("popstate", handleBrowserBack);
+  }, []);
+
+  const closeActiveTrip = () => {
+    if (tripHistoryEntry.current) {
+      window.history.back();
+      return;
+    }
+    setActiveItinerary(null);
+    setActiveTripId(null);
+    requestAnimationFrame(() => window.scrollTo({
+      top: dashboardScrollPosition.current,
+      left: 0,
+      behavior: "auto",
+    }));
+  };
+
   // Share mode state
   const [isSharedMode, setIsSharedMode] = useState(false);
   const [sharedItinerary, setSharedItinerary] = useState<Itinerary | null>(null);
   const [sharedTripId, setSharedTripId] = useState<string | null>(null);
   const [shareLoading, setShareLoading] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    if (!sharedItinerary) return;
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [sharedItinerary]);
 
   // Check for shared URL parameters on mount
   useEffect(() => {
@@ -485,7 +531,8 @@ export default function App() {
     }
 
     setGenerating(true);
-    pendingGeneratedResultScroll.current = true;
+    lastTripInput.current = input;
+    pendingTripResultScroll.current = true;
     setApiError(null);
     setActiveItinerary(null);
     setActiveTripId(null);
@@ -527,7 +574,7 @@ export default function App() {
         throw new Error("No itinerary received from backend.");
       }
     } catch (err: any) {
-      pendingGeneratedResultScroll.current = false;
+      pendingTripResultScroll.current = false;
       console.error("Generation failed:", err);
       setApiError(err.message || "An unexpected error occurred during trip generation.");
     } finally {
@@ -844,7 +891,7 @@ export default function App() {
           <div className="flex flex-col items-start gap-1">
             <button 
               id="header-logo-btn"
-              onClick={() => { setActiveItinerary(null); setActiveTripId(null); }}
+              onClick={closeActiveTrip}
               className="flex items-center gap-2.5 text-xl font-extrabold text-slate-800 dark:text-slate-100 cursor-pointer"
             >
               <div className="p-1.5 bg-slate-900 rounded-xl shadow-md border border-slate-800">
@@ -932,9 +979,19 @@ export default function App() {
         {apiError && (
           <div id="trip-planning-error" role="alert" tabIndex={-1} className="flex items-start gap-3 p-4 mb-8 border rounded-3xl bg-rose-50/50 dark:bg-rose-950/10 border-rose-100 dark:border-rose-900/30 text-rose-800 dark:text-rose-400">
             <AlertCircle className="w-5 h-5 flex-shrink-0 text-rose-500 mt-0.5" />
-            <div className="space-y-1">
+            <div className="space-y-2">
               <h4 className="font-bold">Trip Planning Error</h4>
               <p className="text-sm leading-relaxed">{apiError}</p>
+              {lastTripInput.current && (
+                <button
+                  type="button"
+                  onClick={() => handleGenerateItinerary(lastTripInput.current!)}
+                  disabled={generating}
+                  className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-black text-white hover:bg-rose-700 disabled:opacity-50"
+                >
+                  Try Again
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -946,9 +1003,13 @@ export default function App() {
               <TripBalancingLogo className="w-12 h-12" spin />
             </div>
             <div className="space-y-2">
-              <h3 className="text-2xl font-extrabold text-slate-800 dark:text-slate-100">Consulting AI Travel Guides...</h3>
+              <h3 className="text-2xl font-extrabold text-slate-800 dark:text-slate-100">
+                {generationElapsed < 15 ? "Checking your trip details..." : generationElapsed < 40 ? "Building your day-by-day plan..." : "Finalizing prices and routes..."}
+              </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
-                We are custom tailoring your day-by-day itineraries, street food guides, safety tips, and estimated transit routes. This will only take a moment!
+                {generationElapsed < 45
+                  ? `Your trip is being prepared. ${generationElapsed}s elapsed.`
+                  : "The AI is taking longer than expected. We’ll automatically switch to a verified destination plan if needed."}
               </p>
             </div>
 
@@ -956,7 +1017,9 @@ export default function App() {
             <div className="max-w-xs mx-auto bg-slate-100 dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/50 dark:border-slate-850">
               <div className="flex items-center gap-3 text-left">
                 <span className="inline-block w-2.5 h-2.5 bg-teal-500 rounded-full animate-ping" />
-                <span className="text-xs font-bold text-slate-600 dark:text-slate-300">Generating Day-By-Day schedules...</span>
+                <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                  {generationElapsed < 15 ? "Validating destination and dates" : generationElapsed < 40 ? "Creating activities and meals" : "Checking costs, hotels and transport"}
+                </span>
               </div>
             </div>
           </div>
@@ -967,7 +1030,7 @@ export default function App() {
           <div id="generated-trip-result-top" tabIndex={-1} className="space-y-6 scroll-mt-24 outline-none">
             <button
               id="back-to-dashboard-btn"
-              onClick={() => { setActiveItinerary(null); setActiveTripId(null); }}
+              onClick={closeActiveTrip}
               className="print:hidden inline-flex items-center gap-1.5 px-4 py-2 bg-white hover:bg-slate-50 dark:bg-slate-950 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-xl font-bold text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer transition-colors shadow-sm"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
@@ -994,8 +1057,8 @@ export default function App() {
         )}
 
         {/* NORMAL PLANNER & TRAVEL LIBRARY DISPLAY */}
-        {!generating && !activeItinerary && (
-          <div className="mx-auto w-full max-w-[1560px] space-y-10">
+        {!activeItinerary && (
+          <div className={`mx-auto w-full max-w-[1560px] space-y-10 ${generating ? "hidden" : ""}`} aria-hidden={generating}>
             <section className="overflow-hidden rounded-[34px] border border-slate-200/70 bg-white shadow-[0_20px_70px_rgba(15,23,42,0.06)] dark:border-slate-800 dark:bg-slate-950 dark:shadow-none">
               <div className="border-b border-slate-100 bg-gradient-to-br from-slate-50 via-white to-teal-50/40 px-5 py-6 dark:border-slate-900 dark:from-slate-950 dark:via-slate-950 dark:to-teal-950/10 sm:px-8 sm:py-8">
                 <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
@@ -1063,6 +1126,10 @@ export default function App() {
                     onAcceptInvitation={handleAcceptInvitation}
                     onDeclineInvitation={handleDeclineInvitation}
                     onSelectTrip={(trip, isReadOnly = false) => {
+                      dashboardScrollPosition.current = window.scrollY;
+                      pendingTripResultScroll.current = true;
+                      window.history.pushState({ tripView: true }, "", window.location.href);
+                      tripHistoryEntry.current = true;
                       setActiveItinerary(trip.itinerary);
                       setActiveTripId(trip.id);
                       setActiveTripIsReadOnly(isReadOnly);
