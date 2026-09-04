@@ -4,7 +4,7 @@ import {
   Download, Save, Trash, Calendar, Users, Briefcase, ChevronDown, ChevronUp, MapPin, Printer,
   Map, UtensilsCrossed, CheckSquare, Info, Star, Compass, Tag, Truck, Check, AlertTriangle,
   Plus, Trash2, Coins, Camera, Image, Share2, Copy, Link, Globe, Sparkles, MessageSquare, Send, X,
-  Search, Sun, CloudSun, Cloud, CloudRain, Snowflake, CloudLightning, PlaneTakeoff, Clock
+  Search, Sun, CloudSun, Cloud, CloudRain, Snowflake, CloudLightning, PlaneTakeoff, Clock, MessageCircle
 } from "lucide-react";
 import { Itinerary, TripRecord, LoggedExpense } from "../types";
 // Lazy-load heavier visual sub-components to optimize chunk size and page speed
@@ -315,6 +315,7 @@ export default function ItineraryView({
   const [expensePaidBy, setExpensePaidBy] = useState(splitParticipants[0]);
   const [expenseSplitAmong, setExpenseSplitAmong] = useState<string[]>(splitParticipants);
   const [newParticipantName, setNewParticipantName] = useState("");
+  const [splitShareFeedback, setSplitShareFeedback] = useState<"copied" | "" | "error">("");
 
   // States for camera access and daily photos
   const [activeCameraDay, setActiveCameraDay] = useState<number | null>(null);
@@ -665,6 +666,67 @@ export default function ItineraryView({
     if (totalText.includes("€") || totalText.toLowerCase().includes("eur")) return "€";
     if (totalText.includes("£") || totalText.toLowerCase().includes("gbp")) return "£";
     return "$";
+  };
+
+  const getCostSettlements = () => {
+    const balances = Object.fromEntries(splitParticipants.map((name) => [name, 0])) as Record<string, number>;
+    (itinerary.loggedExpenses || []).forEach((expense) => {
+      const payer = splitParticipants.includes(expense.paidBy || "") ? expense.paidBy! : splitParticipants[0];
+      const members = (expense.splitAmong || splitParticipants).filter((name) => splitParticipants.includes(name));
+      const sharedBy = members.length ? members : splitParticipants;
+      balances[payer] += expense.amount;
+      sharedBy.forEach((name) => { balances[name] -= expense.amount / sharedBy.length; });
+    });
+    const creditors = Object.entries(balances).filter(([, value]) => value > 0.005).map(([name, value]) => ({ name, value }));
+    const debtors = Object.entries(balances).filter(([, value]) => value < -0.005).map(([name, value]) => ({ name, value: -value }));
+    const settlements: Array<{ from: string; to: string; amount: number }> = [];
+    let creditorIndex = 0;
+    let debtorIndex = 0;
+    while (creditorIndex < creditors.length && debtorIndex < debtors.length) {
+      const amount = Math.min(creditors[creditorIndex].value, debtors[debtorIndex].value);
+      settlements.push({ from: debtors[debtorIndex].name, to: creditors[creditorIndex].name, amount });
+      creditors[creditorIndex].value -= amount;
+      debtors[debtorIndex].value -= amount;
+      if (creditors[creditorIndex].value < 0.005) creditorIndex++;
+      if (debtors[debtorIndex].value < 0.005) debtorIndex++;
+    }
+    return settlements;
+  };
+
+  const buildSplitCostMessage = () => {
+    const expenses = itinerary.loggedExpenses || [];
+    const total = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+    const settlements = getCostSettlements();
+    const lines = [
+      `*TripBalancing – ${itinerary.destination} Expense Settlement*`,
+      "",
+      `Total spent: ${getCurrencySymbol()}${total.toFixed(2)}`,
+      `Travelers: ${splitParticipants.join(", ")}`,
+      "",
+      "*Final settlement:*",
+      ...(settlements.length
+        ? settlements.map((item) => `${item.from} pays ${item.to}: ${getCurrencySymbol()}${item.amount.toFixed(2)}`)
+        : [expenses.length ? "Everyone is settled up." : "No expenses have been added yet."]),
+      "",
+      "Calculated with TripBalancing.in"
+    ];
+    return lines.join("\n");
+  };
+
+  const handleCopySplitCosts = async () => {
+    try {
+      await navigator.clipboard.writeText(buildSplitCostMessage());
+      setSplitShareFeedback("copied");
+      setTimeout(() => setSplitShareFeedback(""), 2500);
+    } catch {
+      setSplitShareFeedback("error");
+      setTimeout(() => setSplitShareFeedback(""), 2500);
+    }
+  };
+
+  const handleShareSplitCostsOnWhatsApp = () => {
+    const message = buildSplitCostMessage();
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
   };
 
   // PDF Generation using jsPDF
@@ -1344,9 +1406,29 @@ export default function ItineraryView({
                   </h3>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">Choose who paid and who shared each expense. Balances update automatically.</p>
                 </div>
-                <span className="text-xs font-black text-teal-700 dark:text-teal-300 bg-white/80 dark:bg-slate-950/60 px-3 py-1.5 rounded-xl border border-teal-100 dark:border-teal-900/50">
-                  {splitParticipants.length} traveler{splitParticipants.length === 1 ? "" : "s"}
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-black text-teal-700 dark:text-teal-300 bg-white/80 dark:bg-slate-950/60 px-3 py-1.5 rounded-xl border border-teal-100 dark:border-teal-900/50">
+                    {splitParticipants.length} traveler{splitParticipants.length === 1 ? "" : "s"}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={!(itinerary.loggedExpenses || []).length}
+                    onClick={handleShareSplitCostsOnWhatsApp}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45"
+                    title="Share settlement on WhatsApp"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!(itinerary.loggedExpenses || []).length}
+                    onClick={handleCopySplitCosts}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-teal-200 bg-white/80 px-3 py-1.5 text-xs font-extrabold text-teal-700 hover:bg-white disabled:cursor-not-allowed disabled:opacity-45 dark:border-teal-900/60 dark:bg-slate-950/60 dark:text-teal-300"
+                    title="Copy settlement message"
+                  >
+                    <Copy className="w-3.5 h-3.5" /> {splitShareFeedback === "copied" ? "Copied!" : "Copy"}
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -1391,27 +1473,7 @@ export default function ItineraryView({
               </div>
 
               {(() => {
-                const balances = Object.fromEntries(splitParticipants.map((name) => [name, 0])) as Record<string, number>;
-                (itinerary.loggedExpenses || []).forEach((expense) => {
-                  const payer = splitParticipants.includes(expense.paidBy || "") ? expense.paidBy! : splitParticipants[0];
-                  const members = (expense.splitAmong || splitParticipants).filter((name) => splitParticipants.includes(name));
-                  const sharedBy = members.length ? members : splitParticipants;
-                  balances[payer] += expense.amount;
-                  sharedBy.forEach((name) => { balances[name] -= expense.amount / sharedBy.length; });
-                });
-                const creditors = Object.entries(balances).filter(([, value]) => value > 0.005).map(([name, value]) => ({ name, value }));
-                const debtors = Object.entries(balances).filter(([, value]) => value < -0.005).map(([name, value]) => ({ name, value: -value }));
-                const settlements: Array<{ from: string; to: string; amount: number }> = [];
-                let creditorIndex = 0;
-                let debtorIndex = 0;
-                while (creditorIndex < creditors.length && debtorIndex < debtors.length) {
-                  const amount = Math.min(creditors[creditorIndex].value, debtors[debtorIndex].value);
-                  settlements.push({ from: debtors[debtorIndex].name, to: creditors[creditorIndex].name, amount });
-                  creditors[creditorIndex].value -= amount;
-                  debtors[debtorIndex].value -= amount;
-                  if (creditors[creditorIndex].value < 0.005) creditorIndex++;
-                  if (debtors[debtorIndex].value < 0.005) debtorIndex++;
-                }
+                const settlements = getCostSettlements();
                 return settlements.length ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                     {settlements.map((item, index) => (
@@ -1425,6 +1487,7 @@ export default function ItineraryView({
                   <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Add expenses below to see who owes whom.</p>
                 );
               })()}
+              {splitShareFeedback === "error" && <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">Could not copy automatically. Please use the WhatsApp button.</p>}
             </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-900 pb-4">
