@@ -4883,6 +4883,42 @@ app.get('/api/travelpayouts/resolve-location', async (req, res) => {
 
 
 
+type FallbackDestinationDetails = {
+  places: { name: string, description: string, bestTimeToVisit: string, entryFee: string }[];
+  food: { name: string, description: string, type: string, mustTryAt: string }[];
+  packing: string[];
+  tips: string[];
+};
+
+/**
+ * Last-resort profile for any valid destination when the AI provider is unavailable.
+ * It deliberately uses honest planning categories instead of fabricating landmark,
+ * restaurant or hotel names. The regular quality, route and budget pipeline still
+ * runs afterward, so this path cannot bypass customer-facing safeguards.
+ */
+function buildResilientDestinationDetails(destinationRaw:string):FallbackDestinationDetails {
+  const destination=sanitizeGeneratedText(String(destinationRaw||'Selected destination')).trim()||'Selected destination';
+  const at=(label:string)=>`${destination}: ${label}`;
+  return {
+    places:[
+      {name:at('Central Orientation District'),description:`Begin in a central, well-connected public district of ${destination}; use the official tourism desk or current map listings to choose the exact neighborhood.`,bestTimeToVisit:'Morning',entryFee:'Public-area access is generally free; verify selected venues'},
+      {name:at('Heritage or Museum Visit'),description:`Choose one currently operating official museum, monument or heritage site in ${destination} after confirming its official hours and tickets.`,bestTimeToVisit:'Late morning / early afternoon',entryFee:'Confirm with the official venue'},
+      {name:at('Established Public Market'),description:`Choose a currently operating public market or established shopping district in ${destination} after confirming it from current local or official listings.`,bestTimeToVisit:'Daytime',entryFee:'Free to browse; purchases extra'},
+      {name:at('Public Park or Scenic Viewpoint'),description:`Use a mapped public park, promenade or scenic viewpoint in ${destination}; confirm access, weather and closing time before leaving.`,bestTimeToVisit:'Late afternoon',entryFee:'Verify locally'}
+    ],
+    food:[
+      {name:'Regional Breakfast Selection',description:`Choose a savory breakfast recognized locally in ${destination}, confirmed from the current menu.`,type:'both',mustTryAt:at('well-reviewed breakfast venue')},
+      {name:'Regional Lunch Selection',description:`Choose a complete savory regional lunch with a main dish and accompaniments.`,type:'both',mustTryAt:at('well-reviewed local restaurant')},
+      {name:'Seasonal Local Lunch Menu',description:`Select a different complete seasonal lunch featuring locally appropriate ingredients.`,type:'both',mustTryAt:at('established neighborhood restaurant')},
+      {name:'Regional Dinner Selection',description:`Choose a complete regional dinner from the venue's current menu.`,type:'both',mustTryAt:at('well-reviewed dinner venue')},
+      {name:'Seasonal Local Dinner Menu',description:`Select a distinct savory evening meal appropriate to ${destination}.`,type:'both',mustTryAt:at('established central restaurant')},
+      {name:'Local Bakery or Tasting',description:`Add an optional locally appropriate bakery, dessert or beverage tasting separate from the main meals.`,type:'tasting',mustTryAt:at('established specialty shop')}
+    ],
+    packing:['Government-issued ID and travel documents','Comfortable walking shoes','Weather-appropriate layers','Refillable water bottle','Phone charger and power bank','Required medicines'],
+    tips:[`Confirm exact attraction names, opening hours and tickets using official or current local sources in ${destination}.`,`Use mapped, well-reviewed transport and allow extra time for unfamiliar routes.`,`Keep the selected hotel as the daily start/end anchor unless an overnight excursion is explicitly planned.`,`Treat all prices as planning estimates until confirmed with the provider.`]
+  };
+}
+
 app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;
   let originCoords: { latitude: number; longitude: number } | null = null;
@@ -5589,12 +5625,7 @@ Return the response in strict JSON format.`;
     const baseLon = geoCoords?.longitude ?? 77.2090;
 
     // Load static or dynamic lists
-    const destinationDetails: Record<string, {
-      places: { name: string, description: string, bestTimeToVisit: string, entryFee: string }[];
-      food: { name: string, description: string, type: string, mustTryAt: string }[];
-      packing: string[];
-      tips: string[];
-    }> = {
+    const destinationDetails: Record<string, FallbackDestinationDetails> = {
       goa: {
         places: [
           { name: "Calangute Beach", description: "The famous 'Queen of Beaches', popular for a broad sandy shoreline, water activities and beachside dining.", bestTimeToVisit: "Morning / Sunset", entryFee: "Free" },
@@ -5725,18 +5756,11 @@ Return the response in strict JSON format.`;
     Object.assign(destinationDetails, curatedFallbackDetails);
 
     let details = destinationDetails[Object.keys(destinationDetails).find(k => destNormalized.includes(k)) || ""];
+    let fallbackDataQuality='curated-destination-profile';
     if (!details) {
-      if (geminiFailure.classified.retryAfterSeconds) {
-        res.setHeader("Retry-After", String(geminiFailure.classified.retryAfterSeconds));
-      }
-      return res.status(geminiFailure.status).json({
-        ...geminiFailure.body,
-        error: "We could not generate verified destination-specific recommendations right now. Please retry. Your trip allowance has not been used.",
-        code: geminiFailure.body.code === "GEMINI_REQUEST_FAILED"
-          ? "DESTINATION_DATA_UNVERIFIED"
-          : geminiFailure.body.code,
-        billableGeneration: false
-      });
+      details=buildResilientDestinationDetails(destination);
+      fallbackDataQuality='resilient-destination-planning-profile';
+      console.warn(`[GLOBAL_FALLBACK] Using non-fabricated planning anchors for "${String(destination).slice(0,120)}" after ${geminiFailure.classified.kind}.`);
     }
 
     // Build the budget calculations based on budget level and numbers
@@ -5980,7 +6004,7 @@ Return the response in strict JSON format.`;
       latitude: baseLat,
       longitude: baseLon,
       isFallback: true,
-      fallbackDataQuality: "curated-destination-profile",
+      fallbackDataQuality,
       hotelRecommendations: (() => {
         const key = Object.keys(curatedFallbackDetails).find(k => destNormalized.includes(k)) || "";
         const hotelCatalog: Record<string, any> = {
@@ -6177,7 +6201,9 @@ Return the response in strict JSON format.`;
         reason: geminiFailure.body.code
       },
       billableGeneration: false,
-      notice: "AI generation is temporarily unavailable, so TripBalancing used a verified destination profile. Your trip allowance was not used."
+      notice: fallbackDataQuality==='curated-destination-profile'
+        ? "AI generation is temporarily unavailable, so TripBalancing used a verified destination profile. Your trip allowance was not used."
+        : "AI generation is temporarily unavailable, so TripBalancing created a safe planning itinerary with clearly labelled confirmation points. Your trip allowance was not used."
     });
   }
 });
@@ -6896,6 +6922,7 @@ export const itineraryQualityTestHooks = {
   repairBlockingFinalQuality,
   repairFinalItineraryDiversity,
   finalizeCustomerSpecificity,
+  buildResilientDestinationDetails,
   alignLodgingLogisticsToBudgetHotel,
 };
 
