@@ -86,6 +86,16 @@ for(const [destination,origin,placeNames] of destinations){
 }
 
 const pdf=fs.readFileSync(new URL('../src/utils/pdfGenerator.ts',import.meta.url),'utf8');
+
+for(const destination of ['Reykjavik, Iceland','Cusco, Peru','Madagascar']){
+  const details=quality.buildResilientDestinationDetails(destination);
+  assert.equal(details.places.length,4,`${destination}: global fallback needs four planning anchors`);
+  assert.ok(details.food.length>=6,`${destination}: global fallback needs enough meal variety`);
+  assert.equal(new Set(details.food.map(item=>normalize(item.name))).size,details.food.length,`${destination}: global fallback foods must be distinct`);
+  assert.ok(details.places.every(place=>place.name.startsWith(destination)),`${destination}: fallback anchors must preserve the selected destination`);
+  assert.ok(details.places.every(place=>/confirm|choose|use a mapped|begin in/i.test(place.description)),`${destination}: fallback must label confirmation instead of fabricating facts`);
+}
+
 assert.doesNotMatch(pdf,/const simulatedRating\s*=/,'PDF must not fabricate food ratings');
 assert.doesNotMatch(pdf,/const rating\s*=\s*4\.5/,'PDF must not fabricate attraction ratings');
 assert.match(pdf,/finalBlockReserve/,'PDF must keep the last activity with its route/summary panels');
