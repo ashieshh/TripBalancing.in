@@ -3538,6 +3538,8 @@ function repairFinalLuxuryMealSemantics(itinerary:any) {
   const invalidPrimaryMeal = /breakfast|light meal|street[- ]?food|snack|bakery|bread paired|omelette|small plate|croissant|pain au chocolat|pastr(?:y|ies)|macaron|dessert|sweet|ice cream|gelato|beverage|drink|coffee|tea|juice|lassi|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|tasting/i;
   const trustedMealVenue = /restaurant|dining|hotel|resort|palace|bistro|brasserie|kitchen|cafe|café/i;
   const destination = sanitizeGeneratedText(String(itinerary.destination || 'the destination')) || 'the destination';
+  const cityName = destination.split(',')[0].trim() || destination;
+  const selectedHotel = sanitizeGeneratedText(String(itinerary.budgetHotelName || itinerary.selectedHotelName || ''));
   let repaired = 0;
 
   for (let dayIndex = 0; dayIndex < itinerary.days.length; dayIndex++) {
@@ -3552,14 +3554,14 @@ function repairFinalLuxuryMealSemantics(itinerary:any) {
       if (!invalidPrimaryMeal.test(combined)) continue;
 
       const prettyRole = role === 'lunch' ? 'Lunch' : 'Dinner';
-      activity.title = `Upscale Regional ${prettyRole}: Chef's Local Seasonal Menu`;
+      activity.title = `Upscale Regional ${prettyRole}: Chef's ${cityName} Menu - Day ${dayIndex + 1}`;
       activity.description = `Enjoy a complete savory regional ${role} at a reputable, well-reviewed restaurant in ${destination}. Choose a full main meal appropriate to the destination; desserts, beverages and snack tastings remain separate optional stops. Confirm the current menu, reservation availability and final price before dining.`;
 
       // A snack stall / dessert shop is not a safe venue anchor for the replacement
       // full meal. Keep an existing restaurant/hotel venue; otherwise use the
       // destination as an honest location placeholder rather than inventing a venue.
       const currentLocation = sanitizeGeneratedText(String(activity?.location || ''));
-      if (!currentLocation || !trustedMealVenue.test(currentLocation)) activity.location = destination;
+      if (!currentLocation || !trustedMealVenue.test(currentLocation)) activity.location = selectedHotel || destination;
 
       if (!activity.visitDuration || /30\s*[–-]\s*60\s*min/i.test(String(activity.visitDuration))) {
         activity.visitDuration = role === 'lunch' ? '1h 30m' : '1h 30m';
@@ -3895,7 +3897,30 @@ function repairResidualUserFacingQuality(itinerary:any) {
   const isTransfer=(a:any)=>/(transfer|chauffeur|drive|travel to)/i.test(String(a?.title||''));
   const isBoundary=(a:any)=>/(arrival|departure|airport|station|check[- ]?in|check[- ]?out|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`);
   const seenPlaces=new Set<string>();
-  let removedDuplicates=0,removedWindowConflicts=0,closedGaps=0;
+  let removedDuplicates=0,removedWindowConflicts=0,closedGaps=0,movedThemeVisits=0;
+
+  // Keep a named landmark on the day whose theme promises that landmark.
+  for(const p of places){
+    const keyTokens=tokens(p?.name);if(!keyTokens.length)continue;
+    const targetIndex=itinerary.days.findIndex((d:any)=>{const themeTokens=new Set(tokens(d?.theme));return keyTokens.filter((x:string)=>themeTokens.has(x)).length/Math.max(1,keyTokens.length)>=0.6;});
+    if(targetIndex<0)continue;
+    let sourceIndex=-1,activityIndex=-1;
+    for(let di=0;di<itinerary.days.length;di++){
+      const acts=Array.isArray(itinerary.days[di]?.activities)?itinerary.days[di].activities:[];
+      const ai=acts.findIndex((a:any)=>!isTransfer(a)&&matchPlace(a)===p);
+      if(ai>=0){sourceIndex=di;activityIndex=ai;break;}
+    }
+    if(sourceIndex<0||sourceIndex===targetIndex)continue;
+    const sourceActs=itinerary.days[sourceIndex].activities;
+    const [activity]=sourceActs.splice(activityIndex,1);
+    const targetActs=Array.isArray(itinerary.days[targetIndex].activities)?itinerary.days[targetIndex].activities:(itinerary.days[targetIndex].activities=[]);
+    const departure=targetActs.find((a:any)=>/(departure|airport|station|check[- ]?out)/i.test(`${a?.title||''} ${a?.description||''}`));
+    const best=String(p?.bestTimeToVisit||'').toLowerCase();
+    if(departure&&/evening|sunset|late afternoon/.test(best)&&parseTime(departure.time)<19*60){sourceActs.push(activity);continue;}
+    let targetTime=/early morning/.test(best)?8*60+30:/evening|sunset|late afternoon/.test(best)?17*60:10*60;
+    if(departure)targetTime=Math.min(targetTime,parseTime(departure.time)-150);
+    activity.time=fmtTime(targetTime);targetActs.push(activity);movedThemeVisits++;
+  }
   itinerary.days=itinerary.days.map((day:any)=>{
     let acts=(Array.isArray(day?.activities)?day.activities:[]).map((a:any)=>({...a}));
     acts=acts.filter((a:any)=>{
@@ -3906,18 +3931,23 @@ function repairResidualUserFacingQuality(itinerary:any) {
     });
     for(const a of acts){
       if(isTransfer(a))continue;const p=matchPlace(a);if(!p)continue;const bt=String(p.bestTimeToVisit||'').toLowerCase();let target:number|null=null;
-      if(/early morning/.test(bt)&&parseTime(a.time)>12*60)target=8*60+30;
+      if(/early morning/.test(bt)&&parseTime(a.time)>10*60+30)target=8*60+30;
       else if(/late afternoon/.test(bt)&&(parseTime(a.time)<14*60||parseTime(a.time)>19*60))target=16*60;
       const range=bt.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
       if(range){const cv=(h:string,m:string|undefined,ap:string)=>{let n=Number(h)%12;if(ap.toLowerCase()==='pm')n+=12;return n*60+Number(m||0)};const lo=cv(range[1],range[2],range[3]),hi=cv(range[4],range[5],range[6]);if(parseTime(a.time)<lo||parseTime(a.time)>hi)target=Math.round((lo+hi)/2);}
       if(target==null)continue;
-      if(acts.some((x:any)=>isBoundary(x)&&Math.abs(parseTime(x.time)-target)<90)){(a as any).__removeWindowConflict=true;removedWindowConflicts++;}else a.time=fmtTime(target);
+      const arrivalConflict=acts.some((x:any)=>/(arrival|arrive|check[- ]?in|bag drop)/i.test(`${x?.title||''} ${x?.description||''}`)&&target<parseTime(x.time)+90);
+      const departureConflict=acts.some((x:any)=>/(departure|to airport|to the airport|return flight|return train|check[- ]?out)/i.test(`${x?.title||''} ${x?.description||''}`)&&target>parseTime(x.time)-90);
+      if(arrivalConflict||departureConflict){(a as any).__removeWindowConflict=true;removedWindowConflicts++;}else a.time=fmtTime(target);
     }
     acts=acts.filter((a:any)=>!a.__removeWindowConflict).sort((a:any,b:any)=>parseTime(a.time)-parseTime(b.time));
     for(let i=1;i<acts.length;i++){const previous=acts[i-1],current=acts[i],previousStart=parseTime(previous.time,i-1),currentStart=parseTime(current.time,i);if(currentStart-previousStart>300&&!isBoundary(current)){current.time=fmtTime(previousStart+Math.max(30,duration(previous))+60);closedGaps++;}}
-    return {...day,activities:acts};
+    const meaningful=acts.filter((a:any)=>!isBoundary(a)&&!/breakfast|brunch|lunch|dinner|dining|meal|tasting|spa|wellness/i.test(String(a?.title||'')));
+    const refreshedTheme=meaningful.slice(0,2).map((a:any)=>String(a?.title||'').replace(/^(?:Guided Visit:|Explore|Excursion to|Private)\s*/i,'').trim()).filter(Boolean).join(' & ');
+    const boundaryTheme=acts.some((a:any)=>/(arrival|check[- ]?in)/i.test(`${a?.title||''} ${a?.description||''}`))?'Arrival & Settling In':acts.some((a:any)=>/(departure|airport|station|check[- ]?out)/i.test(`${a?.title||''} ${a?.description||''}`))?'Departure Day':'Relaxed Local Exploration';
+    return {...day,theme:refreshedTheme||boundaryTheme,activities:acts};
   });
-  if(removedDuplicates||removedWindowConflicts||closedGaps) console.warn(`[FINAL_RESIDUAL_REPAIR] Removed ${removedDuplicates} duplicate landmark visit(s), removed ${removedWindowConflicts} incompatible window visit(s), and closed ${closedGaps} excessive schedule gap(s).`);
+  if(removedDuplicates||removedWindowConflicts||closedGaps||movedThemeVisits) console.warn(`[FINAL_RESIDUAL_REPAIR] Moved ${movedThemeVisits} themed landmark visit(s), removed ${removedDuplicates} duplicate landmark visit(s), removed ${removedWindowConflicts} incompatible window visit(s), and closed ${closedGaps} excessive schedule gap(s).`);
   return itinerary;
 }
 
@@ -4214,12 +4244,23 @@ function finalizeCustomerSpecificity(itinerary: any) {
       const isGenericPlace=/private\s*\/\s*(?:priority|advance-planned)|cultural context|second sight|selective premium experience|destination experience/i.test(text);
       const isGenericMeal=/different local|chef'?s local|signature dinner(?!: [A-Z])|boutique dining|complete destination-appropriate|acclaimed fine-dining/i.test(text);
 
-      if (isGenericMeal && foods.length) {
-        const food=foods[(dayIndex*2+foodCursor++)%foods.length];
-        const dinner=/dinner/i.test(text);
-        a.title=`${dinner?'Regional Dinner':'Regional Meal'}: ${food.name}`;
-        a.description=String(food.description||`Enjoy ${food.name}, a local specialty of ${destination}.`);
-        a.location=String(food.mustTryAt||destination);
+      if (isGenericMeal) {
+        const timeMatch=String(a?.time||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);
+        let timeMinutes=12*60;
+        if(timeMatch){let hour=Number(timeMatch[1])%12;if(timeMatch[3]==='PM')hour+=12;timeMinutes=hour*60+Number(timeMatch[2]||0);}
+        const role=/dinner/i.test(text)||timeMinutes>=17*60?'Dinner':'Lunch';
+        const suitableFoods=foods.filter((food:any)=>isCompleteMealFood(food,role.toLowerCase()==='dinner'?'dinner':'lunch'));
+        const food=suitableFoods.length?suitableFoods[(dayIndex+foodCursor++)%suitableFoods.length]:null;
+        if(food){
+          a.title=`Regional ${role}: ${food.name}`;
+          a.description=String(food.description||`Enjoy ${food.name}, a complete local ${role.toLowerCase()} specialty of ${destination}.`);
+          a.location=String(food.mustTryAt||selectedHotel||destination);
+        }else{
+          const cityName=destination.split(',')[0].trim()||destination;
+          a.title=`Upscale Regional ${role}: Chef's ${cityName} Menu - Day ${dayIndex+1}`;
+          a.description=`Enjoy a complete savory ${cityName} ${role.toLowerCase()} with a main course and accompaniments. Confirm the current menu, reservation availability and final price before dining.`;
+          a.location=selectedHotel||destination;
+        }
       } else if (isGenericPlace && places.length) {
         const place=places[(dayIndex+placeCursor++)%places.length];
         a.title=`Guided Visit: ${place.name}`;
