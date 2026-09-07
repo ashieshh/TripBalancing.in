@@ -3813,12 +3813,19 @@ function alignLodgingLogisticsToBudgetHotel(itinerary:any) {
   if (!selected || !Array.isArray(itinerary?.days)) return itinerary;
   itinerary.selectedHotelName = selected;
   const namedHotel = /\b[A-Z][A-Za-z0-9&' -]{1,60}\s(?:Hotel|Palace|Resort|Haveli)\b/g;
+  const allActivities=itinerary.days.flatMap((day:any)=>Array.isArray(day?.activities)?day.activities:[]);
+  const arrivalActivity=allActivities.find((activity:any)=>/arrival|landing|arrive/i.test(`${activity?.title||''} ${activity?.description||''}`));
+  const arrivalText=`${arrivalActivity?.title||''} ${arrivalActivity?.description||''}`;
+  const airportMatch=arrivalText.match(/(?:\bat\s+|\bto\s+)([A-Z][A-Za-z' -]{2,60}?Airport(?:\s*\([A-Z]{3}\))?)/);
+  const stationMatch=arrivalText.match(/\b([A-Z][A-Za-z' -]{2,60}(?:Railway|Train|Bus)\s+Station)/);
+  const verifiedGateway=sanitizeGeneratedText(String(airportMatch?.[1]||stationMatch?.[1]||''));
   for (const day of itinerary.days) {
     for (const activity of Array.isArray(day?.activities) ? day.activities : []) {
-      const logistics = /arrival|landing|airport (?:transfer|pick[- ]?up|pickup)|hotel check[- ]?in|check[- ]?out|departure preparation|packing/i.test(`${activity?.title || ''} ${activity?.description || ''}`);
+      const logistics = /arrival|landing|airport (?:transfer|pick[- ]?up|pickup)|hotel check[- ]?in|check[- ]?out|departure (?:preparation|transfer)|to airport|to station|return flight|return train|packing/i.test(`${activity?.title || ''} ${activity?.description || ''}`);
       if (!logistics) continue;
       activity.description = String(activity.description || '').replace(namedHotel, selected);
       if (/arrival|airport (?:pick[- ]?up|pickup)|check[- ]?in/i.test(`${activity?.title || ''} ${activity?.description || ''}`)) activity.location = selected;
+      if (verifiedGateway && /departure|to airport|to station|return flight|return train/i.test(`${activity?.title||''} ${activity?.description||''}`)) activity.location=verifiedGateway;
     }
   }
   return itinerary;
@@ -3972,7 +3979,7 @@ function repairFinalScheduleCompleteness(itinerary:any) {
   let foodCursor=0;
   const nextFood=()=>{
     const savory=foods.filter((food:any)=>isCompleteMealFood(food,'lunch'));
-    const available=savory.find((food:any)=>!usedFoods.has(norm(food?.name)))||savory[foodCursor%Math.max(1,savory.length)]||null;
+    const available=savory.find((food:any)=>!usedFoods.has(norm(food?.name)))||null;
     foodCursor++;if(available)usedFoods.add(norm(available.name));return available;
   };
   const makeMeal=(role:'Lunch'|'Dinner',time:string)=>{
@@ -4016,6 +4023,7 @@ function repairBlockingFinalQuality(itinerary:any) {
   const parseTime=(v:any,idx=0)=>{const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return 9*60+idx*150;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0)};
   const fmtTime=(mins:number)=>{mins=Math.max(5*60,Math.min(23*60+45,Math.ceil(mins/15)*15));const h24=Math.floor(mins/60),mm=mins%60,ap=h24>=12?'PM':'AM',h=h24%12||12;return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`};
   const duration=(a:any)=>{const raw=String(a?.visitDuration||'').toLowerCase();const range=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(range)return /min/.test(range[3])?Number(range[2]):Number(range[2])*60;const one=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(one)return /min/.test(one[2])?Number(one[1]):Number(one[1])*60;return /meal|breakfast|lunch|dinner|tasting/i.test(String(a?.title||''))?75:60};
+  const travelMinutes=(a:any)=>{const raw=String(a?.travelTimeFromPrevious||'').toLowerCase();const hours=raw.match(/(\d+(?:\.\d+)?)\s*h(?:our)?/);const mins=raw.match(/(\d+)\s*m(?:in)?/);return Math.round((hours?Number(hours[1])*60:0)+(mins?Number(mins[1]):0));};
   const isArrival=(a:any)=>/(arrival|arrive|airport transfer.*stay|airport transfer.*check|station transfer.*stay|hotel check[- ]?in|heritage check[- ]?in|premium stay|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`)&&!/(departure|return flight|head .*airport|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
   const isDeparture=(a:any)=>/(departure transfer|airport departure|transfer to airport|to the airport|head .*airport|return flight|return train|station departure|check[- ]?out.*airport|airport lounge.*before boarding)/i.test(`${a?.title||''} ${a?.description||''}`);
   const norm=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|a|an|private|priority|visit|experience|tour|regional|signature|local|at|to|of|and)\b/g,' ').replace(/\s+/g,' ').trim();
@@ -4030,7 +4038,7 @@ function repairBlockingFinalQuality(itinerary:any) {
     acts=acts.filter((activity:any,index:number)=>{
       if(!/(transfer|chauffeur|drive|travel to)/i.test(String(activity?.title||'')))return true;
       const target=norm(activity?.location||String(activity?.title||'').replace(/^.*?\bto\b/i,''));
-      if(!target)return true;
+      if(!target||target===norm(destination))return true;
       return !acts.some((other:any,otherIndex:number)=>otherIndex!==index&&!/(transfer|chauffeur|drive|travel to)/i.test(String(other?.title||''))&&norm(`${other?.title||''} ${other?.location||''}`).includes(target));
     });
     const arrival=acts.find(isArrival);
@@ -4039,9 +4047,10 @@ function repairBlockingFinalQuality(itinerary:any) {
     if(departure){const boundary=parseTime(departure.time);acts=acts.filter((a:any)=>a===departure||parseTime(a.time)<=boundary);}
     acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
     for(let i=1;i<acts.length;i++){
-      const previous=acts[i-1],current=acts[i],minimum=parseTime(previous.time,i-1)+Math.max(30,duration(previous))+15;
+      const previous=acts[i-1],current=acts[i],minimum=parseTime(previous.time,i-1)+Math.max(30,duration(previous))+Math.max(15,travelMinutes(current));
       if(parseTime(current.time,i)>=minimum)continue;
       if(isDeparture(current)){while(i>0&&parseTime(current.time,i)<parseTime(acts[i-1].time,i-1)+Math.max(30,duration(acts[i-1]))){acts.splice(i-1,1);i--;}}
+      else if(minimum+Math.max(30,duration(current))>23*60+45){acts.splice(i,1);i--;}
       else current.time=fmtTime(minimum);
     }
     return {...day,activities:acts};
@@ -4443,7 +4452,8 @@ function finalizeCustomerSpecificity(itinerary: any) {
         a.location=selectedHotel;
       }
 
-      const incorrectlyFree=(isTransfer||/boat|cruise|guided tour|spa|massage/i.test(text))&&/^free(?:\s*\/\s*included)?$/i.test(String(a.cost||'').trim());
+      const paidService=/boat|cruise|guided (?:tour|visit)|spa|massage|rafting|kayak|diving|climbing|bike|bicycle|rental|scenic flight|helicopter|safari|private experience/i.test(text);
+      const incorrectlyFree=(isTransfer||paidService)&&/^free(?:\s*\/\s*included)?$/i.test(String(a.cost||'').trim());
       if (!a.cost || vague.test(String(a.cost)) || incorrectlyFree) {
         a.cost=isTransfer?estimate(transferEstimate):isMeal?estimate(mealEstimate,'for all travelers'):estimate(activityEstimate);
       }
@@ -5526,6 +5536,8 @@ Return the response in strict JSON format.`;
     repairFinalItineraryDiversity(reconciledItinerary);
     repairResidualUserFacingQuality(reconciledItinerary);
     repairFinalScheduleCompleteness(reconciledItinerary);
+    repairFinalItineraryDiversity(reconciledItinerary);
+    finalizeCustomerSpecificity(reconciledItinerary);
     // Diversity repair can change a location anchor. Re-run route enrichment so
     // visible route distance/transport is calculated from the final customer itinerary.
     const finalRoutedItinerary = applySmartRouteAndTransport(reconciledItinerary);
@@ -6137,6 +6149,8 @@ Return the response in strict JSON format.`;
     repairFinalItineraryDiversity(reconciledFallback);
     repairResidualUserFacingQuality(reconciledFallback);
     repairFinalScheduleCompleteness(reconciledFallback);
+    repairFinalItineraryDiversity(reconciledFallback);
+    finalizeCustomerSpecificity(reconciledFallback);
     const routedFallback = applySmartRouteAndTransport(reconciledFallback);
     Object.assign(reconciledFallback, routedFallback);
     reconcileItineraryBudget(reconciledFallback);
@@ -6880,6 +6894,8 @@ export const itineraryQualityTestHooks = {
   blockingFinalQualityErrors,
   repairFinalScheduleCompleteness,
   repairBlockingFinalQuality,
+  repairFinalItineraryDiversity,
+  finalizeCustomerSpecificity,
   alignLodgingLogisticsToBudgetHotel,
 };
 
