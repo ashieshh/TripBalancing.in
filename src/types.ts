@@ -181,6 +181,7 @@ export interface Itinerary {
   tripDays?: number;
   budgetAmount: string;
   travelers: number;
+  travelerType?: TravelerType;
   travelStyle: string;
   days: DayItinerary[];
   estimatedBudgetBreakdown: BudgetBreakdown;
