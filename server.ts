@@ -2411,12 +2411,11 @@ function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string
     'senior citizens':/(comfortable pacing|rest break|shorter walk|accessible|daytime|convenient transport)/i,
     'students':/(student|value|public transport|free attraction|discount|low-cost)/i,
     'women-only trip':/(well-connected|reputable accommodation|dependable transport|evening return|women)/i,
-    'group trip':/(meeting point|group-capacity|group transport|advance reservation|room allocation|coordination)/i,
-    'parents with children':/(child-friendly|children|stroller|restroom|meal break|shorter activity|family room)/i
+    'group trip':/(meeting point|group-capacity|group transport|advance reservation|room allocation|coordination)/i
   };
   const requiredTravelerSignal=travelerSignals[travelerType];
   if(requiredTravelerSignal&&!requiredTravelerSignal.test(allActivityText)) errors.push(`${expectedTravelerType} traveler type is not meaningfully reflected in the itinerary`);
-  if(['family','senior citizens','parents with children'].includes(travelerType)){
+  if(['family','senior citizens'].includes(travelerType)){
     const tooLate=days.flatMap((d:any)=>Array.isArray(d?.activities)?d.activities:[]).some((a:any)=>{const m=String(a?.time||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return false;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h>=22&&!/return|hotel|dinner/i.test(String(a?.title||''));});
     if(tooLate)errors.push(`${expectedTravelerType} itinerary contains an unsuitable late-night activity`);
   }
@@ -3836,8 +3835,7 @@ function applyTravelerTypePersonalization(itinerary:any, selectedType?:string) {
     'Senior Citizens':'Use comfortable daytime pacing, shorter walking stretches, seating breaks and convenient transport.',
     Students:'Prioritize strong value, public transport, free/low-fee sights and available student discounts.',
     'Women-only Trip':'Favor well-connected areas, reputable stays, dependable transport and a practical evening return plan.',
-    'Group Trip':'Confirm meeting points, group-capacity transport, advance reservations and room allocation.',
-    'Parents with Children':'Use child-friendly timing, shorter activity blocks, meal/restroom breaks and stroller-friendly alternatives where relevant.'
+    'Group Trip':'Confirm meeting points, group-capacity transport, advance reservations and room allocation.'
   };
   const note=guidance[type]||'Adjust pacing, lodging, dining and transport to the selected traveler group.';
   const tips=Array.isArray(itinerary.travelTips)?itinerary.travelTips:[];
@@ -3845,7 +3843,7 @@ function applyTravelerTypePersonalization(itinerary:any, selectedType?:string) {
   const firstDay=itinerary.days[0];
   const anchor=(Array.isArray(firstDay?.activities)?firstDay.activities:[]).find((a:any)=>!/(arrival|airport|station|check[- ]?in|transfer)/i.test(String(a?.title||'')));
   if(anchor&&!String(anchor.description||'').includes(note))anchor.description=`${String(anchor.description||'').trim()} ${note}`.trim();
-  if(['Family','Senior Citizens','Parents with Children'].includes(type)){
+  if(['Family','Senior Citizens'].includes(type)){
     for(const day of itinerary.days){
       day.activities=(Array.isArray(day?.activities)?day.activities:[]).filter((a:any)=>{
         const m=String(a?.time||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return true;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;
@@ -4925,8 +4923,7 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
       "Senior Citizens": "Prioritize comfortable pacing, shorter walking stretches, seating/rest breaks, elevators or accessible alternatives where practical, convenient transport, daytime sightseeing and medical/pharmacy access awareness. Do not assume disability; offer easier alternatives rather than removing major sights automatically.",
       "Students": "Prioritize strong value, public transport, hostels/budget stays when style allows, student-friendly/free attractions, inexpensive local food and discount opportunities. Preserve safety and realistic travel times.",
       "Women-only Trip": "Prioritize well-connected areas, reputable accommodation, dependable transport, sensible late-evening return options and practical destination-specific safety information. Do not restrict normal activities or stereotype travelers; keep recommendations empowering and equivalent in quality.",
-      "Group Trip": "Prioritize group logistics: meeting points, advance reservations where useful, group-capacity transport, restaurants/activities that can handle the party size, room allocation practicality and buffer time for coordination.",
-      "Parents with Children": "Prioritize child-friendly attractions, stroller/restroom practicality where relevant, shorter activity blocks, meal/rest breaks, safe transfers and accommodation suitable for parents with children. Avoid very late schedules unless requested."
+      "Group Trip": "Prioritize group logistics: meeting points, advance reservations where useful, group-capacity transport, restaurants/activities that can handle the party size, room allocation practicality and buffer time for coordination."
     };
     const selectedTravelerGuidance = travelerTypeGuidance[String(travelerType)] || "Personalize pacing, lodging, activities, dining and transport appropriately for the stated traveler type without overriding explicit budget, style, interests or trip-purpose inputs.";
 
