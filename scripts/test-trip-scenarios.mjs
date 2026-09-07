@@ -16,6 +16,7 @@ const destinations = [
   ['Baku, Azerbaijan', 'Mumbai, India', ['Icherisheher', 'Baku Boulevard', 'Gobustan']],
   ['Bali, Indonesia', 'Mumbai, India', ['Ubud Palace', 'Sanur Beach', 'Tanah Lot']],
   ['Dubai, United Arab Emirates', 'Mumbai, India', ['Burj Khalifa', 'Dubai Creek', 'Al Fahidi']],
+  ['Nepal', 'Mumbai, India', ['Shivapuri Nagarjun National Park', 'Trisuli River Gorge', 'Boudhanath Stupa']],
 ];
 const travelers = ['Couple', 'Family', 'Solo', 'Senior Citizens', 'Students', 'Group Trip'];
 const styles = ['Beach Escape', 'Culture & History', 'Budget', 'Nature & Wildlife', 'Smart Luxury', 'Adventure'];
@@ -47,6 +48,8 @@ for(const [destination,origin,placeNames] of destinations){
     quality.alignLodgingLogisticsToBudgetHotel(trip);
     assert.equal(trip.days[0].activities.find(a=>/arrival/i.test(a.title))?.location,selectedHotel,`${destination}: arrival hotel mismatch`);
     quality.repairFinalScheduleCompleteness(trip);
+    quality.repairFinalItineraryDiversity(trip);
+    quality.finalizeCustomerSpecificity(trip);
     quality.repairBlockingFinalQuality(trip);
     reconcileItineraryBudget(trip);
 
@@ -62,6 +65,7 @@ for(const [destination,origin,placeNames] of destinations){
       const matched=day.activities.map(a=>placeNames.find(name=>normalize(`${a.title} ${a.location}`).includes(normalize(name)))).filter(Boolean);
       assert.equal(new Set(matched).size,matched.length,`${destination} day ${index+1}: duplicate landmark`);
       for(const meal of day.activities.filter(a=>/\blunch\b|\bdinner\b/i.test(a.title)))assert.ok(money(meal.cost)>0,`${destination} day ${index+1}: paid meal shown as free`);
+      for(const paid of day.activities.filter(a=>/rafting|kayak|diving|climbing|bike|rental|scenic flight|helicopter|safari|guided tour/i.test(`${a.title} ${a.description}`)))assert.ok(money(paid.cost)>0,`${destination} day ${index+1}: paid experience shown as free`);
       const breakdown=day.dailyCostBreakdown;
       const parts=['accommodation','food','localTransport','activities','miscellaneous'].reduce((sum,key)=>sum+money(breakdown[key]),0);
       assert.equal(parts,money(day.dailyBudget),`${destination} day ${index+1}: daily cost does not reconcile`);
@@ -72,6 +76,13 @@ for(const [destination,origin,placeNames] of destinations){
     assert.deepEqual(quality.blockingFinalQualityErrors(quality.validateFinalUserFacingItinerary(trip)),[],`${destination}: blocking final-quality error remains`);
     scenarios++;
   }
+}
+
+{
+  const trip=fixture('Nepal','Mumbai, India',['Shivapuri Nagarjun National Park','Trisuli River Gorge','Boudhanath Stupa'],4,'gemini','recommended',0);
+  trip.days[0].activities[0].description='Land at Tribhuvan International Airport (KTM), then transfer to the selected hotel.';
+  quality.alignLodgingLogisticsToBudgetHotel(trip);
+  assert.equal(trip.days.at(-1).activities.find(a=>/departure/i.test(a.title))?.location,'Tribhuvan International Airport (KTM)','country-level departure must use the verified arrival gateway');
 }
 
 const pdf=fs.readFileSync(new URL('../src/utils/pdfGenerator.ts',import.meta.url),'utf8');
