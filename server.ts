@@ -4819,6 +4819,7 @@ app.get('/api/travelpayouts/resolve-location', async (req, res) => {
 
 app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;
+  let originCoords: { latitude: number; longitude: number } | null = null;
   let diffDays = 3;
   try {
     // Currency selection must only convert the same economic trip cost.
@@ -4890,6 +4891,7 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
       return res.status(422).json({ error: `Destination "${destination}" could not be verified. Please enter a real city, state or country.` });
     }
     geoCoords = { latitude: validatedDestination.latitude!, longitude: validatedDestination.longitude! };
+    if(origin && validatedOrigin.latitude!=null && validatedOrigin.longitude!=null) originCoords={latitude:validatedOrigin.latitude,longitude:validatedOrigin.longitude};
 
     // 1. Check Itinerary Cache first to prevent redundant generations and reduce response time
     const contentIdentity = [
@@ -5804,8 +5806,10 @@ Return the response in strict JSON format.`;
           mkActivity('04:30 PM', `Second Heritage Stop: ${secondary.name}`, secondary.description, secondary.name, secondary.entryFee || 'Verify', dayIdx, 4)
         ];
       } else if (fallbackStyle === 'beach escape') {
-        const namedCoastal=details.places.find((p:any)=>/\b(beach|coast|ocean|sea|island|bay|cove|shore|lagoon)\b/i.test(`${p?.name||''} ${p?.description||''}`));
-        const namedWaterside=details.places.find((p:any)=>/\b(river|ghat|lake|waterfall|waterfront|canal|reservoir)\b/i.test(`${p?.name||''} ${p?.description||''}`));
+        const waterPlaces=details.places.filter((p:any)=>/\b(beach|coast|ocean|sea|island|bay|cove|shore|lagoon|river|ghat|lake|waterfall|waterfront|canal|reservoir)\b/i.test(`${p?.name||''} ${p?.description||''}`));
+        const selectedWaterPlace=waterPlaces[dayIdx] || null;
+        const namedCoastal=selectedWaterPlace&&/\b(beach|coast|ocean|sea|island|bay|cove|shore|lagoon)\b/i.test(`${selectedWaterPlace?.name||''} ${selectedWaterPlace?.description||''}`)?selectedWaterPlace:null;
+        const namedWaterside=selectedWaterPlace&&!namedCoastal?selectedWaterPlace:null;
         if(namedCoastal){
           theme=`Coastal Relaxation & Beach Time at ${namedCoastal.name}`;
           activities=[
@@ -5814,7 +5818,7 @@ Return the response in strict JSON format.`;
             mkActivity('03:30 PM',`Relaxed Coastal Experience near ${primary.name}`,`Choose a safe, currently available water activity or unstructured coast time according to local weather, tide and safety guidance.`,namedCoastal.name,'Optional - verify',dayIdx,3),
             mkActivity('06:00 PM','Coastal Sunset & Easy Evening',`Keep sunset relaxed at ${namedCoastal.name} and use dependable return transport.`,namedCoastal.name,'Free / verify',dayIdx,4)
           ];
-        }else if(namedWaterside&&dayIdx===0){
+        }else if(namedWaterside){
           theme=`Beach-style Relaxation Adapted to ${namedWaterside.name}`;
           activities=[
             mkActivity('09:30 AM',`Unhurried Waterside Time at ${namedWaterside.name}`,`${namedWaterside.description} This is an honest riverside/lakeside alternative because the destination has no verified beach.`,namedWaterside.name,namedWaterside.entryFee||'Free / verify',dayIdx,1),
@@ -5831,6 +5835,7 @@ Return the response in strict JSON format.`;
             mkActivity('06:00 PM','Resort / Hotel Leisure & Easy Evening','Keep an unhurried leisure block at the selected stay; do not claim beach, sea or coastal access.',`${destination} selected hotel`,'Included / verify',dayIdx,4)
           ];
         }
+        if(dayIdx<diffDays-1) activities.push(mkActivity('07:30 PM',`Relaxed Regional Dinner: ${meal2.name}`,meal2.description,meal2.mustTryAt||destination,'Per person',dayIdx,5));
       } else if (fallbackStyle === 'nature & wildlife') {
         theme = `Nature, Wildlife & Responsible Exploration`;
         activities = [
@@ -6029,7 +6034,16 @@ Return the response in strict JSON format.`;
         grandTotal: `₹${(totalMin + (origin ? 5000 : 0)).toLocaleString("en-IN")} - ₹${(totalMax + (origin ? 12000 : 0)).toLocaleString("en-IN")}`
       },
       isAiBudgetPlanner: !!isAiBudgetPlanner,
-      originToDestinationDuration: origin ? "4h 30m via Flight" : "N/A",
+      originToDestinationDuration: (()=>{
+        if(!origin)return "N/A";
+        if(!originCoords||!geoCoords)return "Confirm booked route duration";
+        const rad=(n:number)=>n*Math.PI/180,dLat=rad(geoCoords.latitude-originCoords.latitude),dLon=rad(geoCoords.longitude-originCoords.longitude);
+        const h=Math.sin(dLat/2)**2+Math.cos(rad(originCoords.latitude))*Math.cos(rad(geoCoords.latitude))*Math.sin(dLon/2)**2;
+        const km=6371*2*Math.asin(Math.sqrt(h));
+        const mins=Math.max(60,Math.round((45+(km/750)*60)/15)*15),hours=Math.floor(mins/60),minutes=mins%60;
+        return `${hours}h${minutes?` ${minutes}m`:''} estimated flight time`;
+      })(),
+      originToDestinationDistanceKm: originCoords&&geoCoords?Math.round((()=>{const rad=(n:number)=>n*Math.PI/180,dLat=rad(geoCoords!.latitude-originCoords!.latitude),dLon=rad(geoCoords!.longitude-originCoords!.longitude);const h=Math.sin(dLat/2)**2+Math.cos(rad(originCoords!.latitude))*Math.cos(rad(geoCoords!.latitude))*Math.sin(dLon/2)**2;return 6371*2*Math.asin(Math.sqrt(h));})()):undefined,
       aiBudgetSummary: isAiBudgetPlanner ? `With your budget of ${budgetAmount}, you can comfortably travel for ${diffDays} days and ${diffDays - 1} nights.` : undefined,
       maxDaysComfortable: isAiBudgetPlanner ? diffDays : undefined,
       remainingBudget: isAiBudgetPlanner ? (String(budgetAmount).includes("$") ? "$10" : "₹500") : undefined

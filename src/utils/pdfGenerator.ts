@@ -1766,7 +1766,7 @@ export const exportPremiumTravelPDF = async (
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9.5);
     doc.setTextColor(51, 65, 85);
-    const recommendationIntro = `Every destination possesses a unique spirit, manifested through its historic monuments, local landmarks, and culinary specialties. In this chapter, we present a curated portfolio of sightseeing recommendations and iconic regional foods handpicked for your trip. For each selection, we include dynamic quality ratings, estimated admission costs, and optimized visiting hours.`;
+    const recommendationIntro = `Every destination possesses a unique spirit, manifested through its historic monuments, local landmarks, and culinary specialties. In this chapter, we present a curated portfolio of sightseeing recommendations and iconic regional foods handpicked for your trip, with estimated admission costs and practical visiting hours.`;
     doc.text(doc.splitTextToSize(recommendationIntro, 180), marginX, y);
     y += 24;
 
@@ -1826,12 +1826,10 @@ export const exportPremiumTravelPDF = async (
         doc.setTextColor(15, 23, 42);
         doc.text(`${idx + 1}. ${place.name}`, contentX, y + 6.5);
 
-        const rating = 4.5 + (idx % 5) * 0.1;
         doc.setFont("helvetica", "bold");
         doc.setFontSize(7.5);
         doc.setTextColor(245, 158, 11);
-        const ratingVal = rating.toFixed(1);
-        doc.text(`Rating: ${ratingVal} / 5.0`, contentX + 110, y + 6.5, { align: "right" });
+        doc.text("CURATED LANDMARK", contentX + 110, y + 6.5, { align: "right" });
 
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8);
@@ -1889,14 +1887,13 @@ export const exportPremiumTravelPDF = async (
         doc.text(descLines, contentX, y + 12);
 
         const detailY = Math.min(y + heightNeeded - 7.5, y + 12 + (descLines.length * 4.2) + 2);
-        const simulatedRating = (4.4 + (idx % 6) * 0.1).toFixed(1);
         const estimatedPrice = estimateFoodPriceRange(food, idx, itinerary, currencySym);
 
         // Badge 1: Must Try (Amber, wider and perfectly centered)
         drawCenteredBadge(doc, contentX, detailY, 60, 4.5, `Must Try: ${food.mustTryAt}`, undefined, [254, 243, 199], [217, 119, 6]);
 
-        // Badge 2: Rating (Emerald, centered beautifully)
-        drawCenteredBadge(doc, contentX + 64, detailY, 28, 4.5, `Rating: ${simulatedRating}`, undefined, [236, 253, 245], [13, 148, 136]);
+        // Badge 2: editorial label. Never manufacture a numeric customer rating.
+        drawCenteredBadge(doc, contentX + 64, detailY, 28, 4.5, "LOCAL PICK", undefined, [236, 253, 245], [13, 148, 136]);
 
         // Badge 3: Cost (using drawPriceBadge helper with auto-scaling font size)
         drawPriceBadge(doc, contentX + 96, detailY, 34, 4.5, `Avg: ${estimatedPrice}`);

@@ -804,6 +804,19 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
         activities: fmtDayPart(parts[3]),
         miscellaneous: fmtDayPart(parts[4])
       };
+
+      // Paid meals must never appear as "Free" while the same day carries a
+      // food allocation. Split that day's food pool across its visible meal
+      // cards so the itinerary and PDF explain where the money is spent.
+      const mealRows = (Array.isArray(day.activities) ? day.activities : []).filter((activity:any) =>
+        /breakfast|brunch|lunch|dinner|dining|regional meal|restaurant|cafe tasting/i.test(`${activity?.title||''} ${activity?.description||''}`)
+      );
+      if (mealRows.length && parts[1] > 0) {
+        const mealShares = distributeExact(parts[1], mealRows.map(() => 1));
+        mealRows.forEach((activity:any, mealIndex:number) => {
+          activity.cost = fmtDayPart(mealShares[mealIndex] || 0);
+        });
+      }
     });
   }
 
@@ -827,12 +840,42 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     itinerary.days.forEach((day:any)=>{ (Array.isArray(day?.activities)?day.activities:[]).forEach((activity:any)=>{
       const raw=String(activity?.cost??""); const ak=key(`${activity?.title||""} ${activity?.location||""}`);
       const isTransfer=/(transfer|chauffeur|drive|travel to|pickup|drop[- ]?off)/i.test(String(activity?.title||""));
+      const isMeal=/breakfast|brunch|lunch|dinner|dining|regional meal|restaurant|cafe tasting/i.test(`${activity?.title||""} ${activity?.description||""}`);
+      // Food and local transport are reconciled in their own visible daily
+      // categories. Do not accidentally consume the sightseeing pool again.
+      if(isMeal || isTransfer) return;
       const matched=isTransfer ? undefined : placeFees.find((p:any)=>ak.includes(p.key)||p.key.includes(ak));
       if(matched){ if(matched.free)activity.cost="Free"; else { const fee=Math.max(1,Math.round(matched.fee)); activity.cost=fmtMoney(fee); fixedAdmissionTotal+=fee; } return; }
       const weight=firstMoneyNumber(raw); if(/\bfree\b|included/i.test(raw)||weight<=0){ if(!raw.trim()||/\bfree\b|included/i.test(raw))activity.cost="Free"; return; } serviceRows.push({activity,weight});
     }); });
     const remaining=Math.max(0,Math.round(calculated.sightseeing-fixedAdmissionTotal));
     if(serviceRows.length){ const totalWeight=serviceRows.reduce((n,r)=>n+r.weight,0)||serviceRows.length; let allocated=0; serviceRows.forEach((r,i)=>{ const amount=i===serviceRows.length-1?Math.max(0,remaining-allocated):Math.max(0,Math.round(remaining*r.weight/totalWeight)); allocated+=amount; r.activity.cost=amount>0?fmtMoney(amount):"Free / Included"; }); }
+
+    // Rebuild each displayed day total from the final activity prices. This is
+    // intentionally after admission/service normalization so a paid landmark
+    // cannot appear on one day while its cost is spread across unrelated days.
+    const rawActivityByDay=itinerary.days.map((day:any)=>(Array.isArray(day?.activities)?day.activities:[]).reduce((sum:number,activity:any)=>{
+        const text=`${activity?.title||''} ${activity?.description||''}`;
+        if(/breakfast|brunch|lunch|dinner|dining|regional meal|restaurant|cafe tasting|transfer|chauffeur|drive|travel to|pickup|drop[- ]?off/i.test(text))return sum;
+        return sum+firstMoneyNumber(activity?.cost);
+      },0));
+    const activityWeightTotal=rawActivityByDay.reduce((sum:number,value:number)=>sum+value,0);
+    const finalActivityByDay=rawActivityByDay.map((value:number,index:number)=>{
+      const weights=activityWeightTotal>0?rawActivityByDay:rawActivityByDay.map(()=>1);
+      const totalWeight=weights.reduce((sum:number,weight:number)=>sum+weight,0)||1;
+      const raw=calculated.sightseeing*weights[index]/totalWeight;
+      return Math.floor(raw);
+    });
+    let activityRemainder=Math.round(calculated.sightseeing)-finalActivityByDay.reduce((sum:number,value:number)=>sum+value,0);
+    for(let index=0;activityRemainder>0;index=(index+1)%finalActivityByDay.length,activityRemainder--)finalActivityByDay[index]++;
+    itinerary.days.forEach((day:any,index:number)=>{
+      const breakdown=day?.dailyCostBreakdown||{};
+      breakdown.activities=fmtMoney(finalActivityByDay[index]||0);
+      const total=['accommodation','food','localTransport','activities','miscellaneous'].reduce((sum,keyName)=>sum+firstMoneyNumber(breakdown[keyName]),0);
+      day.dailyCostBreakdown=breakdown;
+      day.dailyBudget=fmtMoney(total);
+      day.estimatedTotalSpend=fmtMoney(total);
+    });
   }
   const dayCountForRates = Math.max(1, days);
   const nightsForRates = Math.max(1, days - 1);
