@@ -49,7 +49,6 @@ const TRAVELER_TYPES: Array<{ name: TravelerType; icon: string }> = [
   { name: "Students", icon: "🎓" },
   { name: "Women-only Trip", icon: "👭" },
   { name: "Group Trip", icon: "🚌" },
-  { name: "Parents with Children", icon: "👪" },
 ];
 
 const TRAVEL_STYLES: Array<{ name: TravelStyle; icon: string; description: string }> = [
@@ -131,7 +130,6 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
       Students: 2,
       "Women-only Trip": 2,
       "Group Trip": 3,
-      "Parents with Children": 2,
     };
     if (nextType === "Solo") setTravelers(1);
     else setTravelers((current) => Math.max(current, minimums[nextType] || 1));
@@ -141,7 +139,7 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
     setTravelStyle(nextStyle);
     if (nextStyle === "Smart Luxury") setBudgetMode("recommended");
   };
-  const minimumTravelersForType = travelerType === "Group Trip" ? 3 : travelerType === "Solo" ? 1 : ["Couple", "Honeymoon", "Family", "Friends", "Senior Citizens", "Students", "Women-only Trip", "Parents with Children"].includes(travelerType) ? 2 : 1;
+  const minimumTravelersForType = travelerType === "Group Trip" ? 3 : travelerType === "Solo" ? 1 : ["Couple", "Honeymoon", "Family", "Friends", "Senior Citizens", "Students", "Women-only Trip"].includes(travelerType) ? 2 : 1;
 
   // Default the trip-budget currency from the country saved on the user's account,
   // while still allowing the user to choose any other supported currency afterwards.
