@@ -841,15 +841,16 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       const raw=String(activity?.cost??""); const ak=key(`${activity?.title||""} ${activity?.location||""}`);
       const isTransfer=/(transfer|chauffeur|drive|travel to|pickup|drop[- ]?off)/i.test(String(activity?.title||""));
       const isMeal=/breakfast|brunch|lunch|dinner|dining|regional meal|restaurant|cafe tasting/i.test(`${activity?.title||""} ${activity?.description||""}`);
+      const isPaidService=/guided|private experience|boat|cruise|rafting|kayak|diving|climbing|bike|bicycle|rental|scenic flight|helicopter|safari|water[- ]?sport/i.test(`${activity?.title||""} ${activity?.description||""}`);
       // Food and local transport are reconciled in their own visible daily
       // categories. Do not accidentally consume the sightseeing pool again.
       if(isMeal || isTransfer) return;
-      const matched=isTransfer ? undefined : placeFees.find((p:any)=>ak.includes(p.key)||p.key.includes(ak));
+      const matched=isTransfer||isPaidService ? undefined : placeFees.find((p:any)=>ak.includes(p.key)||p.key.includes(ak));
       if(matched){ if(matched.free)activity.cost="Free"; else { const fee=Math.max(1,Math.round(matched.fee)); activity.cost=fmtMoney(fee); fixedAdmissionTotal+=fee; } return; }
-      const weight=firstMoneyNumber(raw); if(/\bfree\b|included/i.test(raw)||weight<=0){ if(!raw.trim()||/\bfree\b|included/i.test(raw))activity.cost="Free"; return; } serviceRows.push({activity,weight});
+      const weight=firstMoneyNumber(raw); if(isPaidService){serviceRows.push({activity,weight:Math.max(1,weight)});return;} if(/\bfree\b|included/i.test(raw)||weight<=0){ if(!raw.trim()||/\bfree\b|included/i.test(raw))activity.cost="Free"; return; } serviceRows.push({activity,weight});
     }); });
     const remaining=Math.max(0,Math.round(calculated.sightseeing-fixedAdmissionTotal));
-    if(serviceRows.length){ const totalWeight=serviceRows.reduce((n,r)=>n+r.weight,0)||serviceRows.length; let allocated=0; serviceRows.forEach((r,i)=>{ const amount=i===serviceRows.length-1?Math.max(0,remaining-allocated):Math.max(0,Math.round(remaining*r.weight/totalWeight)); allocated+=amount; r.activity.cost=amount>0?fmtMoney(amount):"Free / Included"; }); }
+    if(serviceRows.length){ const totalWeight=serviceRows.reduce((n,r)=>n+r.weight,0)||serviceRows.length; let allocated=0; serviceRows.forEach((r,i)=>{ const amount=i===serviceRows.length-1?Math.max(0,remaining-allocated):Math.max(0,Math.round(remaining*r.weight/totalWeight)); allocated+=amount; r.activity.cost=fmtMoney(Math.max(1,amount)); }); }
 
     // Rebuild each displayed day total from the final activity prices. This is
     // intentionally after admission/service normalization so a paid landmark
