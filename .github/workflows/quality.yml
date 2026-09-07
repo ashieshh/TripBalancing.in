@@ -15,7 +15,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run test:variants
+      - run: npm run test:quality
       - run: npm run lint
       - run: npx vite build
       - run: npx esbuild server.ts --platform=node --packages=external --bundle --format=esm --outfile=/tmp/tripbalancing-server.mjs

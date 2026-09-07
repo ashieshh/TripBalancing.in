@@ -3997,8 +3997,8 @@ function repairFinalScheduleCompleteness(itinerary:any) {
     }
     const arrival=activities.find(isArrival),departure=activities.find(isDeparture);
     const arrivalMinutes=arrival?parseTime(arrival.time):null,departureMinutes=departure?parseTime(departure.time):null;
-    const needsLunch=(!arrival||arrivalMinutes!>13*60)&&(!departure||departureMinutes!>=13*60);
-    const needsDinner=(!departure||departureMinutes!>=20*60)&&(!arrival||arrivalMinutes!<=17*60);
+    const needsLunch=(!arrival||(arrivalMinutes!==null&&arrivalMinutes<=13*60))&&(!departure||(departureMinutes!==null&&departureMinutes>=13*60));
+    const needsDinner=(!departure||(departureMinutes!==null&&departureMinutes>=20*60))&&(!arrival||(arrivalMinutes!==null&&arrivalMinutes<=17*60));
     if(needsLunch&&!activities.some((a:any)=>isMeal(a,'lunch')))activities.push(makeMeal('Lunch','12:30 PM'));
     if(needsDinner&&!activities.some((a:any)=>isMeal(a,'dinner')))activities.push(makeMeal('Dinner','07:30 PM'));
     activities.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
@@ -6872,11 +6872,24 @@ async function setupVite() {
   }
 }
 
-setupVite().then(() => {
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`TripBalancing Server running on http://0.0.0.0:${PORT}`);
-    if (process.env.AGODA_HOTEL_DATA_URL) {
-      void warmAgodaCityIndex(false);
-    }
+// Pure itinerary helpers are exported only to let CI exercise the exact same
+// repair/validation code used by production. Importing the module in test mode
+// must never bind a port or start Vite.
+export const itineraryQualityTestHooks = {
+  validateFinalUserFacingItinerary,
+  blockingFinalQualityErrors,
+  repairFinalScheduleCompleteness,
+  repairBlockingFinalQuality,
+  alignLodgingLogisticsToBudgetHotel,
+};
+
+if (process.env.NODE_ENV !== "test") {
+  setupVite().then(() => {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`TripBalancing Server running on http://0.0.0.0:${PORT}`);
+      if (process.env.AGODA_HOTEL_DATA_URL) {
+        void warmAgodaCityIndex(false);
+      }
+    });
   });
-});
+}

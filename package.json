@@ -10,6 +10,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test:variants": "node scripts/test-trip-variants.mjs",
+    "test:scenarios": "NODE_ENV=test node --import tsx scripts/test-trip-scenarios.mjs",
+    "test:quality": "npm run test:variants && npm run test:scenarios",
     "prebuild": "tsx scripts/build-agoda-city-index.ts"
   },
   "dependencies": {
