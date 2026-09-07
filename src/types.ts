@@ -1,7 +1,7 @@
 export type PlanningMode = 'known_destination' | 'help_choose';
 export type BudgetMode = 'fixed' | 'recommended';
 export type RevisitPreference = 'new_only' | 'allow_revisit' | 'favorites_only';
-export type TravelerType = 'Couple' | 'Honeymoon' | 'Family' | 'Friends' | 'Solo' | 'Business' | 'Senior Citizens' | 'Students' | 'Women-only Trip' | 'Group Trip' | 'Parents with Children';
+export type TravelerType = 'Couple' | 'Honeymoon' | 'Family' | 'Friends' | 'Solo' | 'Business' | 'Senior Citizens' | 'Students' | 'Women-only Trip' | 'Group Trip';
 
 export interface DestinationRecommendation {
   destination: string;
