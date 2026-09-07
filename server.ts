@@ -2314,7 +2314,7 @@ function deterministicRepairGeneratedItinerary(itinerary: any, destination: stri
   return sanitizeItineraryStrings(clone);
 }
 
-function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string): string[] {
+function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string, expectedTravelerType?: string): string[] {
   const errors: string[] = [];
   const dest = String(itinerary?.destination || '').toLowerCase();
   const generic = /(grand landmark|city center & central plaza|botanical & scenic gardens|local artisans market|budget inn|travelers cozy hostel|backpackers haven|central hotel|parkview residency|comfort suites|royal heritage resort|ritz sovereign|morning exploration & breakfast|guided landmark sightseeing|sunset vista & evening local dinner|main food street promenade|old town pastry shop|scenic overlook tea lounge)/i;
@@ -2381,6 +2381,44 @@ function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string
     if (themedDays < Math.max(1, Math.ceil(days.length * 0.75))) errors.push('Food Explorer style is not food-led on most days');
     if (foodActivityCount < Math.max(3, days.length)) errors.push('Food Explorer style lacks enough distinct culinary experiences');
     if (themes.filter((t:string) => /local flavors?/.test(t)).length >= Math.max(2, Math.ceil(days.length / 2))) errors.push('Food Explorer style uses repetitive generic Local Flavors day themes');
+  }
+
+  const styleSignals:Record<string,RegExp>={
+    'smart luxury':/(boutique|heritage hotel|premium|private transfer|chauffeur|priority|fine dining|spa|suite)/i,
+    'adventure':/(trek|hike|rafting|kayak|cycling|climb|dive|safari|adventure|water sport)/i,
+    'backpacker':/(hostel|guesthouse|public transport|local bus|walking tour|free walking|budget stay)/i,
+    'wellness & spa':/(spa|wellness|yoga|meditation|ayurveda|onsen|hammam|thermal|massage)/i,
+    'culture & history':/(heritage|museum|archaeological|historic|architecture|unesco|craft|cultural|temple|fort)/i,
+    'beach escape':/(beach|coast|waterfront|swim|water sport|sunset|island|sea)/i,
+    'nature & wildlife':/(national park|reserve|forest|wildlife|birding|waterfall|nature|eco|scenic)/i,
+    'shopping':/(market|bazaar|artisan|boutique|mall|shopping|craft district|specialty stores)/i,
+    'nightlife':/(night market|live music|club|lounge|rooftop|show|entertainment|late-night)/i
+  };
+  const requiredStyleSignal=styleSignals[style];
+  if(requiredStyleSignal&&activityText.filter((text:string)=>requiredStyleSignal.test(text)).length<Math.max(1,Math.ceil(days.length/2))) errors.push(`${expectedTravelStyle} style is not meaningfully reflected across the itinerary`);
+  if(style==='budget'&&/(private chauffeur|five[- ]star|luxury suite|yacht charter|fine dining tasting menu)/i.test(allActivityText)) errors.push('Budget style contains incompatible luxury-first choices');
+  if(style==='smart luxury'&&/(hostel|budget guesthouse|public bus as primary|ultra-luxury|presidential suite)/i.test(allActivityText)) errors.push('Smart Luxury contains choices outside its value-premium positioning');
+  if(style==='backpacker'&&/(private chauffeur|five[- ]star|luxury suite|yacht charter)/i.test(allActivityText)) errors.push('Backpacker style contains incompatible luxury-first choices');
+
+  const travelerType=String(expectedTravelerType||itinerary?.travelerType||'').toLowerCase().trim();
+  const travelerSignals:Record<string,RegExp>={
+    'couple':/(shared|couple|date-friendly|scenic dinner|comfortable pacing)/i,
+    'honeymoon':/(romantic|private|sunset|honeymoon|couple|scenic dinner)/i,
+    'family':/(family|flexible break|manageable transfer|mixed ages|convenient)/i,
+    'friends':/(social|group-friendly|shared dining|entertainment|friends)/i,
+    'solo':/(solo|easy navigation|central|optional social|practical transport)/i,
+    'business':/(efficient|reliable transport|work-friendly|connectivity|buffer time|punctual)/i,
+    'senior citizens':/(comfortable pacing|rest break|shorter walk|accessible|daytime|convenient transport)/i,
+    'students':/(student|value|public transport|free attraction|discount|low-cost)/i,
+    'women-only trip':/(well-connected|reputable accommodation|dependable transport|evening return|women)/i,
+    'group trip':/(meeting point|group-capacity|group transport|advance reservation|room allocation|coordination)/i,
+    'parents with children':/(child-friendly|children|stroller|restroom|meal break|shorter activity|family room)/i
+  };
+  const requiredTravelerSignal=travelerSignals[travelerType];
+  if(requiredTravelerSignal&&!requiredTravelerSignal.test(allActivityText)) errors.push(`${expectedTravelerType} traveler type is not meaningfully reflected in the itinerary`);
+  if(['family','senior citizens','parents with children'].includes(travelerType)){
+    const tooLate=days.flatMap((d:any)=>Array.isArray(d?.activities)?d.activities:[]).some((a:any)=>{const m=String(a?.time||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return false;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h>=22&&!/return|hotel|dinner/i.test(String(a?.title||''));});
+    if(tooLate)errors.push(`${expectedTravelerType} itinerary contains an unsuitable late-night activity`);
   }
 
   // Cross-day uniqueness and customer-copy gate before accepting Gemini output.
@@ -3778,6 +3816,41 @@ function alignLodgingLogisticsToBudgetHotel(itinerary:any) {
       if (!logistics) continue;
       activity.description = String(activity.description || '').replace(namedHotel, selected);
       if (/arrival|airport (?:pick[- ]?up|pickup)|check[- ]?in/i.test(`${activity?.title || ''} ${activity?.description || ''}`)) activity.location = selected;
+    }
+  }
+  return itinerary;
+}
+
+/** Ensure traveler-type choices remain visible even when the AI path is repaired or unavailable. */
+function applyTravelerTypePersonalization(itinerary:any, selectedType?:string) {
+  if(!itinerary||!Array.isArray(itinerary.days))return itinerary;
+  const type=String(selectedType||itinerary.travelerType||'Couple');
+  itinerary.travelerType=type;
+  const guidance:Record<string,string>={
+    Couple:'Keep shared experiences, comfortable pacing and date-friendly dining reservations.',
+    Honeymoon:'Prioritize privacy, romantic atmosphere and a memorable scenic or sunset moment.',
+    Family:'Use family-friendly timing, manageable transfers and flexible meal/rest breaks for mixed ages.',
+    Friends:'Use group-friendly reservations, shared dining and flexible social experiences.',
+    Solo:'Favor easy navigation, a convenient central base and optional social experiences.',
+    Business:'Protect punctual transfers, work-friendly connectivity and buffer time around commitments.',
+    'Senior Citizens':'Use comfortable daytime pacing, shorter walking stretches, seating breaks and convenient transport.',
+    Students:'Prioritize strong value, public transport, free/low-fee sights and available student discounts.',
+    'Women-only Trip':'Favor well-connected areas, reputable stays, dependable transport and a practical evening return plan.',
+    'Group Trip':'Confirm meeting points, group-capacity transport, advance reservations and room allocation.',
+    'Parents with Children':'Use child-friendly timing, shorter activity blocks, meal/restroom breaks and stroller-friendly alternatives where relevant.'
+  };
+  const note=guidance[type]||'Adjust pacing, lodging, dining and transport to the selected traveler group.';
+  const tips=Array.isArray(itinerary.travelTips)?itinerary.travelTips:[];
+  if(!tips.some((tip:any)=>String(tip).includes(note)))itinerary.travelTips=[note,...tips];
+  const firstDay=itinerary.days[0];
+  const anchor=(Array.isArray(firstDay?.activities)?firstDay.activities:[]).find((a:any)=>!/(arrival|airport|station|check[- ]?in|transfer)/i.test(String(a?.title||'')));
+  if(anchor&&!String(anchor.description||'').includes(note))anchor.description=`${String(anchor.description||'').trim()} ${note}`.trim();
+  if(['Family','Senior Citizens','Parents with Children'].includes(type)){
+    for(const day of itinerary.days){
+      day.activities=(Array.isArray(day?.activities)?day.activities:[]).filter((a:any)=>{
+        const m=String(a?.time||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return true;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;
+        return h<22||/dinner|return|hotel|transfer/i.test(String(a?.title||''));
+      });
     }
   }
   return itinerary;
@@ -5254,7 +5327,8 @@ Return the response in strict JSON format.`;
     }
 
     let parsedItinerary = sanitizeItineraryStrings(JSON.parse(jsonText.trim()));
-    let qualityErrors = validateGeneratedItinerary(parsedItinerary, travelStyle);
+    applyTravelerTypePersonalization(parsedItinerary, travelerType);
+    let qualityErrors = validateGeneratedItinerary(parsedItinerary, travelStyle, travelerType);
     if (qualityErrors.length) {
       console.warn(`[STYLE_QUALITY_REPAIR] ${travelStyle}: ${qualityErrors.join('; ')}`);
 
@@ -5262,7 +5336,8 @@ Return the response in strict JSON format.`;
       // semantics (dessert/beverage labelled as lunch/dinner), thin attraction
       // lists and thin food lists without spending another Gemini request.
       const deterministic = deterministicRepairGeneratedItinerary(parsedItinerary, destination, travelStyle);
-      const deterministicErrors = validateGeneratedItinerary(deterministic, travelStyle);
+      applyTravelerTypePersonalization(deterministic, travelerType);
+      const deterministicErrors = validateGeneratedItinerary(deterministic, travelStyle, travelerType);
       if (!deterministicErrors.length) {
         console.warn(`[STYLE_DETERMINISTIC_REPAIR] ${travelStyle}: repaired locally without another AI call.`);
         parsedItinerary = deterministic;
@@ -5279,7 +5354,8 @@ Return the response in strict JSON format.`;
         const repaired = await repairItineraryForStyle(ai, parsedItinerary, destination, travelStyle, travelerType, diffDays, qualityErrors);
         if (repaired) {
           const repairedDeterministic = deterministicRepairGeneratedItinerary(repaired, destination, travelStyle);
-          const repairedErrors = validateGeneratedItinerary(repairedDeterministic, travelStyle);
+          applyTravelerTypePersonalization(repairedDeterministic, travelerType);
+          const repairedErrors = validateGeneratedItinerary(repairedDeterministic, travelStyle, travelerType);
           if (!repairedErrors.length) {
             parsedItinerary = repairedDeterministic;
             qualityErrors = [];
@@ -5301,6 +5377,7 @@ Return the response in strict JSON format.`;
     // The form selection is authoritative. Gemini must never rewrite the selected
     // travel style (especially AI Budget Planner trips) back to Budget.
     parsedItinerary.travelStyle = travelStyle;
+    parsedItinerary.travelerType = travelerType;
     parsedItinerary.travelers = Number(travelers) || 1;
     // The user's submitted budget/currency is the single source of truth.
     // Gemini is not allowed to replace it with destination-local currency.
@@ -5330,6 +5407,7 @@ Return the response in strict JSON format.`;
     // Select the budgeted Agoda hotel before final content repair so arrival,
     // check-in and departure logistics use the same working accommodation.
     reconcileItineraryBudget(reconciledItinerary);
+    applyTravelerTypePersonalization(reconciledItinerary, travelerType);
     alignLodgingLogisticsToBudgetHotel(reconciledItinerary);
     removeRedundantGenericActivities(reconciledItinerary);
     // Last-mile deterministic repair: enrichment/final polish must not leave a
@@ -5374,7 +5452,7 @@ Return the response in strict JSON format.`;
     const geminiFailure = geminiHttpErrorPayload(error);
     console.warn(`[AI Itinerary Generation Error:${geminiFailure.classified.kind}]`, error?.message || error);
 
-    const { destination, origin, startDate, endDate, tripDays, budgetAmount, travelers, travelStyle, isAiBudgetPlanner } = req.body;
+    const { destination, origin, startDate, endDate, tripDays, budgetAmount, travelers, travelerType, travelStyle, isAiBudgetPlanner } = req.body;
 
     let diffDays = Number.parseInt(String(tripDays ?? ""), 10);
     if (!Number.isFinite(diffDays) || diffDays <= 0) {
@@ -5745,6 +5823,7 @@ Return the response in strict JSON format.`;
       tripDays: diffDays,
       budgetAmount: budgetAmount,
       travelers: Number(travelers) || 1,
+      travelerType: travelerType || 'Couple',
       travelStyle: travelStyle,
       days: daysList,
       estimatedBudgetBreakdown,
@@ -5908,6 +5987,7 @@ Return the response in strict JSON format.`;
     // as AI-generated trips. No destination or degraded mode may bypass hotel,
     // duplication, route, content-trust or budget consistency checks.
     reconcileItineraryBudget(reconciledFallback);
+    applyTravelerTypePersonalization(reconciledFallback, travelerType);
     alignLodgingLogisticsToBudgetHotel(reconciledFallback);
     removeRedundantGenericActivities(reconciledFallback);
     repairFinalContentTrust(reconciledFallback);
