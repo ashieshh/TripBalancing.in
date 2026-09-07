@@ -49,6 +49,7 @@ const TRAVELER_TYPES: Array<{ name: TravelerType; icon: string }> = [
   { name: "Students", icon: "🎓" },
   { name: "Women-only Trip", icon: "👭" },
   { name: "Group Trip", icon: "🚌" },
+  { name: "Parents with Children", icon: "👪" },
 ];
 
 const TRAVEL_STYLES: Array<{ name: TravelStyle; icon: string; description: string }> = [
@@ -117,7 +118,30 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
   const errorRef = useRef<HTMLDivElement | null>(null);
   const recommendationsRef = useRef<HTMLElement | null>(null);
   const [errorHighlight, setErrorHighlight] = useState(false);
-  const recommendBudget = budgetMode === "recommended" || travelStyle === "Smart Luxury";
+  const recommendBudget = budgetMode === "recommended";
+
+  const selectTravelerType = (nextType: TravelerType) => {
+    setTravelerType(nextType);
+    const minimums: Partial<Record<TravelerType, number>> = {
+      Couple: 2,
+      Honeymoon: 2,
+      Family: 2,
+      Friends: 2,
+      "Senior Citizens": 2,
+      Students: 2,
+      "Women-only Trip": 2,
+      "Group Trip": 3,
+      "Parents with Children": 2,
+    };
+    if (nextType === "Solo") setTravelers(1);
+    else setTravelers((current) => Math.max(current, minimums[nextType] || 1));
+  };
+
+  const selectTravelStyle = (nextStyle: TravelStyle) => {
+    setTravelStyle(nextStyle);
+    if (nextStyle === "Smart Luxury") setBudgetMode("recommended");
+  };
+  const minimumTravelersForType = travelerType === "Group Trip" ? 3 : travelerType === "Solo" ? 1 : ["Couple", "Honeymoon", "Family", "Friends", "Senior Citizens", "Students", "Women-only Trip", "Parents with Children"].includes(travelerType) ? 2 : 1;
 
   // Default the trip-budget currency from the country saved on the user's account,
   // while still allowing the user to choose any other supported currency afterwards.
@@ -594,21 +618,21 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
 
       <section id="wizard-travelers" className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Who is travelling?</p>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{TRAVELER_TYPES.map((item) => <ChoiceButton key={item.name} selected={travelerType === item.name} onClick={() => setTravelerType(item.name)}><span className="mr-1">{item.icon}</span>{item.name}</ChoiceButton>)}</div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{TRAVELER_TYPES.map((item) => <ChoiceButton key={item.name} selected={travelerType === item.name} onClick={() => selectTravelerType(item.name)}><span className="mr-1">{item.icon}</span>{item.name}</ChoiceButton>)}</div>
       </section>
 
       <section id="travel-style-section" className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Select your travel style</p>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(125px,1fr))] gap-3">{TRAVEL_STYLES.map((item) => <button key={item.name} type="button" onClick={() => setTravelStyle(item.name)} title={item.description} className={`min-h-[112px] rounded-2xl border-2 p-3 text-center transition ${travelStyle === item.name ? "border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-950/20 dark:text-teal-300" : "border-slate-100 bg-slate-50/50 text-slate-600 dark:border-slate-900 dark:bg-slate-900/30 dark:text-slate-400"}`}><div className="text-xl">{item.icon}</div><div className="mt-1 text-sm font-bold">{item.name}{item.name === "Smart Luxury" && <span className="ml-1 text-[9px] text-fuchsia-500">NEW</span>}</div><p className="mt-1 text-[10px] leading-tight opacity-75">{item.description}</p></button>)}</div>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(125px,1fr))] gap-3">{TRAVEL_STYLES.map((item) => <button key={item.name} type="button" onClick={() => selectTravelStyle(item.name)} title={item.description} className={`min-h-[112px] rounded-2xl border-2 p-3 text-center transition ${travelStyle === item.name ? "border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-950/20 dark:text-teal-300" : "border-slate-100 bg-slate-50/50 text-slate-600 dark:border-slate-900 dark:bg-slate-900/30 dark:text-slate-400"}`}><div className="text-xl">{item.icon}</div><div className="mt-1 text-sm font-bold">{item.name}{item.name === "Smart Luxury" && <span className="ml-1 text-[9px] text-fuchsia-500">NEW</span>}</div><p className="mt-1 text-[10px] leading-tight opacity-75">{item.description}</p></button>)}</div>
       </section>
 
       <section id="wizard-budget" className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Budget mode</p>
         <div className="grid gap-3 md:grid-cols-2">
-          <ChoiceButton selected={budgetMode === "fixed" && travelStyle !== "Smart Luxury"} onClick={() => { setBudgetMode("fixed"); if (travelStyle === "Smart Luxury") setTravelStyle("Luxury"); }}>💳 I have a fixed budget</ChoiceButton>
+          <ChoiceButton selected={budgetMode === "fixed"} onClick={() => setBudgetMode("fixed")}>💳 I have a fixed budget</ChoiceButton>
           <ChoiceButton selected={recommendBudget} onClick={() => setBudgetMode("recommended")}>✨ Recommend the ideal budget</ChoiceButton>
         </div>
-        {travelStyle === "Smart Luxury" && <p className="rounded-xl border border-fuchsia-200 bg-fuchsia-50 p-3 text-xs text-fuchsia-700 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20 dark:text-fuchsia-300">Smart Luxury automatically recommends the best-value luxury budget. It avoids wasteful ultra-luxury spending.</p>}
+        {travelStyle === "Smart Luxury" && <p className="rounded-xl border border-fuchsia-200 bg-fuchsia-50 p-3 text-xs text-fuchsia-700 dark:border-fuchsia-900/40 dark:bg-fuchsia-950/20 dark:text-fuchsia-300">Smart Luxury finds the best premium value. Use a fixed maximum budget or let TripBalancing recommend the ideal budget.</p>}
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
@@ -630,9 +654,9 @@ export default function TripForm({ onSubmit, loading }: TripFormProps) {
         ) : <div className="rounded-2xl border border-teal-200 bg-teal-50 p-4 text-sm text-teal-700 dark:border-teal-900/40 dark:bg-teal-950/20 dark:text-teal-300"><div className="flex flex-wrap items-center justify-between gap-3"><div><Sparkles className="mb-2 h-5 w-5" /><strong>AI budget recommendation enabled.</strong><p className="mt-1 text-xs opacity-80">You will receive minimum practical, recommended and premium estimates in your selected currency.</p></div><select value={budgetCurrency} onChange={(event) => setBudgetCurrency(event.target.value as BudgetCurrency)} className="rounded-xl border border-teal-300 bg-white px-3 py-2 text-sm font-bold text-slate-800 dark:border-teal-800 dark:bg-slate-900 dark:text-white" aria-label="Recommended budget currency"><option value="INR">₹ INR</option><option value="USD">$ USD</option><option value="AED">AED</option><option value="EUR">€ EUR</option><option value="GBP">£ GBP</option><option value="JPY">¥ JPY</option></select></div></div>}
         <FieldLabel icon={<Users className="h-4 w-4 text-teal-500" />} label="Number of travelers">
           <div className="flex items-center gap-3">
-            <button type="button" onClick={() => setTravelers((value) => Math.max(1, value - 1))} className="counter-btn" aria-label="Decrease travelers">−</button>
+            <button type="button" disabled={travelers <= minimumTravelersForType} onClick={() => setTravelers((value) => Math.max(minimumTravelersForType, value - 1))} className="counter-btn disabled:cursor-not-allowed disabled:opacity-40" aria-label="Decrease travelers">−</button>
             <input type="text" inputMode="numeric" value={travelers} readOnly aria-label="Number of travelers" className="input-field cursor-default text-center font-bold" />
-            <button type="button" onClick={() => setTravelers((value) => Math.min(50, value + 1))} className="counter-btn" aria-label="Increase travelers">+</button>
+            <button type="button" disabled={travelerType === "Solo"} onClick={() => setTravelers((value) => travelerType === "Solo" ? 1 : Math.min(50, value + 1))} className="counter-btn disabled:cursor-not-allowed disabled:opacity-40" aria-label="Increase travelers">+</button>
           </div>
         </FieldLabel>
       </section>
