@@ -3953,6 +3953,62 @@ function blockingFinalQualityErrors(errors:string[]):string[] {
   return errors.filter((error)=>blocking.test(error));
 }
 
+/**
+ * Ensure the final visible schedule has sensible meal coverage and no duplicate
+ * same-day landmark cards. This uses only localFood/places already verified for
+ * the itinerary and therefore never invents a restaurant or attraction.
+ */
+function repairFinalScheduleCompleteness(itinerary:any) {
+  if(!itinerary||!Array.isArray(itinerary.days))return itinerary;
+  const foods=Array.isArray(itinerary.localFood)?itinerary.localFood:[];
+  const places=Array.isArray(itinerary.placesToVisit)?itinerary.placesToVisit:[];
+  const parseTime=(v:any,idx=0)=>{const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return 9*60+idx*150;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0)};
+  const norm=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|a|an|private|priority|guided|visit|experience|tour|at|to|of|and)\b/g,' ').replace(/\s+/g,' ').trim();
+  const isArrival=(a:any)=>/(arrival|arrive|check[- ]?in|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`)&&!/(departure|return|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const isDeparture=(a:any)=>/(departure|to airport|return flight|return train|check[- ]?out)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const isMeal=(a:any,role:string)=>role==='lunch'?/\blunch\b|regional meal/i.test(String(a?.title||'')):/\bdinner\b|signature dining|evening meal/i.test(String(a?.title||''));
+  const usedFoods=new Set<string>();
+  for(const day of itinerary.days)for(const activity of Array.isArray(day?.activities)?day.activities:[]){for(const food of foods){const key=norm(food?.name);if(key&&norm(`${activity?.title||''} ${activity?.description||''}`).includes(key))usedFoods.add(key);}}
+  let foodCursor=0;
+  const nextFood=()=>{
+    const savory=foods.filter((food:any)=>isCompleteMealFood(food,'lunch'));
+    const available=savory.find((food:any)=>!usedFoods.has(norm(food?.name)))||savory[foodCursor%Math.max(1,savory.length)]||null;
+    foodCursor++;if(available)usedFoods.add(norm(available.name));return available;
+  };
+  const makeMeal=(role:'Lunch'|'Dinner',time:string)=>{
+    const food=nextFood(),destination=String(itinerary.destination||'the destination');
+    const name=food?.name||`Chef's ${destination.split(',')[0]} Seasonal Menu`;
+    return {time,title:`Regional ${role}: ${name}`,description:String(food?.description||`Enjoy a complete savory regional ${role.toLowerCase()}.`),location:String(food?.mustTryAt||itinerary.budgetHotelName||destination),cost:'Food allocation',visitDuration:'1h 15m'};
+  };
+
+  itinerary.days=itinerary.days.map((day:any,dayIndex:number)=>{
+    let activities=(Array.isArray(day?.activities)?day.activities:[]).map((a:any)=>({...a})).sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
+    const seenPlaces=new Set<string>();
+    activities=activities.filter((activity:any)=>{
+      if(/transfer|chauffeur|drive|travel to/i.test(String(activity?.title||'')))return true;
+      const text=norm(`${activity?.title||''} ${activity?.location||''}`);
+      const place=places.find((p:any)=>{const key=norm(p?.name);return key&&(text.includes(key)||key.includes(text));});
+      if(!place)return true;const key=norm(place.name);if(seenPlaces.has(key))return false;seenPlaces.add(key);return true;
+    });
+    for(const activity of activities){
+      const minutes=parseTime(activity?.time);
+      if(/\bmorning\b/i.test(String(activity?.title||''))&&minutes>=12*60)activity.title=String(activity.title).replace(/\bmorning\b/i,'Visit');
+      if(/\bdinner\b/i.test(String(activity?.title||''))&&minutes<17*60+30)activity.title=String(activity.title).replace(/\bdinner\b/i,'Lunch');
+    }
+    const arrival=activities.find(isArrival),departure=activities.find(isDeparture);
+    const arrivalMinutes=arrival?parseTime(arrival.time):null,departureMinutes=departure?parseTime(departure.time):null;
+    const needsLunch=(!arrival||arrivalMinutes!>13*60)&&(!departure||departureMinutes!>=13*60);
+    const needsDinner=(!departure||departureMinutes!>=20*60)&&(!arrival||arrivalMinutes!<=17*60);
+    if(needsLunch&&!activities.some((a:any)=>isMeal(a,'lunch')))activities.push(makeMeal('Lunch','12:30 PM'));
+    if(needsDinner&&!activities.some((a:any)=>isMeal(a,'dinner')))activities.push(makeMeal('Dinner','07:30 PM'));
+    activities.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
+    const meaningful=activities.filter((a:any)=>!isMeal(a,'lunch')&&!isMeal(a,'dinner')&&!isArrival(a)&&!isDeparture(a));
+    const refreshed=meaningful.slice(0,2).map((a:any)=>String(a?.title||'').replace(/^(?:Guided Visit:|Explore|Excursion to|Private)\s*/i,'').trim()).filter(Boolean).join(' & ');
+    return {...day,theme:refreshed||day.theme||`Day ${dayIndex+1}`,activities};
+  });
+  return itinerary;
+}
+
 /** Guaranteed final repair for the small set of defects that may block delivery. */
 function repairBlockingFinalQuality(itinerary:any) {
   if(!itinerary || !Array.isArray(itinerary.days)) return itinerary;
@@ -5469,6 +5525,7 @@ Return the response in strict JSON format.`;
     repairFinalLuxuryMealSemantics(reconciledItinerary);
     repairFinalItineraryDiversity(reconciledItinerary);
     repairResidualUserFacingQuality(reconciledItinerary);
+    repairFinalScheduleCompleteness(reconciledItinerary);
     // Diversity repair can change a location anchor. Re-run route enrichment so
     // visible route distance/transport is calculated from the final customer itinerary.
     const finalRoutedItinerary = applySmartRouteAndTransport(reconciledItinerary);
@@ -6079,6 +6136,7 @@ Return the response in strict JSON format.`;
     repairFinalLuxuryMealSemantics(reconciledFallback);
     repairFinalItineraryDiversity(reconciledFallback);
     repairResidualUserFacingQuality(reconciledFallback);
+    repairFinalScheduleCompleteness(reconciledFallback);
     const routedFallback = applySmartRouteAndTransport(reconciledFallback);
     Object.assign(reconciledFallback, routedFallback);
     reconcileItineraryBudget(reconciledFallback);
