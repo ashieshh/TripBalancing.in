@@ -3730,7 +3730,7 @@ function repairFinalItineraryDiversity(itinerary:any) {
 
   const suitableMeal=(f:any)=>{
     const text=`${f?.name||''} ${f?.description||''}`;
-    return !!f?.name && !/lassi|paan|chaat|dessert|sweet|tea|coffee|juice|drink|beverage|snack|ice cream|gelato|betel/i.test(text);
+    return !!f?.name && !/breakfast|brunch|lassi|paan|chaat|dessert|sweet|tea|coffee|juice|drink|beverage|snack|ice cream|gelato|betel/i.test(text);
   };
 
   for (const [dayIndex,day] of itinerary.days.entries()) {
@@ -3743,7 +3743,7 @@ function repairFinalItineraryDiversity(itinerary:any) {
       const recognized=foods.find((f:any)=>{const k=foodKey(f);return k&&activityText.includes(k);});
       const venueKey=norm(a?.location);
       const role=/dinner/i.test(title)?'Dinner':'Lunch';
-      const wrongMealRole=Boolean(recognized)&&!isCompleteMealFood(recognized,role.toLowerCase()==='dinner'?'dinner':'lunch');
+      const wrongMealRole=Boolean(recognized)&&(/\bbreakfast\b/i.test(`${recognized?.name||''} ${recognized?.description||''}`)||!isCompleteMealFood(recognized,role.toLowerCase()==='dinner'?'dinner':'lunch'));
       const duplicateFood=wrongMealRole||(recognized && usedFoods.has(foodKey(recognized)));
       const duplicateVenue=venueKey && usedMealVenues.has(venueKey) && venueKey!==norm(destination);
       if(!duplicateFood && !duplicateVenue){
@@ -3760,8 +3760,9 @@ function repairFinalItineraryDiversity(itinerary:any) {
         usedMealVenues.add(norm(a.location));
       } else {
         const city=destination.split(',')[0].trim()||destination;
-        a.title=`Regional ${role}: Chef's ${city} Seasonal Menu - Day ${dayIndex+1}`;
-        a.description=`Enjoy a complete savory seasonal ${role.toLowerCase()} appropriate to ${destination}. Confirm the current menu, reservation availability and price.`;
+        const menu=role==='Lunch'?'Market-Inspired Seasonal Lunch':'Evening Regional Specialties';
+        a.title=`Regional ${role}: Chef's ${city} ${menu} - Day ${dayIndex+1}`;
+        a.description=`Enjoy a complete savory ${role.toLowerCase()} appropriate to ${destination}, distinct from the day's other meal. Confirm the current menu, reservation availability and price.`;
         a.location=destination;
       }
       mealRepairs++;

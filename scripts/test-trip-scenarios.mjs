@@ -112,6 +112,7 @@ for(const destination of ['Reykjavik, Iceland','Cusco, Peru','Madagascar']){
   quality.finalizeCustomerSpecificity(trip);
   quality.repairFinalItineraryDiversity(trip);
   quality.repairBlockingFinalQuality(trip);
+  reconcileItineraryBudget(trip);
   assert.ok(trip.days[0].activities.some(a=>/arrival/i.test(a.title)),'arrival anchor must survive final transfer de-duplication');
   assert.ok(minutes(trip.days[0].activities.find(a=>/\blunch\b/i.test(a.title))?.time)<=15*60,'arrival-day lunch must remain in a realistic lunch window');
   assert.ok(money(trip.days[0].activities.find(a=>/rafting/i.test(`${a.title} ${a.description}`))?.cost)>0,'paid active service must not remain Free');
@@ -121,6 +122,11 @@ for(const destination of ['Reykjavik, Iceland','Cusco, Peru','Madagascar']){
     assert.ok(day.activities.filter(a=>/\bdinner\b/i.test(a.title)).length<=1,'day must not contain two dinners');
   }
   assert.equal(trip.days.at(-1).theme,'Departure Day','final-day theme must match its departure anchor');
+  const breakfastAsLunch={name:'Regional Breakfast Selection',description:'Choose a savory breakfast.',type:'both',mustTryAt:'Breakfast venue'};
+  trip.localFood.unshift(breakfastAsLunch);
+  trip.days[1].activities[0]={time:'12:30 PM',title:'Regional Lunch: Regional Breakfast Selection',description:breakfastAsLunch.description,location:breakfastAsLunch.mustTryAt,cost:'$10'};
+  quality.repairFinalItineraryDiversity(trip);
+  assert.ok(!/breakfast/i.test(`${trip.days[1].activities[0].title} ${trip.days[1].activities[0].description}`),'breakfast-labelled food must not survive in a lunch slot');
 }
 
 assert.doesNotMatch(pdf,/const simulatedRating\s*=/,'PDF must not fabricate food ratings');
