@@ -2396,6 +2396,10 @@ function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string
   };
   const requiredStyleSignal=styleSignals[style];
   if(requiredStyleSignal&&activityText.filter((text:string)=>requiredStyleSignal.test(text)).length<Math.max(1,Math.ceil(days.length/2))) errors.push(`${expectedTravelStyle} style is not meaningfully reflected across the itinerary`);
+  if(style==='beach escape'){
+    const namedCoastalPlaces=(Array.isArray(itinerary?.placesToVisit)?itinerary.placesToVisit:[]).filter((p:any)=>/\b(beach|coast|ocean|sea|island|bay|cove|shore|lagoon)\b/i.test(String(p?.name||'')));
+    if(!namedCoastalPlaces.length)errors.push('Beach Escape has no named coastal place verified in the destination recommendations');
+  }
   if(style==='budget'&&/(private chauffeur|five[- ]star|luxury suite|yacht charter|fine dining tasting menu)/i.test(allActivityText)) errors.push('Budget style contains incompatible luxury-first choices');
   if(style==='smart luxury'&&/(hostel|budget guesthouse|public bus as primary|ultra-luxury|presidential suite)/i.test(allActivityText)) errors.push('Smart Luxury contains choices outside its value-premium positioning');
   if(style==='backpacker'&&/(private chauffeur|five[- ]star|luxury suite|yacht charter)/i.test(allActivityText)) errors.push('Backpacker style contains incompatible luxury-first choices');
@@ -4888,7 +4892,9 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
       }, origin || "", destination, startDate, endDate, travelers);
       const cachedItinerary = finalizeItineraryForUser(cachedPrepared, diffDays);
       cachedItinerary.travelStyle = travelStyle;
+      cachedItinerary.travelerType = travelerType;
       cachedItinerary.travelers = Number(travelers) || 1;
+      applyTravelerTypePersonalization(cachedItinerary, travelerType);
       await attachLiveAgodaHotelsToItinerary(cachedItinerary);
       // Agoda is attached after structural finalization; reconcile once more so the
       // realistic estimate uses the recommended live Agoda nightly rate when available.
@@ -5347,6 +5353,11 @@ Return the response in strict JSON format.`;
       // Only use the AI repair pass when the deterministic repair cannot satisfy
       // the remaining quality rules. This prevents a harmless dessert/drink
       // classification mistake from discarding an otherwise good itinerary.
+      // A missing real coastal anchor cannot be repaired by asking the model to
+      // invent one. Use the curated destination-aware adaptation instead.
+      if (qualityErrors.some((error:string)=>error.includes('Beach Escape has no named coastal place'))) {
+        throw new Error('Beach Escape requires destination-compatible waterside adaptation');
+      }
       if (qualityErrors.length) {
         const repaired = await repairItineraryForStyle(ai, parsedItinerary, destination, travelStyle, travelerType, diffDays, qualityErrors);
         if (repaired) {
@@ -5752,13 +5763,33 @@ Return the response in strict JSON format.`;
           mkActivity('04:30 PM', `Second Heritage Stop: ${secondary.name}`, secondary.description, secondary.name, secondary.entryFee || 'Verify', dayIdx, 4)
         ];
       } else if (fallbackStyle === 'beach escape') {
-        theme = `Coastal Relaxation & Beach Time near ${primary.name}`;
-        activities = [
-          mkActivity('09:30 AM', 'Unhurried Beach Morning', `Use a suitable beach/coastal area near ${destination} with ample free time rather than over-scheduling.`, primary.name, 'Free / verify', dayIdx, 1),
-          mkActivity('01:00 PM', `Waterfront Lunch: ${meal1.name}`, meal1.description, meal1.mustTryAt, 'Per person', dayIdx, 2),
-          mkActivity('03:30 PM', 'Optional Coastal Activity / Resort Downtime', 'Choose swimming, kayaking, a boat ride or simply resort/beach downtime depending on sea and weather conditions.', `${destination} coast`, 'Optional', dayIdx, 3),
-          mkActivity('06:00 PM', 'Sunset by the Water', 'Keep sunset unscheduled enough to relax, photograph and enjoy the coast.', `${destination} waterfront`, 'Free', dayIdx, 4)
-        ];
+        const namedCoastal=details.places.find((p:any)=>/\b(beach|coast|ocean|sea|island|bay|cove|shore|lagoon)\b/i.test(`${p?.name||''} ${p?.description||''}`));
+        const namedWaterside=details.places.find((p:any)=>/\b(river|ghat|lake|waterfall|waterfront|canal|reservoir)\b/i.test(`${p?.name||''} ${p?.description||''}`));
+        if(namedCoastal){
+          theme=`Coastal Relaxation & Beach Time at ${namedCoastal.name}`;
+          activities=[
+            mkActivity('09:30 AM',`Unhurried Beach Morning at ${namedCoastal.name}`,namedCoastal.description,namedCoastal.name,namedCoastal.entryFee||'Free / verify',dayIdx,1),
+            mkActivity('01:00 PM',`Coastal Regional Lunch: ${meal1.name}`,meal1.description,meal1.mustTryAt,'Per person',dayIdx,2),
+            mkActivity('03:30 PM',`Relaxed Coastal Experience near ${primary.name}`,`Choose a safe, currently available water activity or unstructured coast time according to local weather, tide and safety guidance.`,namedCoastal.name,'Optional - verify',dayIdx,3),
+            mkActivity('06:00 PM','Coastal Sunset & Easy Evening',`Keep sunset relaxed at ${namedCoastal.name} and use dependable return transport.`,namedCoastal.name,'Free / verify',dayIdx,4)
+          ];
+        }else if(namedWaterside&&dayIdx===0){
+          theme=`Beach-style Relaxation Adapted to ${namedWaterside.name}`;
+          activities=[
+            mkActivity('09:30 AM',`Unhurried Waterside Time at ${namedWaterside.name}`,`${namedWaterside.description} This is an honest riverside/lakeside alternative because the destination has no verified beach.`,namedWaterside.name,namedWaterside.entryFee||'Free / verify',dayIdx,1),
+            mkActivity('01:00 PM',`Relaxed Regional Lunch: ${meal1.name}`,meal1.description,meal1.mustTryAt,'Per person',dayIdx,2),
+            mkActivity('03:30 PM',`Slow Cultural Exploration near ${secondary.name}`,secondary.description,secondary.name,secondary.entryFee||'Verify',dayIdx,3),
+            mkActivity('06:00 PM',`Sunset near ${namedWaterside.name}`,'Enjoy the public waterside atmosphere and photography without claiming coastal or sea activities.',namedWaterside.name,'Free / verify',dayIdx,4)
+          ];
+        }else{
+          theme=`Relaxed Scenic Escape: ${primary.name}`;
+          activities=[
+            mkActivity('09:30 AM',`Unhurried Morning at ${primary.name}`,`${primary.description} The selected Beach Escape pace is adapted honestly because no verified beach is available at this destination.`,primary.name,primary.entryFee||'Verify',dayIdx,1),
+            mkActivity('01:00 PM',`Relaxed Regional Lunch: ${meal1.name}`,meal1.description,meal1.mustTryAt,'Per person',dayIdx,2),
+            mkActivity('03:30 PM',`Slow Exploration at ${secondary.name}`,secondary.description,secondary.name,secondary.entryFee||'Verify',dayIdx,3),
+            mkActivity('06:00 PM','Resort / Hotel Leisure & Easy Evening','Keep an unhurried leisure block at the selected stay; do not claim beach, sea or coastal access.',`${destination} selected hotel`,'Included / verify',dayIdx,4)
+          ];
+        }
       } else if (fallbackStyle === 'nature & wildlife') {
         theme = `Nature, Wildlife & Responsible Exploration`;
         activities = [
