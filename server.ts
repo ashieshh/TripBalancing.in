@@ -3733,7 +3733,7 @@ function repairFinalItineraryDiversity(itinerary:any) {
     return !!f?.name && !/lassi|paan|chaat|dessert|sweet|tea|coffee|juice|drink|beverage|snack|ice cream|gelato|betel/i.test(text);
   };
 
-  for (const day of itinerary.days) {
+  for (const [dayIndex,day] of itinerary.days.entries()) {
     const acts=Array.isArray(day?.activities)?day.activities:[];
     for (const a of acts) {
       const title=String(a?.title||'');
@@ -3742,7 +3742,9 @@ function repairFinalItineraryDiversity(itinerary:any) {
       const activityText=norm(`${a?.title||''} ${a?.description||''}`);
       const recognized=foods.find((f:any)=>{const k=foodKey(f);return k&&activityText.includes(k);});
       const venueKey=norm(a?.location);
-      const duplicateFood=recognized && usedFoods.has(foodKey(recognized));
+      const role=/dinner/i.test(title)?'Dinner':'Lunch';
+      const wrongMealRole=Boolean(recognized)&&!isCompleteMealFood(recognized,role.toLowerCase()==='dinner'?'dinner':'lunch');
+      const duplicateFood=wrongMealRole||(recognized && usedFoods.has(foodKey(recognized)));
       const duplicateVenue=venueKey && usedMealVenues.has(venueKey) && venueKey!==norm(destination);
       if(!duplicateFood && !duplicateVenue){
         if(recognized) usedFoods.add(foodKey(recognized));
@@ -3750,7 +3752,6 @@ function repairFinalItineraryDiversity(itinerary:any) {
         continue;
       }
       const replacement=foods.find((f:any)=>suitableMeal(f)&&!usedFoods.has(foodKey(f)));
-      const role=/dinner/i.test(title)?'Dinner':'Lunch';
       if(replacement){
         a.title=`Upscale Regional ${role}: ${replacement.name}`;
         a.description=`${sanitizeGeneratedText(String(replacement.description||`Enjoy ${replacement.name} as a complete regional meal.`))} Serve it as a complete ${role.toLowerCase()} at a reputable, well-reviewed venue; confirm the current menu and price.`;
@@ -3758,8 +3759,9 @@ function repairFinalItineraryDiversity(itinerary:any) {
         usedFoods.add(foodKey(replacement));
         usedMealVenues.add(norm(a.location));
       } else {
-        a.title=`Upscale Regional ${role}: Different Local Seasonal Menu`;
-        a.description=`Choose a complete destination-appropriate ${role.toLowerCase()} at a reputable, well-reviewed venue in ${destination}, different from restaurants and named dishes already used on this trip. Confirm the current menu, reservation availability and price.`;
+        const city=destination.split(',')[0].trim()||destination;
+        a.title=`Regional ${role}: Chef's ${city} Seasonal Menu - Day ${dayIndex+1}`;
+        a.description=`Enjoy a complete savory seasonal ${role.toLowerCase()} appropriate to ${destination}. Confirm the current menu, reservation availability and price.`;
         a.location=destination;
       }
       mealRepairs++;
@@ -3970,6 +3972,7 @@ function repairFinalScheduleCompleteness(itinerary:any) {
   const foods=Array.isArray(itinerary.localFood)?itinerary.localFood:[];
   const places=Array.isArray(itinerary.placesToVisit)?itinerary.placesToVisit:[];
   const parseTime=(v:any,idx=0)=>{const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return 9*60+idx*150;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0)};
+  const fmtSimpleTime=(mins:number)=>{const h24=Math.floor(mins/60)%24,mm=mins%60,ap=h24>=12?'PM':'AM',h=h24%12||12;return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`};
   const norm=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|a|an|private|priority|guided|visit|experience|tour|at|to|of|and)\b/g,' ').replace(/\s+/g,' ').trim();
   const isArrival=(a:any)=>/(arrival|arrive|check[- ]?in|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`)&&!/(departure|return|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
   const isDeparture=(a:any)=>/(departure|to airport|return flight|return train|check[- ]?out)/i.test(`${a?.title||''} ${a?.description||''}`);
@@ -4002,12 +4005,34 @@ function repairFinalScheduleCompleteness(itinerary:any) {
       if(/\bmorning\b/i.test(String(activity?.title||''))&&minutes>=12*60)activity.title=String(activity.title).replace(/\bmorning\b/i,'Visit');
       if(/\bdinner\b/i.test(String(activity?.title||''))&&minutes<17*60+30)activity.title=String(activity.title).replace(/\bdinner\b/i,'Lunch');
     }
+    // Keep only one primary lunch and one primary dinner. Later repair passes can
+    // otherwise turn an added meal into a second slot on the same day.
+    const seenMealRoles=new Set<string>();
+    activities=activities.filter((activity:any)=>{
+      const role=isMeal(activity,'lunch')?'lunch':isMeal(activity,'dinner')?'dinner':'';
+      if(!role)return true;if(seenMealRoles.has(role))return false;seenMealRoles.add(role);return true;
+    });
     const arrival=activities.find(isArrival),departure=activities.find(isDeparture);
     const arrivalMinutes=arrival?parseTime(arrival.time):null,departureMinutes=departure?parseTime(departure.time):null;
     const needsLunch=(!arrival||(arrivalMinutes!==null&&arrivalMinutes<=13*60))&&(!departure||(departureMinutes!==null&&departureMinutes>=13*60));
     const needsDinner=(!departure||(departureMinutes!==null&&departureMinutes>=20*60))&&(!arrival||(arrivalMinutes!==null&&arrivalMinutes<=17*60));
     if(needsLunch&&!activities.some((a:any)=>isMeal(a,'lunch')))activities.push(makeMeal('Lunch','12:30 PM'));
     if(needsDinner&&!activities.some((a:any)=>isMeal(a,'dinner')))activities.push(makeMeal('Dinner','07:30 PM'));
+    // On a midday arrival, place lunch before any long excursion. This prevents a
+    // 2-4 hour activity from pushing the visible lunch card into late afternoon.
+    if(arrival&&arrivalMinutes!==null&&arrivalMinutes<=13*60){
+      const lunch=activities.find((a:any)=>isMeal(a,'lunch'));
+      if(lunch){const lunchTime=Math.max(12*60,arrivalMinutes+75);lunch.time=fmtSimpleTime(lunchTime);for(const activity of activities){if(activity===arrival||activity===lunch||isDeparture(activity)||isMeal(activity,'dinner'))continue;if(parseTime(activity.time)<lunchTime+90)activity.time=fmtSimpleTime(lunchTime+90);}}
+    }
+    const boundaryDay=Boolean(arrival||departure);
+    const meaningfulNow=activities.filter((a:any)=>!isMeal(a,'lunch')&&!isMeal(a,'dinner')&&!isArrival(a)&&!isDeparture(a));
+    if(!boundaryDay&&meaningfulNow.length===0){
+      const style=String(itinerary.travelStyle||'').toLowerCase();
+      const choices=/nature|adventure/.test(style)
+        ? [['Mapped Nature Area Walk','Choose a currently accessible mapped park, nature area or gentle trail; confirm weather, access and safety locally.'],['Scenic Landscape & Wildlife Observation','Use a public scenic area for low-impact observation, keeping to current local access and wildlife guidance.']]
+        : [['Central Neighborhood Discovery','Explore a mapped, well-connected neighborhood using current local listings and public access information.'],['Public Market, Park or Cultural District','Choose a currently operating public market, park or cultural district and confirm hours before visiting.']];
+      activities.push(...choices.map((choice,index)=>({time:index?'03:30 PM':'09:30 AM',title:`${choice[0]} - Day ${dayIndex+1}`,description:`${choice[1]} This flexible stop is anchored to ${itinerary.destination}.`,location:itinerary.destination,cost:'Check current local price',visitDuration:'1h 30m'})));
+    }
     activities.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
     const meaningful=activities.filter((a:any)=>!isMeal(a,'lunch')&&!isMeal(a,'dinner')&&!isArrival(a)&&!isDeparture(a));
     const refreshed=meaningful.slice(0,2).map((a:any)=>String(a?.title||'').replace(/^(?:Guided Visit:|Explore|Excursion to|Private)\s*/i,'').trim()).filter(Boolean).join(' & ');
@@ -4036,6 +4061,7 @@ function repairBlockingFinalQuality(itinerary:any) {
   itinerary.days=itinerary.days.map((day:any)=>{
     let acts=(Array.isArray(day?.activities)?day.activities:[]).map((activity:any)=>({...activity,title:cleanCopy(activity?.title),description:cleanCopy(activity?.description),cost:cleanCopy(activity?.cost),location:cleanCopy(activity?.location)})).sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
     acts=acts.filter((activity:any,index:number)=>{
+      if(isArrival(activity)||isDeparture(activity))return true;
       if(!/(transfer|chauffeur|drive|travel to)/i.test(String(activity?.title||'')))return true;
       const target=norm(activity?.location||String(activity?.title||'').replace(/^.*?\bto\b/i,''));
       if(!target||target===norm(destination))return true;
@@ -4053,7 +4079,9 @@ function repairBlockingFinalQuality(itinerary:any) {
       else if(minimum+Math.max(30,duration(current))>23*60+45){acts.splice(i,1);i--;}
       else current.time=fmtTime(minimum);
     }
-    return {...day,activities:acts};
+    const hasArrival=acts.some(isArrival),hasDeparture=acts.some(isDeparture);
+    const theme=hasDeparture?'Departure Day':hasArrival?'Arrival & Settling In':day.theme;
+    return {...day,theme,activities:acts};
   });
   return itinerary;
 }
@@ -4453,7 +4481,7 @@ function finalizeCustomerSpecificity(itinerary: any) {
       }
 
       const paidService=/boat|cruise|guided (?:tour|visit)|spa|massage|rafting|kayak|diving|climbing|bike|bicycle|rental|scenic flight|helicopter|safari|private experience/i.test(text);
-      const incorrectlyFree=(isTransfer||paidService)&&/^free(?:\s*\/\s*included)?$/i.test(String(a.cost||'').trim());
+      const incorrectlyFree=(isTransfer||paidService)&&/\bfree\b/i.test(String(a.cost||''))&&!/\bpaid\b/i.test(String(a.cost||''));
       if (!a.cost || vague.test(String(a.cost)) || incorrectlyFree) {
         a.cost=isTransfer?estimate(transferEstimate):isMeal?estimate(mealEstimate,'for all travelers'):estimate(activityEstimate);
       }
@@ -5572,8 +5600,8 @@ Return the response in strict JSON format.`;
     repairFinalItineraryDiversity(reconciledItinerary);
     repairResidualUserFacingQuality(reconciledItinerary);
     repairFinalScheduleCompleteness(reconciledItinerary);
-    repairFinalItineraryDiversity(reconciledItinerary);
     finalizeCustomerSpecificity(reconciledItinerary);
+    repairFinalItineraryDiversity(reconciledItinerary);
     // Diversity repair can change a location anchor. Re-run route enrichment so
     // visible route distance/transport is calculated from the final customer itinerary.
     const finalRoutedItinerary = applySmartRouteAndTransport(reconciledItinerary);
@@ -6173,8 +6201,8 @@ Return the response in strict JSON format.`;
     repairFinalItineraryDiversity(reconciledFallback);
     repairResidualUserFacingQuality(reconciledFallback);
     repairFinalScheduleCompleteness(reconciledFallback);
-    repairFinalItineraryDiversity(reconciledFallback);
     finalizeCustomerSpecificity(reconciledFallback);
+    repairFinalItineraryDiversity(reconciledFallback);
     const routedFallback = applySmartRouteAndTransport(reconciledFallback);
     Object.assign(reconciledFallback, routedFallback);
     reconcileItineraryBudget(reconciledFallback);
