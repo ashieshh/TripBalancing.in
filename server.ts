@@ -3953,6 +3953,46 @@ function blockingFinalQualityErrors(errors:string[]):string[] {
   return errors.filter((error)=>blocking.test(error));
 }
 
+/** Guaranteed final repair for the small set of defects that may block delivery. */
+function repairBlockingFinalQuality(itinerary:any) {
+  if(!itinerary || !Array.isArray(itinerary.days)) return itinerary;
+  const destination=String(itinerary.destination||'');
+  const parseTime=(v:any,idx=0)=>{const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return 9*60+idx*150;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0)};
+  const fmtTime=(mins:number)=>{mins=Math.max(5*60,Math.min(23*60+45,Math.ceil(mins/15)*15));const h24=Math.floor(mins/60),mm=mins%60,ap=h24>=12?'PM':'AM',h=h24%12||12;return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`};
+  const duration=(a:any)=>{const raw=String(a?.visitDuration||'').toLowerCase();const range=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(range)return /min/.test(range[3])?Number(range[2]):Number(range[2])*60;const one=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(one)return /min/.test(one[2])?Number(one[1]):Number(one[1])*60;return /meal|breakfast|lunch|dinner|tasting/i.test(String(a?.title||''))?75:60};
+  const isArrival=(a:any)=>/(arrival|arrive|airport transfer.*stay|airport transfer.*check|station transfer.*stay|hotel check[- ]?in|heritage check[- ]?in|premium stay|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`)&&!/(departure|return flight|head .*airport|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const isDeparture=(a:any)=>/(departure transfer|airport departure|transfer to airport|to the airport|head .*airport|return flight|return train|station departure|check[- ]?out.*airport|airport lounge.*before boarding)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const norm=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|a|an|private|priority|visit|experience|tour|regional|signature|local|at|to|of|and)\b/g,' ').replace(/\s+/g,' ').trim();
+  const cleanCopy=(value:any)=>{
+    let text=String(value||'');
+    text=text.replace(/\bdo not invent[^.]*\.?/gi,'Choose an established, destination-specific option.').replace(/\bthis must be a complete[^.]*\.?/gi,'Enjoy this as a complete savory regional meal.').replace(/\btreat desserts?[^.]*\.?/gi,'Desserts and beverages remain optional tasting stops.').replace(/\bdo not use a casual[^.]*\.?/gi,'Choose an established dining venue.').replace(/\buse a reputable venue\b/gi,'Choose an established venue').replace(/\bkeep this meal distinct[^.]*\.?/gi,'Choose a different regional specialty for this meal.').replace(/\buse this block for[^.]*\.?/gi,'Explore the surrounding area at a relaxed pace.').replace(/\bkeep the pace unhurried\b/gi,'Enjoy a relaxed pace').replace(/\bverify live rate\b/gi,'confirm the current price');
+    if(!/goa|india/i.test(destination)) text=text.replace(/\bGoan\b/gi,'local');
+    return sanitizeGeneratedText(text);
+  };
+  itinerary.days=itinerary.days.map((day:any)=>{
+    let acts=(Array.isArray(day?.activities)?day.activities:[]).map((activity:any)=>({...activity,title:cleanCopy(activity?.title),description:cleanCopy(activity?.description),cost:cleanCopy(activity?.cost),location:cleanCopy(activity?.location)})).sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
+    acts=acts.filter((activity:any,index:number)=>{
+      if(!/(transfer|chauffeur|drive|travel to)/i.test(String(activity?.title||'')))return true;
+      const target=norm(activity?.location||String(activity?.title||'').replace(/^.*?\bto\b/i,''));
+      if(!target)return true;
+      return !acts.some((other:any,otherIndex:number)=>otherIndex!==index&&!/(transfer|chauffeur|drive|travel to)/i.test(String(other?.title||''))&&norm(`${other?.title||''} ${other?.location||''}`).includes(target));
+    });
+    const arrival=acts.find(isArrival);
+    if(arrival){const boundary=parseTime(arrival.time);acts=acts.filter((a:any)=>a===arrival||isArrival(a)||parseTime(a.time)>=boundary);}
+    const departure=acts.find(isDeparture);
+    if(departure){const boundary=parseTime(departure.time);acts=acts.filter((a:any)=>a===departure||parseTime(a.time)<=boundary);}
+    acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
+    for(let i=1;i<acts.length;i++){
+      const previous=acts[i-1],current=acts[i],minimum=parseTime(previous.time,i-1)+Math.max(30,duration(previous))+15;
+      if(parseTime(current.time,i)>=minimum)continue;
+      if(isDeparture(current)){while(i>0&&parseTime(current.time,i)<parseTime(acts[i-1].time,i-1)+Math.max(30,duration(acts[i-1]))){acts.splice(i-1,1);i--;}}
+      else current.time=fmtTime(minimum);
+    }
+    return {...day,activities:acts};
+  });
+  return itinerary;
+}
+
 /** Deterministic final repair shared by AI and curated itineraries. */
 function repairResidualUserFacingQuality(itinerary:any) {
   if(!itinerary || !Array.isArray(itinerary.days)) return itinerary;
@@ -5433,6 +5473,7 @@ Return the response in strict JSON format.`;
     Object.assign(reconciledItinerary, finalRoutedItinerary);
     // Re-price accommodation from the selected-style Agoda recommendation.
     reconcileItineraryBudget(reconciledItinerary);
+    repairBlockingFinalQuality(reconciledItinerary);
     const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
     const finalBlockingErrors=blockingFinalQualityErrors(finalUserFacingErrors);
     if (finalUserFacingErrors.length) console.warn(`[FINAL_ITINERARY_ADVISORY] ${finalUserFacingErrors.join('; ')}`);
@@ -6027,6 +6068,7 @@ Return the response in strict JSON format.`;
     const routedFallback = applySmartRouteAndTransport(reconciledFallback);
     Object.assign(reconciledFallback, routedFallback);
     reconcileItineraryBudget(reconciledFallback);
+    repairBlockingFinalQuality(reconciledFallback);
     const fallbackUserFacingErrors = validateFinalUserFacingItinerary(reconciledFallback);
     const fallbackBlockingErrors=blockingFinalQualityErrors(fallbackUserFacingErrors);
     if (fallbackUserFacingErrors.length) console.warn(`[FINAL_FALLBACK_ADVISORY] ${fallbackUserFacingErrors.join('; ')}`);
