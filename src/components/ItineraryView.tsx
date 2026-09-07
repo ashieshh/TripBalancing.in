@@ -847,6 +847,7 @@ export default function ItineraryView({
             <p className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-teal-50 font-medium">
               <span className="flex items-center gap-1"><Calendar className="w-4 h-4" /> {itinerary.startDate} to {itinerary.endDate}</span>
               <span className="flex items-center gap-1"><Users className="w-4 h-4" /> {itinerary.travelers} {itinerary.travelers === 1 ? 'traveler' : 'travelers'}</span>
+              {itinerary.travelerType && <span className="flex items-center gap-1"><Users className="w-4 h-4" /> {itinerary.travelerType}</span>}
               <span className="flex items-center gap-1"><Briefcase className="w-4 h-4" /> {itinerary.travelStyle} Style</span>
             </p>
 
