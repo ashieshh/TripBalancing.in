@@ -96,6 +96,33 @@ for(const destination of ['Reykjavik, Iceland','Cusco, Peru','Madagascar']){
   assert.ok(details.places.every(place=>/confirm|choose|use a mapped|begin in/i.test(place.description)),`${destination}: fallback must label confirmation instead of fabricating facts`);
 }
 
+// Regression for the Bali/Nepal PDFs: boundary anchors must survive, arrival-day
+// lunch must stay in a lunch window, sparse full days must be filled honestly,
+// meal roles must not duplicate, and active paid services must not display Free.
+{
+  const trip=fixture('Bali, Indonesia','Mumbai, India',['Tanah Lot Temple','Uluwatu Temple','Tegallalang Rice Terraces'],6,'gemini','recommended',0);
+  const arrival=trip.days[0].activities.find(a=>/arrival/i.test(a.title));
+  arrival.time='11:00 AM';
+  trip.days[0].activities.push({time:'12:15 PM',title:'Early Nature / Wildlife Excursion',description:'Guided rafting and bicycle rental experience.',location:trip.budgetHotelName,cost:'Free / verify',visitDuration:'2–4 hours'});
+  trip.days[0].activities.push({time:'04:45 PM',title:'Local Lunch: Bali Savory Dish 1',description:'A complete savory regional meal.',location:'Local restaurant',cost:'$10',visitDuration:'1h 15m'});
+  trip.days[3].activities=[];
+  trip.days[4].activities=[];
+  trip.days.at(-1).theme='Arrival & Settling In';
+  quality.repairFinalScheduleCompleteness(trip);
+  quality.finalizeCustomerSpecificity(trip);
+  quality.repairFinalItineraryDiversity(trip);
+  quality.repairBlockingFinalQuality(trip);
+  assert.ok(trip.days[0].activities.some(a=>/arrival/i.test(a.title)),'arrival anchor must survive final transfer de-duplication');
+  assert.ok(minutes(trip.days[0].activities.find(a=>/\blunch\b/i.test(a.title))?.time)<=15*60,'arrival-day lunch must remain in a realistic lunch window');
+  assert.ok(money(trip.days[0].activities.find(a=>/rafting/i.test(`${a.title} ${a.description}`))?.cost)>0,'paid active service must not remain Free');
+  for(const index of [3,4])assert.ok(trip.days[index].activities.filter(a=>!/lunch|dinner/i.test(a.title)).length>=2,`sparse full day ${index+1} must receive meaningful planning blocks`);
+  for(const day of trip.days){
+    assert.ok(day.activities.filter(a=>/\blunch\b/i.test(a.title)).length<=1,'day must not contain two lunches');
+    assert.ok(day.activities.filter(a=>/\bdinner\b/i.test(a.title)).length<=1,'day must not contain two dinners');
+  }
+  assert.equal(trip.days.at(-1).theme,'Departure Day','final-day theme must match its departure anchor');
+}
+
 assert.doesNotMatch(pdf,/const simulatedRating\s*=/,'PDF must not fabricate food ratings');
 assert.doesNotMatch(pdf,/const rating\s*=\s*4\.5/,'PDF must not fabricate attraction ratings');
 assert.match(pdf,/finalBlockReserve/,'PDF must keep the last activity with its route/summary panels');
