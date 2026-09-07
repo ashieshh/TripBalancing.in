@@ -1482,7 +1482,7 @@ export const exportPremiumTravelPDF = async (
     { label: (itinerary as any).isAiBudgetPlanner ? "AI RECOMMENDED BUDGET" : "PLANNED BUDGET", val: String((itinerary as any).plannedBudget || itinerary.budgetAmount || "Bespoke"), color: [13, 148, 136] },
     { label: "REALISTIC ESTIMATE", val: String((itinerary as any).realisticEstimatedCost || itinerary.estimatedBudgetBreakdown?.total || "Calculating"), color: [2, 132, 199] },
     { label: "TRIP DURATION", val: `${itinerary.days?.length || 0} Days`, color: [79, 70, 229] },
-    { label: "TOTAL TRAVELERS", val: `${itinerary.travelers} Pax`, color: [217, 119, 6] },
+    { label: "TRAVEL PARTY", val: `${itinerary.travelers} Pax${itinerary.travelerType ? ` - ${itinerary.travelerType}` : ""}`, color: [217, 119, 6] },
     { label: "TRAVEL STYLE", val: String(itinerary.travelStyle || "Premium").toUpperCase(), color: [20, 184, 166] },
     { label: "GENERATION DATE", val: coverTodayStr.toUpperCase(), color: [225, 29, 72] },
     itinerary.origin
