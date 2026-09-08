@@ -2458,7 +2458,7 @@ function isCompleteMealFood(food: any, role: 'lunch' | 'dinner' = 'dinner') {
   const text = `${food?.name || ''} ${food?.description || ''} ${food?.type || ''}`.toLowerCase();
 
   if (/(dessert|beverage|drink|tasting|snack|sweet)/i.test(kind)) return false;
-  if (/(dessert|sweet|cake|pastr(?:y|ies)|ice cream|gelato|pudding|cookie|biscuit|macaron|bebinca|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni|coffee|tea|juice|lassi|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|digestive|tasting|snack)/i.test(text)) return false;
+  if (/(dessert|sweet|cake|pastr(?:y|ies)|ice cream|gelato|pudding|cookie|biscuit|macaron|bebinca|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni|coffee|tea|juice|lassi|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|digestive|tasting|snack|suppl[iì]|rice balls?|arancini)/i.test(text)) return false;
   if (/(breakfast|bakery|bread paired|small plate)/i.test(text)) return false;
   if (role === 'dinner' && /(omelette|toast|salad only)/i.test(text)) return false;
   return true;
@@ -4068,6 +4068,7 @@ function repairBlockingFinalQuality(itinerary:any) {
   const travelMinutes=(a:any)=>{const raw=String(a?.travelTimeFromPrevious||'').toLowerCase();const hours=raw.match(/(\d+(?:\.\d+)?)\s*h(?:our)?/);const mins=raw.match(/(\d+)\s*m(?:in)?/);return Math.round((hours?Number(hours[1])*60:0)+(mins?Number(mins[1]):0));};
   const isArrival=(a:any)=>/(arrival|arrive|airport transfer.*stay|airport transfer.*check|station transfer.*stay|hotel check[- ]?in|heritage check[- ]?in|premium stay|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`)&&!/(departure|return flight|head .*airport|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
   const isDeparture=(a:any)=>/(departure transfer|airport departure|transfer to airport|to the airport|head .*airport|return flight|return train|station departure|check[- ]?out.*airport|airport lounge.*before boarding)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const mealRole=(a:any)=>{const label=String(a?.title||'').split(':',1)[0];return /\blunch\b|regional meal/i.test(label)?'lunch':/\bdinner\b|signature dining|evening meal/i.test(label)?'dinner':'';};
   const norm=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|a|an|private|priority|visit|experience|tour|regional|signature|local|at|to|of|and)\b/g,' ').replace(/\s+/g,' ').trim();
   const cleanCopy=(value:any)=>{
     let text=String(value||'');
@@ -4084,18 +4085,42 @@ function repairBlockingFinalQuality(itinerary:any) {
       if(!target||target===norm(destination))return true;
       return !acts.some((other:any,otherIndex:number)=>otherIndex!==index&&!/(transfer|chauffeur|drive|travel to)/i.test(String(other?.title||''))&&norm(`${other?.title||''} ${other?.location||''}`).includes(target));
     });
+    // Customer-copy normalization can change two different placeholders into the
+    // same service (for example two identical hotel spa sessions). Keep the best
+    // priced/customer-ready copy, never both.
+    const duplicateKeys=new Map<string,any[]>();
+    for(const activity of acts){
+      if(isArrival(activity)||isDeparture(activity)||mealRole(activity))continue;
+      const key=norm(`${activity?.title||''} ${activity?.location||''}`);
+      if(!key)continue;
+      const group=duplicateKeys.get(key)||[];group.push(activity);duplicateKeys.set(key,group);
+    }
+    for(const group of duplicateKeys.values())if(group.length>1){
+      const best=group.slice().sort((a:any,b:any)=>{const score=(x:any)=>/food allocation/i.test(String(x?.cost||''))?-2:/[0-9]/.test(String(x?.cost||''))?2:0;return score(b)-score(a);})[0];
+      acts=acts.filter((activity:any)=>!group.includes(activity)||activity===best);
+    }
+    for(const activity of acts)if(!mealRole(activity)&&/food allocation/i.test(String(activity?.cost||'')))activity.cost='Activity allocation';
     const arrival=acts.find(isArrival);
     if(arrival){const boundary=parseTime(arrival.time);acts=acts.filter((a:any)=>a===arrival||isArrival(a)||parseTime(a.time)>=boundary);}
     const departure=acts.find(isDeparture);
     if(departure){const boundary=parseTime(departure.time);acts=acts.filter((a:any)=>a===departure||parseTime(a.time)<=boundary);}
+
+    // A late transformation must not leave a boundary day without lunch. Restore
+    // one destination food before the final arrival-day cap and chronology pass.
+    if(arrival&&parseTime(arrival.time)<=13*60&&!acts.some((a:any)=>mealRole(a)==='lunch')){
+      const foods=Array.isArray(itinerary.localFood)?itinerary.localFood:[];
+      const usedText=acts.map((a:any)=>`${a?.title||''} ${a?.description||''}`).join(' ').toLowerCase();
+      const food=foods.find((f:any)=>isCompleteMealFood(f,'lunch')&&!usedText.includes(String(f?.name||'').toLowerCase()));
+      const city=destination.split(',')[0].trim()||destination;
+      acts.push({time:fmtTime(Math.max(12*60+30,parseTime(arrival.time)+90)),title:`Regional Lunch: ${food?.name||`Chef's ${city} Lunch Menu`}`,description:String(food?.description||`Enjoy a complete savory regional lunch in ${destination}.`),location:String(food?.mustTryAt||itinerary.budgetHotelName||destination),cost:'Food allocation',visitDuration:'1h 15m'});
+    }
 
     // Arrival days must remain usable after a tiring journey and must fit as one
     // coherent PDF day. Keep the arrival anchor, one lunch, one dinner and at
     // most one purposeful experience (two only for a genuinely early arrival).
     // Late generic blocks must never turn an arrival day into a six-stop schedule.
     if(arrival){
-      const role=(a:any)=>{const label=String(a?.title||'').split(':',1)[0];return /\blunch\b|regional meal/i.test(label)?'lunch':/\bdinner\b|signature dining|evening meal/i.test(label)?'dinner':'';};
-      const sightseeing=acts.filter((a:any)=>a!==arrival&&!isArrival(a)&&!isDeparture(a)&&!role(a));
+      const sightseeing=acts.filter((a:any)=>a!==arrival&&!isArrival(a)&&!isDeparture(a)&&!mealRole(a));
       const allowed=parseTime(arrival.time)<=9*60+30?2:1;
       const style=String(itinerary.travelStyle||'').toLowerCase();
       sightseeing.sort((a:any,b:any)=>{
@@ -5680,6 +5705,7 @@ Return the response in strict JSON format.`;
     // Re-price accommodation from the selected-style Agoda recommendation.
     reconcileItineraryBudget(reconciledItinerary);
     repairBlockingFinalQuality(reconciledItinerary);
+    reconcileItineraryBudget(reconciledItinerary);
     const finalUserFacingErrors = validateFinalUserFacingItinerary(reconciledItinerary);
     const finalBlockingErrors=blockingFinalQualityErrors(finalUserFacingErrors);
     if (finalUserFacingErrors.length) console.warn(`[FINAL_ITINERARY_ADVISORY] ${finalUserFacingErrors.join('; ')}`);
@@ -6310,6 +6336,7 @@ Return the response in strict JSON format.`;
     Object.assign(reconciledFallback, routedFallback);
     reconcileItineraryBudget(reconciledFallback);
     repairBlockingFinalQuality(reconciledFallback);
+    reconcileItineraryBudget(reconciledFallback);
     const fallbackUserFacingErrors = validateFinalUserFacingItinerary(reconciledFallback);
     const fallbackBlockingErrors=blockingFinalQualityErrors(fallbackUserFacingErrors);
     if (fallbackUserFacingErrors.length) console.warn(`[FINAL_FALLBACK_ADVISORY] ${fallbackUserFacingErrors.join('; ')}`);
