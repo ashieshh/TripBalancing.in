@@ -127,6 +127,31 @@ for(const destination of ['Reykjavik, Iceland','Cusco, Peru','Madagascar']){
   trip.days[1].activities[0]={time:'12:30 PM',title:'Regional Lunch: Regional Breakfast Selection',description:breakfastAsLunch.description,location:breakfastAsLunch.mustTryAt,cost:'$10'};
   quality.repairFinalItineraryDiversity(trip);
   assert.ok(!/breakfast/i.test(`${trip.days[1].activities[0].title} ${trip.days[1].activities[0].description}`),'breakfast-labelled food must not survive in a lunch slot');
+
+  const crossedMeals={
+    destination:'Dubai Emirate, United Arab Emirates',
+    localFood:[
+      {name:'Regional Lunch Selection',description:'A complete regional lunch.',mustTryAt:'Lunch venue'},
+      {name:'Seasonal Local Lunch Menu',description:'A different complete seasonal lunch.',mustTryAt:'Lunch venue two'},
+      {name:'Regional Dinner Selection',description:'A complete regional dinner.',mustTryAt:'Dinner venue'},
+      {name:'Seasonal Local Dinner Menu',description:'A distinct evening dinner.',mustTryAt:'Dinner venue two'}
+    ],
+    placesToVisit:[],
+    days:[{activities:[
+      {time:'12:30 PM',title:'Lunch: Regional Lunch Selection',description:'A complete regional lunch.',location:'Lunch venue'},
+      {time:'07:30 PM',title:'Regional Dinner: Seasonal Local Lunch Menu',description:'A different complete seasonal lunch.',location:'Lunch venue two'}
+    ]},{activities:[
+      {time:'12:30 PM',title:'Upscale Regional Lunch: Regional Dinner Selection',description:'A complete regional dinner.',location:'Dinner venue'},
+      {time:'07:30 PM',title:'Regional Dinner: Seasonal Local Dinner Menu',description:'A distinct evening dinner.',location:'Dinner venue two'}
+    ]}]
+  };
+  quality.repairFinalItineraryDiversity(crossedMeals);
+  for(const day of crossedMeals.days){
+    const lunch=day.activities.find(a=>/\blunch\b/i.test(a.title));
+    const dinner=day.activities.find(a=>/\bdinner\b/i.test(a.title));
+    assert.doesNotMatch(`${lunch.title} ${lunch.description}`,/\bdinner\b/i,'a lunch replacement must never reuse dinner-labelled food');
+    assert.doesNotMatch(`${dinner.title} ${dinner.description}`,/\blunch\b/i,'a dinner replacement must never reuse lunch-labelled food');
+  }
 }
 
 {
