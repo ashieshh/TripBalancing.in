@@ -24,6 +24,13 @@ const money = value => Number(String(value ?? '').replace(/,/g, '').match(/[0-9]
 const minutes = value => { const m=String(value||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/); if(!m)return 0; let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0); };
 const normalize = value => String(value||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
 
+// A resilient generic planning profile may help internal repair logic, but the
+// production endpoint must never return it as a completed Premium Guide.
+const serverSource=fs.readFileSync(new URL('../server.ts',import.meta.url),'utf8');
+assert.match(serverSource,/GLOBAL_FALLBACK_REJECTED/,'generic fallback must be rejected before customer delivery');
+assert.match(serverSource,/DESTINATION_CONTENT_UNAVAILABLE/,'generic fallback rejection must return a stable retry code');
+assert.match(serverSource,/trip allowance has not been used/,'generic fallback rejection must protect the customer trip allowance');
+
 function fixture(destination, origin, placeNames, dayCount, source, budgetMode, scenarioIndex) {
   const places=placeNames.map((name,index)=>({name,description:`Verified visitor context for ${name}.`,bestTimeToVisit:index===0?'Morning':'Daytime',entryFee:index===1?'$12':'Free'}));
   const foods=Array.from({length:8},(_,index)=>({name:`${destination.split(',')[0]} Savory Dish ${index+1}`,description:'A complete savory regional meal with local accompaniments.',type:'veg',mustTryAt:`${destination.split(',')[0]} established restaurant ${index+1}`}));
