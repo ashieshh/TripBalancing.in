@@ -5850,6 +5850,28 @@ Return the response in strict JSON format.`;
         ],
         packing: ["Comfortable shoes for cobblestones", "Windproof light jacket", "European-style travel adapter", "Small AZN cash notes", "Modest clothing for mosques", "Sun protection"],
         tips: ["Use Baku Metro for suitable central routes and Bolt/taxi for point-to-point travel.", "Allow a road transfer or organized tour for Gobustan and Absheron Peninsula sights.", "Baku can be windy, especially at exposed viewpoints.", "Use official/app-based taxis rather than accepting unsolicited airport rides."]
+      },
+      dubai: {
+        places: [
+          { name: "Burj Khalifa and Downtown Dubai", description: "Dubai's landmark tower and the surrounding Downtown district beside Dubai Mall.", bestTimeToVisit: "Late afternoon / evening", entryFee: "Downtown public areas free; observation decks are paid" },
+          { name: "Dubai Mall", description: "Major shopping and entertainment complex in Downtown Dubai with extensive retail, dining and indoor attractions.", bestTimeToVisit: "Late morning / afternoon", entryFee: "Free to enter; attractions and purchases extra" },
+          { name: "Al Fahidi Historical Neighbourhood", description: "Restored lanes, courtyard buildings and cultural spaces illustrating Dubai's pre-oil urban heritage.", bestTimeToVisit: "Morning", entryFee: "Public lanes free; selected museums may charge" },
+          { name: "Dubai Creek and Gold Souk", description: "Historic creek crossing and traditional Deira trading district known for gold, spice and textile shops.", bestTimeToVisit: "Late afternoon / evening", entryFee: "Souks free to browse; abra crossing and purchases extra" },
+          { name: "Museum of the Future", description: "Contemporary museum on Sheikh Zayed Road focused on future technology, design and society.", bestTimeToVisit: "Reserved daytime slot", entryFee: "Paid timed ticket" },
+          { name: "Madinat Jumeirah Souk", description: "Covered retail and dining complex inspired by traditional architecture, with waterways and views toward Burj Al Arab.", bestTimeToVisit: "Late afternoon / evening", entryFee: "Free to enter; purchases extra" }
+        ],
+        food: [
+          { name: "Machboos", description: "Emirati spiced rice served with chicken, lamb or fish.", type: "non-veg", mustTryAt: "Established Emirati restaurant in Dubai" },
+          { name: "Harees", description: "Slow-cooked wheat and meat dish associated with Emirati home cooking and festive meals.", type: "non-veg", mustTryAt: "Traditional Emirati restaurant" },
+          { name: "Balaleet", description: "Sweet-spiced vermicelli commonly paired with an egg omelette for breakfast.", type: "both", mustTryAt: "Emirati breakfast restaurant" },
+          { name: "Chebab", description: "Emirati saffron-and-cardamom pancakes often served with date syrup or cheese.", type: "veg", mustTryAt: "Emirati cafe or breakfast venue" },
+          { name: "Regag", description: "Thin crisp Emirati bread prepared with savory or sweet fillings.", type: "both", mustTryAt: "Traditional Emirati bakery or cafe" },
+          { name: "Luqaimat", description: "Small fried dumplings finished with date syrup, a popular Emirati sweet.", type: "veg", mustTryAt: "Emirati dessert shop or heritage dining venue" },
+          { name: "Khameer Bread", description: "Soft Emirati yeast bread flavored with spices and commonly eaten at breakfast.", type: "veg", mustTryAt: "Emirati breakfast cafe" },
+          { name: "Arabic Mixed Grill", description: "Grilled kebabs and accompaniments widely available across Dubai's established Arabic restaurants.", type: "non-veg", mustTryAt: "Well-reviewed Arabic restaurant in Dubai" }
+        ],
+        packing: ["Light breathable clothing", "Sun hat and high-SPF sunscreen", "Comfortable walking shoes", "Modest layer for religious or cultural sites", "Refillable water bottle", "Type G power adapter", "Passport and travel documents"],
+        tips: ["Use Dubai Metro for suitable corridors and official taxis or app-based rides for last-mile travel.", "Reserve timed attractions such as Burj Khalifa observation decks and Museum of the Future in advance.", "Dress modestly at religious and cultural sites and follow posted photography rules.", "Carry water and limit long outdoor walks during the hottest part of the day.", "Compare displayed gold weight, purity, workmanship and final price before purchasing in the souk."]
       }
     };
     Object.assign(destinationDetails, curatedFallbackDetails);
