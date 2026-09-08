@@ -449,22 +449,27 @@ async function generateContentWithRetry(
   }
 }
 
-const ITINERARY_AI_TIMEOUT_MS = 50_000;
+const ITINERARY_AI_TIMEOUT_MS = 45_000;
 
 async function generateItineraryContentWithDeadline(
   ai: GoogleGenAI,
   options: Parameters<typeof generateContentWithRetry>[1]
 ): Promise<any> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const controller=new AbortController();
+  const boundedOptions={...options,config:{...(options.config||{}),abortSignal:controller.signal}};
   try {
     return await Promise.race([
-      generateContentWithRetry(ai, options, 1, 750),
+      generateContentWithRetry(ai, boundedOptions, 1, 750),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new GeminiServiceError(
-          "Itinerary generation exceeded the safe response deadline.",
-          "overloaded",
-          true
-        )), ITINERARY_AI_TIMEOUT_MS);
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new GeminiServiceError(
+            "Itinerary generation exceeded the safe response deadline.",
+            "overloaded",
+            true
+          ));
+        }, ITINERARY_AI_TIMEOUT_MS);
       })
     ]);
   } finally {
@@ -4987,12 +4992,13 @@ async function recoverDestinationSpecificDetails(destinationRaw:string):Promise<
   if(!destination)return null;
   try{
     const ai=getGeminiClient();
-    const request=generateContentWithRetry(ai,{
-      model:process.env.GEMINI_MODEL||'gemini-3.5-flash',
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),25_000);
+    const response=await ai.models.generateContent({
+      model:process.env.GEMINI_RECOVERY_MODEL||'gemini-2.5-flash',
       contents:`Return a compact factual travel profile for ${destination}. Use real, established place and food names specific to this destination. Provide exactly 6 distinct attractions and 8 distinct local foods. Do not use generic labels such as central district, heritage visit, public market, scenic viewpoint, regional selection or seasonal menu. Do not invent ratings, availability or live prices. Return strict JSON only.`,
-      config:{responseMimeType:'application/json',responseSchema:{type:Type.OBJECT,properties:{places:{type:Type.ARRAY,minItems:6,maxItems:6,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},bestTimeToVisit:{type:Type.STRING},entryFee:{type:Type.STRING}},required:['name','description','bestTimeToVisit','entryFee']}},food:{type:Type.ARRAY,minItems:8,maxItems:8,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},type:{type:Type.STRING},mustTryAt:{type:Type.STRING}},required:['name','description','type','mustTryAt']}},packing:{type:Type.ARRAY,minItems:5,items:{type:Type.STRING}},tips:{type:Type.ARRAY,minItems:4,items:{type:Type.STRING}}},required:['places','food','packing','tips']}}
-    },0);
-    const response:any=await Promise.race([request,new Promise((_,reject)=>setTimeout(()=>reject(new Error('destination recovery deadline exceeded')),15_000))]);
+      config:{abortSignal:controller.signal,responseMimeType:'application/json',responseSchema:{type:Type.OBJECT,properties:{places:{type:Type.ARRAY,minItems:6,maxItems:6,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},bestTimeToVisit:{type:Type.STRING},entryFee:{type:Type.STRING}},required:['name','description','bestTimeToVisit','entryFee']}},food:{type:Type.ARRAY,minItems:8,maxItems:8,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},type:{type:Type.STRING},mustTryAt:{type:Type.STRING}},required:['name','description','type','mustTryAt']}},packing:{type:Type.ARRAY,minItems:5,items:{type:Type.STRING}},tips:{type:Type.ARRAY,minItems:4,items:{type:Type.STRING}}},required:['places','food','packing','tips']}}
+    }).finally(()=>clearTimeout(timer));
     const parsed=JSON.parse(String(response?.text||'{}'));
     const places=Array.isArray(parsed?.places)?parsed.places:[];
     const food=Array.isArray(parsed?.food)?parsed.food:[];
@@ -5315,7 +5321,7 @@ Return the response in strict JSON format.`;
     // Keep enough time for the verified local fallback to finish before Render's
     // request deadline. A slow AI response must never become a host-level 502/504.
     const response = await generateItineraryContentWithDeadline(ai, {
-      model: "gemini-3.5-flash",
+      model: process.env.GEMINI_ITINERARY_MODEL || process.env.GEMINI_MODEL || "gemini-2.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
