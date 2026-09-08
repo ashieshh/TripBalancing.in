@@ -4995,7 +4995,7 @@ async function recoverDestinationSpecificDetails(destinationRaw:string):Promise<
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),25_000);
     const response=await ai.models.generateContent({
-      model:process.env.GEMINI_RECOVERY_MODEL||'gemini-2.5-flash',
+      model:process.env.GEMINI_RECOVERY_MODEL||'gemini-3.6-flash',
       contents:`Return a compact factual travel profile for ${destination}. Use real, established place and food names specific to this destination. Provide exactly 6 distinct attractions and 8 distinct local foods. Do not use generic labels such as central district, heritage visit, public market, scenic viewpoint, regional selection or seasonal menu. Do not invent ratings, availability or live prices. Return strict JSON only.`,
       config:{abortSignal:controller.signal,responseMimeType:'application/json',responseSchema:{type:Type.OBJECT,properties:{places:{type:Type.ARRAY,minItems:6,maxItems:6,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},bestTimeToVisit:{type:Type.STRING},entryFee:{type:Type.STRING}},required:['name','description','bestTimeToVisit','entryFee']}},food:{type:Type.ARRAY,minItems:8,maxItems:8,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},type:{type:Type.STRING},mustTryAt:{type:Type.STRING}},required:['name','description','type','mustTryAt']}},packing:{type:Type.ARRAY,minItems:5,items:{type:Type.STRING}},tips:{type:Type.ARRAY,minItems:4,items:{type:Type.STRING}}},required:['places','food','packing','tips']}}
     }).finally(()=>clearTimeout(timer));
@@ -5321,7 +5321,7 @@ Return the response in strict JSON format.`;
     // Keep enough time for the verified local fallback to finish before Render's
     // request deadline. A slow AI response must never become a host-level 502/504.
     const response = await generateItineraryContentWithDeadline(ai, {
-      model: process.env.GEMINI_ITINERARY_MODEL || process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      model: process.env.GEMINI_ITINERARY_MODEL || process.env.GEMINI_MODEL || "gemini-3.6-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",

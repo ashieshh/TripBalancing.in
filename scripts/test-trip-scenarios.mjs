@@ -32,7 +32,9 @@ assert.match(serverSource,/DESTINATION_CONTENT_UNAVAILABLE/,'generic fallback re
 assert.match(serverSource,/trip allowance has not been used/,'generic fallback rejection must protect the customer trip allowance');
 assert.match(serverSource,/recoverDestinationSpecificDetails/,'failed full itineraries must attempt a compact destination-specific recovery before rejection');
 assert.match(serverSource,/DESTINATION_RECOVERY_SUCCESS/,'validated destination recovery must be observable in production logs');
-assert.match(serverSource,/GEMINI_RECOVERY_MODEL\|\|'gemini-2\.5-flash'/,'recovery must use the independent fast model instead of inheriting the overloaded primary model');
+assert.match(serverSource,/GEMINI_RECOVERY_MODEL\|\|'gemini-3\.6-flash'/,'recovery must use the currently supported independent fast model');
+assert.match(serverSource,/GEMINI_ITINERARY_MODEL[\s\S]{0,120}gemini-3\.6-flash/,'the main itinerary path must default to the currently supported model');
+assert.doesNotMatch(serverSource,/GEMINI_(?:RECOVERY|ITINERARY)_MODEL[^\n]*gemini-2\.5-flash/,'customer itinerary paths must not default to the retired Gemini 2.5 Flash model');
 assert.match(serverSource,/controller\.abort\(\)/,'timed-out Gemini requests must be aborted rather than left running beside recovery');
 
 function fixture(destination, origin, placeNames, dayCount, source, budgetMode, scenarioIndex) {
