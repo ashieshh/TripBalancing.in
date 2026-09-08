@@ -39,6 +39,24 @@ assert.match(serverSource,/controller\.abort\(\)/,'timed-out Gemini requests mus
 assert.match(serverSource,/dubai:\s*\{[\s\S]*Burj Khalifa and Downtown Dubai[\s\S]*Dubai Creek and Gold Souk/,'Dubai must have a provider-independent verified destination profile');
 
 {
+  const rome={destination:'Rome, Lazio, Italy',travelStyle:'Budget',budgetHotelName:'Ibis Roma Fiera',localFood:[
+    {name:'Suppli',description:'Fried rice balls with mozzarella.',type:'street food',mustTryAt:'Suppli shop'},
+    {name:'Cacio e Pepe',description:'A complete savory Roman pasta.',type:'pasta dish',mustTryAt:'Roman trattoria'}
+  ],days:[{theme:'Arrival',activities:[
+    {time:'11:00 AM',title:'Arrival Transfer & Hotel Check-in',description:'Arrive and check in.',location:'Ibis Roma Fiera',cost:'$12'},
+    {time:'12:30 PM',title:'Spa & Wellness Session at Ibis Roma Fiera',description:'Reserve a wellness treatment.',location:'Ibis Roma Fiera',cost:'Food allocation'},
+    {time:'02:30 PM',title:'Spa & Wellness Session at Ibis Roma Fiera',description:'Reserve a wellness treatment.',location:'Ibis Roma Fiera',cost:'$45'},
+    {time:'09:00 PM',title:'Regional Dinner: Suppli',description:'Fried rice balls with mozzarella.',location:'Suppli shop',cost:'$20'}
+  ]}]};
+  quality.repairFinalItineraryDiversity(rome);
+  quality.repairBlockingFinalQuality(rome);
+  assert.equal(rome.days[0].activities.filter(a=>/spa & wellness session/i.test(a.title)).length,1,'late customer copy must not leave duplicate spa services');
+  assert.ok(rome.days[0].activities.some(a=>/\blunch\b/i.test(a.title)),'arrival day must restore a missing lunch after late activity transformation');
+  assert.ok(!rome.days[0].activities.some(a=>!/\blunch\b|\bdinner\b/i.test(a.title)&&/food allocation/i.test(String(a.cost))),'non-meal activities must not retain a food allocation label');
+  assert.ok(!rome.days[0].activities.some(a=>/\bdinner\b/i.test(a.title)&&/suppl[iì]|rice ball/i.test(`${a.title} ${a.description}`)),'snacks such as suppli must not survive as dinner');
+}
+
+{
   const museum={name:'Museum of the Future',description:'A real museum.',bestTimeToVisit:'Daytime',entryFee:'Paid'};
   const duplicateMuseumTrip={destination:'Dubai, UAE',placesToVisit:[museum],days:[
     {theme:'Museum day',activities:[{time:'10:00 AM',title:'Museum of the Future',description:'Visit the museum.',location:'Museum of the Future'}]},
