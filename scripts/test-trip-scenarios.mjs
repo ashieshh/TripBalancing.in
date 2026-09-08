@@ -129,6 +129,25 @@ for(const destination of ['Reykjavik, Iceland','Cusco, Peru','Madagascar']){
   assert.ok(!/breakfast/i.test(`${trip.days[1].activities[0].title} ${trip.days[1].activities[0].description}`),'breakfast-labelled food must not survive in a lunch slot');
 }
 
+{
+  const trip=fixture('Dubai Emirate, United Arab Emirates','Mumbai, India',['Central Orientation District','Heritage or Museum Visit','Established Public Market'],4,'curated-fallback','recommended',0);
+  trip.localFood=[
+    {name:'Regional Lunch Selection',description:'Complete regional lunch.',type:'both',mustTryAt:'Local restaurant'},
+    {name:'Regional Dinner Selection',description:'Complete regional dinner.',type:'both',mustTryAt:'Dinner venue'},
+    {name:'Seasonal Local Dinner Menu',description:'Savory evening meal.',type:'both',mustTryAt:'Central restaurant'}
+  ];
+  trip.days[1].activities=[{time:'12:30 PM',title:'Regional Lunch: Regional Dinner Selection',description:'Complete regional dinner.',location:'Dinner venue',cost:'$10'}];
+  trip.days[2].activities=[{time:'04:30 PM',title:'Guided Visit: Heritage or Museum Visit',description:'Confirm official access.',location:'Heritage or Museum Visit',cost:'$10'}];
+  quality.repairFinalItineraryDiversity(trip);
+  quality.repairFinalScheduleCompleteness(trip);
+  quality.alignLodgingLogisticsToBudgetHotel(trip);
+  const lunch=trip.days[1].activities.find(a=>/\blunch\b/i.test(a.title));
+  assert.ok(!/dinner/i.test(`${lunch?.title} ${lunch?.description}`),'dinner-labelled food must not survive in a lunch slot');
+  assert.ok(trip.days[1].activities.some(a=>/^.*\bdinner\b/i.test(a.title)&&!/\blunch\b/i.test(a.title)),'embedded dinner word in lunch must not suppress the real dinner slot');
+  assert.ok(trip.days[2].activities.some(a=>minutes(a.time)<=11*60),'full non-boundary day must begin with a morning activity');
+  assert.match(trip.days.at(-1).activities.find(a=>/departure/i.test(a.title))?.location||'',/confirmed departure airport \/ station/i,'unnamed departure gateway must not point back to the hotel');
+}
+
 assert.doesNotMatch(pdf,/const simulatedRating\s*=/,'PDF must not fabricate food ratings');
 assert.doesNotMatch(pdf,/const rating\s*=\s*4\.5/,'PDF must not fabricate attraction ratings');
 assert.match(pdf,/finalBlockReserve/,'PDF must keep the last activity with its route/summary panels');
