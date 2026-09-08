@@ -3742,8 +3742,10 @@ function repairFinalItineraryDiversity(itinerary:any) {
       const activityText=norm(`${a?.title||''} ${a?.description||''}`);
       const recognized=foods.find((f:any)=>{const k=foodKey(f);return k&&activityText.includes(k);});
       const venueKey=norm(a?.location);
-      const role=/dinner/i.test(title)?'Dinner':'Lunch';
-      const wrongMealRole=Boolean(recognized)&&(/\bbreakfast\b/i.test(`${recognized?.name||''} ${recognized?.description||''}`)||!isCompleteMealFood(recognized,role.toLowerCase()==='dinner'?'dinner':'lunch'));
+      const role=/\blunch\b|regional meal/i.test(title)?'Lunch':'Dinner';
+      const recognizedText=`${recognized?.name||''} ${recognized?.description||''}`;
+      const oppositeRole=role==='Lunch'?/\bdinner\b/i.test(recognizedText):/\blunch\b|\bbreakfast\b|\bbrunch\b/i.test(recognizedText);
+      const wrongMealRole=Boolean(recognized)&&(oppositeRole||/\bbreakfast\b/i.test(recognizedText)||!isCompleteMealFood(recognized,role.toLowerCase()==='dinner'?'dinner':'lunch'));
       const duplicateFood=wrongMealRole||(recognized && usedFoods.has(foodKey(recognized)));
       const duplicateVenue=venueKey && usedMealVenues.has(venueKey) && venueKey!==norm(destination);
       if(!duplicateFood && !duplicateVenue){
@@ -3828,7 +3830,7 @@ function alignLodgingLogisticsToBudgetHotel(itinerary:any) {
       if (!logistics) continue;
       activity.description = String(activity.description || '').replace(namedHotel, selected);
       if (/arrival|airport (?:pick[- ]?up|pickup)|check[- ]?in/i.test(`${activity?.title || ''} ${activity?.description || ''}`)) activity.location = selected;
-      if (verifiedGateway && /departure|to airport|to station|return flight|return train/i.test(`${activity?.title||''} ${activity?.description||''}`)) activity.location=verifiedGateway;
+      if (/departure|to airport|to station|return flight|return train/i.test(`${activity?.title||''} ${activity?.description||''}`)) activity.location=verifiedGateway||`${itinerary.destination} - confirmed departure airport / station`;
     }
   }
   return itinerary;
@@ -3977,7 +3979,8 @@ function repairFinalScheduleCompleteness(itinerary:any) {
   const norm=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|a|an|private|priority|guided|visit|experience|tour|at|to|of|and)\b/g,' ').replace(/\s+/g,' ').trim();
   const isArrival=(a:any)=>/(arrival|arrive|check[- ]?in|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`)&&!/(departure|return|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
   const isDeparture=(a:any)=>/(departure|to airport|return flight|return train|check[- ]?out)/i.test(`${a?.title||''} ${a?.description||''}`);
-  const isMeal=(a:any,role:string)=>role==='lunch'?/\blunch\b|regional meal/i.test(String(a?.title||'')):/\bdinner\b|signature dining|evening meal/i.test(String(a?.title||''));
+  const mealRole=(a:any)=>{const title=String(a?.title||'');if(/\blunch\b|regional meal/i.test(title))return'lunch';if(/\bdinner\b|signature dining|evening meal/i.test(title))return'dinner';return'';};
+  const isMeal=(a:any,role:string)=>mealRole(a)===role;
   const usedFoods=new Set<string>();
   for(const day of itinerary.days)for(const activity of Array.isArray(day?.activities)?day.activities:[]){for(const food of foods){const key=norm(food?.name);if(key&&norm(`${activity?.title||''} ${activity?.description||''}`).includes(key))usedFoods.add(key);}}
   let foodCursor=0;
@@ -4034,9 +4037,15 @@ function repairFinalScheduleCompleteness(itinerary:any) {
         : [['Central Neighborhood Discovery','Explore a mapped, well-connected neighborhood using current local listings and public access information.'],['Public Market, Park or Cultural District','Choose a currently operating public market, park or cultural district and confirm hours before visiting.']];
       activities.push(...choices.map((choice,index)=>({time:index?'03:30 PM':'09:30 AM',title:`${choice[0]} - Day ${dayIndex+1}`,description:`${choice[1]} This flexible stop is anchored to ${itinerary.destination}.`,location:itinerary.destination,cost:'Check current local price',visitDuration:'1h 30m'})));
     }
+    const finalMeaningful=activities.filter((a:any)=>!isMeal(a,'lunch')&&!isMeal(a,'dinner')&&!isArrival(a)&&!isDeparture(a));
+    if(!boundaryDay&&!finalMeaningful.some((a:any)=>parseTime(a.time)<=11*60)){
+      const culture=/culture|history/i.test(String(itinerary.travelStyle||''));
+      activities.push({time:'09:30 AM',title:`${culture?'Morning Public Heritage Walk':'Morning Destination Orientation'} - Day ${dayIndex+1}`,description:`Begin with a mapped public-area orientation in ${itinerary.destination}, confirming current access and opening conditions before travel.`,location:itinerary.destination,cost:'Free public-area planning block',visitDuration:'1h 30m'});
+    }
     activities.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
     const meaningful=activities.filter((a:any)=>!isMeal(a,'lunch')&&!isMeal(a,'dinner')&&!isArrival(a)&&!isDeparture(a));
-    const refreshed=meaningful.slice(0,2).map((a:any)=>String(a?.title||'').replace(/^(?:Guided Visit:|Explore|Excursion to|Private)\s*/i,'').trim()).filter(Boolean).join(' & ');
+    const destinationPrefix=new RegExp(`^${String(itinerary.destination||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\s*:\s*`,'i');
+    const refreshed=meaningful.slice(0,2).map((a:any)=>String(a?.title||'').replace(/^(?:Guided Visit:|Explore|Excursion to|Private)\s*/i,'').replace(destinationPrefix,'').trim()).filter(Boolean).join(' & ');
     return {...day,theme:refreshed||day.theme||`Day ${dayIndex+1}`,activities};
   });
   return itinerary;
@@ -4135,7 +4144,7 @@ function repairResidualUserFacingQuality(itinerary:any) {
     acts=acts.filter((a:any)=>{
       if(isTransfer(a))return true;
       const p=matchPlace(a);if(!p)return true;const key=canonical(p.name);if(!key)return true;
-      if(seenPlaces.has(key)){if(/aarti|museum|performance|food|weav|market/i.test(`${a.title||''} ${a.location||''}`))return true;removedDuplicates++;return false;}
+      if(seenPlaces.has(key)){const text=`${a.title||''} ${a.location||''}`;const genericAnchor=/central orientation district|heritage or museum visit|established public market|public park or scenic viewpoint/i.test(text);if(!genericAnchor&&/aarti|museum|performance|food|weav|market/i.test(text))return true;removedDuplicates++;return false;}
       seenPlaces.add(key);return true;
     });
     for(const a of acts){
