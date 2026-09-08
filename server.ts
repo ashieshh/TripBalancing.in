@@ -5815,9 +5815,15 @@ Return the response in strict JSON format.`;
     let details = destinationDetails[Object.keys(destinationDetails).find(k => destNormalized.includes(k)) || ""];
     let fallbackDataQuality='curated-destination-profile';
     if (!details) {
-      details=buildResilientDestinationDetails(destination);
       fallbackDataQuality='resilient-destination-planning-profile';
-      console.warn(`[GLOBAL_FALLBACK] Using non-fabricated planning anchors for "${String(destination).slice(0,120)}" after ${geminiFailure.classified.kind}.`);
+      console.error(`[GLOBAL_FALLBACK_REJECTED] No curated destination profile for "${String(destination).slice(0,120)}" after ${geminiFailure.classified.kind}. Generic planning anchors cannot be sold as a Premium Guide.`);
+      return res.status(503).json({
+        error: 'Verified destination-specific recommendations are temporarily unavailable. Please try again. Your completed form is preserved and your trip allowance has not been used.',
+        code: 'DESTINATION_CONTENT_UNAVAILABLE',
+        retryable: true,
+        preservedInput: true,
+        billableGeneration: false
+      });
     }
 
     // Build the budget calculations based on budget level and numbers
