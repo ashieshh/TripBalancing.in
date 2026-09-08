@@ -4083,6 +4083,23 @@ function repairBlockingFinalQuality(itinerary:any) {
     if(arrival){const boundary=parseTime(arrival.time);acts=acts.filter((a:any)=>a===arrival||isArrival(a)||parseTime(a.time)>=boundary);}
     const departure=acts.find(isDeparture);
     if(departure){const boundary=parseTime(departure.time);acts=acts.filter((a:any)=>a===departure||parseTime(a.time)<=boundary);}
+
+    // Arrival days must remain usable after a tiring journey and must fit as one
+    // coherent PDF day. Keep the arrival anchor, one lunch, one dinner and at
+    // most one purposeful experience (two only for a genuinely early arrival).
+    // Late generic blocks must never turn an arrival day into a six-stop schedule.
+    if(arrival){
+      const role=(a:any)=>{const label=String(a?.title||'').split(':',1)[0];return /\blunch\b|regional meal/i.test(label)?'lunch':/\bdinner\b|signature dining|evening meal/i.test(label)?'dinner':'';};
+      const sightseeing=acts.filter((a:any)=>a!==arrival&&!isArrival(a)&&!isDeparture(a)&&!role(a));
+      const allowed=parseTime(arrival.time)<=9*60+30?2:1;
+      const style=String(itinerary.travelStyle||'').toLowerCase();
+      sightseeing.sort((a:any,b:any)=>{
+        const score=(activity:any)=>{const text=`${activity?.title||''} ${activity?.description||''}`;const styleHit=style&&new RegExp(style==='shopping'?'shopping|market|souq|mall|artisan':style.replace(/[^a-z ]/g,''),'i').test(text)?4:0;const purposeful=/rafting|kayak|diving|climbing|cycling|bicycle|safari|museum|heritage|temple|fort|cruise|spa|workshop|class|performance|market|souq|mall|artisan/i.test(text)?2:0;const generic=/central orientation|public scenic viewpoint|public park or scenic|local exploration/i.test(text)?-2:0;return styleHit+purposeful+generic;};
+        return score(b)-score(a)||parseTime(a.time)-parseTime(b.time);
+      });
+      const keepSightseeing=new Set(sightseeing.slice(0,allowed));
+      acts=acts.filter((a:any)=>!sightseeing.includes(a)||keepSightseeing.has(a));
+    }
     acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
     for(let i=1;i<acts.length;i++){
       const previous=acts[i-1],current=acts[i],minimum=parseTime(previous.time,i-1)+Math.max(30,duration(previous))+Math.max(15,travelMinutes(current));
