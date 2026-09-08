@@ -4976,6 +4976,42 @@ function buildResilientDestinationDetails(destinationRaw:string):FallbackDestina
   };
 }
 
+/**
+ * A short recovery request used only after the full itinerary request fails its
+ * provider/quality path. It asks for factual destination anchors instead of a
+ * second full itinerary, keeping latency and malformed-output risk much lower.
+ * The result is still validated before the normal itinerary pipeline may use it.
+ */
+async function recoverDestinationSpecificDetails(destinationRaw:string):Promise<FallbackDestinationDetails|null>{
+  const destination=sanitizeGeneratedText(String(destinationRaw||'')).trim();
+  if(!destination)return null;
+  try{
+    const ai=getGeminiClient();
+    const request=generateContentWithRetry(ai,{
+      model:process.env.GEMINI_MODEL||'gemini-3.5-flash',
+      contents:`Return a compact factual travel profile for ${destination}. Use real, established place and food names specific to this destination. Provide exactly 6 distinct attractions and 8 distinct local foods. Do not use generic labels such as central district, heritage visit, public market, scenic viewpoint, regional selection or seasonal menu. Do not invent ratings, availability or live prices. Return strict JSON only.`,
+      config:{responseMimeType:'application/json',responseSchema:{type:Type.OBJECT,properties:{places:{type:Type.ARRAY,minItems:6,maxItems:6,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},bestTimeToVisit:{type:Type.STRING},entryFee:{type:Type.STRING}},required:['name','description','bestTimeToVisit','entryFee']}},food:{type:Type.ARRAY,minItems:8,maxItems:8,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},type:{type:Type.STRING},mustTryAt:{type:Type.STRING}},required:['name','description','type','mustTryAt']}},packing:{type:Type.ARRAY,minItems:5,items:{type:Type.STRING}},tips:{type:Type.ARRAY,minItems:4,items:{type:Type.STRING}}},required:['places','food','packing','tips']}}
+    },0);
+    const response:any=await Promise.race([request,new Promise((_,reject)=>setTimeout(()=>reject(new Error('destination recovery deadline exceeded')),15_000))]);
+    const parsed=JSON.parse(String(response?.text||'{}'));
+    const places=Array.isArray(parsed?.places)?parsed.places:[];
+    const food=Array.isArray(parsed?.food)?parsed.food:[];
+    const forbidden=/central orientation|central district|heritage or museum visit|established public market|public park or scenic viewpoint|regional (?:breakfast|lunch|dinner) selection|seasonal local (?:lunch|dinner) menu/i;
+    const clean=(v:any)=>sanitizeGeneratedText(String(v||'')).trim();
+    const unique=(rows:any[],field:string)=>new Set(rows.map(row=>clean(row?.[field]).toLowerCase()).filter(Boolean)).size===rows.length;
+    if(places.length!==6||food.length!==8||!unique(places,'name')||!unique(food,'name')||places.some((p:any)=>!clean(p?.name)||forbidden.test(clean(p?.name)))||food.some((f:any)=>!clean(f?.name)||forbidden.test(clean(f?.name))))return null;
+    return {
+      places:places.map((p:any)=>({name:clean(p.name),description:clean(p.description),bestTimeToVisit:clean(p.bestTimeToVisit),entryFee:clean(p.entryFee)||'Confirm with official venue'})),
+      food:food.map((f:any)=>({name:clean(f.name),description:clean(f.description),type:clean(f.type)||'both',mustTryAt:clean(f.mustTryAt)||`${destination} established restaurant`})),
+      packing:(Array.isArray(parsed.packing)?parsed.packing:[]).map(clean).filter(Boolean).slice(0,10),
+      tips:(Array.isArray(parsed.tips)?parsed.tips:[]).map(clean).filter(Boolean).slice(0,8)
+    };
+  }catch(error:any){
+    console.warn(`[DESTINATION_RECOVERY_FAILED] ${error?.message||error}`);
+    return null;
+  }
+}
+
 app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;
   let originCoords: { latitude: number; longitude: number } | null = null;
@@ -5815,15 +5851,19 @@ Return the response in strict JSON format.`;
     let details = destinationDetails[Object.keys(destinationDetails).find(k => destNormalized.includes(k)) || ""];
     let fallbackDataQuality='curated-destination-profile';
     if (!details) {
-      fallbackDataQuality='resilient-destination-planning-profile';
-      console.error(`[GLOBAL_FALLBACK_REJECTED] No curated destination profile for "${String(destination).slice(0,120)}" after ${geminiFailure.classified.kind}. Generic planning anchors cannot be sold as a Premium Guide.`);
-      return res.status(503).json({
-        error: 'Verified destination-specific recommendations are temporarily unavailable. Please try again. Your completed form is preserved and your trip allowance has not been used.',
-        code: 'DESTINATION_CONTENT_UNAVAILABLE',
-        retryable: true,
-        preservedInput: true,
-        billableGeneration: false
-      });
+      details=await recoverDestinationSpecificDetails(destination);
+      fallbackDataQuality=details?'recovered-destination-profile':'resilient-destination-planning-profile';
+      if(!details){
+        console.error(`[GLOBAL_FALLBACK_REJECTED] No verified destination profile for "${String(destination).slice(0,120)}" after ${geminiFailure.classified.kind}. Generic planning anchors cannot be sold as a Premium Guide.`);
+        return res.status(503).json({
+          error: 'Verified destination-specific recommendations are temporarily unavailable. Please try again. Your completed form is preserved and your trip allowance has not been used.',
+          code: 'DESTINATION_CONTENT_UNAVAILABLE',
+          retryable: true,
+          preservedInput: true,
+          billableGeneration: false
+        });
+      }
+      console.warn(`[DESTINATION_RECOVERY_SUCCESS] Built a validated destination-specific recovery profile for "${String(destination).slice(0,120)}".`);
     }
 
     // Build the budget calculations based on budget level and numbers
@@ -6264,9 +6304,9 @@ Return the response in strict JSON format.`;
         reason: geminiFailure.body.code
       },
       billableGeneration: false,
-      notice: fallbackDataQuality==='curated-destination-profile'
-        ? "AI generation is temporarily unavailable, so TripBalancing used a verified destination profile. Your trip allowance was not used."
-        : "AI generation is temporarily unavailable, so TripBalancing created a safe planning itinerary with clearly labelled confirmation points. Your trip allowance was not used."
+      notice: fallbackDataQuality==='recovered-destination-profile'
+        ? "The full AI itinerary needed recovery, so TripBalancing rebuilt it from a validated destination-specific profile. Your trip allowance was not used."
+        : "AI generation is temporarily unavailable, so TripBalancing used a verified destination profile. Your trip allowance was not used."
     });
   }
 });
@@ -6986,6 +7026,7 @@ export const itineraryQualityTestHooks = {
   repairFinalItineraryDiversity,
   finalizeCustomerSpecificity,
   buildResilientDestinationDetails,
+  recoverDestinationSpecificDetails,
   alignLodgingLogisticsToBudgetHotel,
 };
 

@@ -30,6 +30,8 @@ const serverSource=fs.readFileSync(new URL('../server.ts',import.meta.url),'utf8
 assert.match(serverSource,/GLOBAL_FALLBACK_REJECTED/,'generic fallback must be rejected before customer delivery');
 assert.match(serverSource,/DESTINATION_CONTENT_UNAVAILABLE/,'generic fallback rejection must return a stable retry code');
 assert.match(serverSource,/trip allowance has not been used/,'generic fallback rejection must protect the customer trip allowance');
+assert.match(serverSource,/recoverDestinationSpecificDetails/,'failed full itineraries must attempt a compact destination-specific recovery before rejection');
+assert.match(serverSource,/DESTINATION_RECOVERY_SUCCESS/,'validated destination recovery must be observable in production logs');
 
 function fixture(destination, origin, placeNames, dayCount, source, budgetMode, scenarioIndex) {
   const places=placeNames.map((name,index)=>({name,description:`Verified visitor context for ${name}.`,bestTimeToVisit:index===0?'Morning':'Daytime',entryFee:index===1?'$12':'Free'}));
