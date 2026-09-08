@@ -115,7 +115,8 @@ for(const destination of ['Reykjavik, Iceland','Cusco, Peru','Madagascar']){
   reconcileItineraryBudget(trip);
   assert.ok(trip.days[0].activities.some(a=>/arrival/i.test(a.title)),'arrival anchor must survive final transfer de-duplication');
   assert.ok(minutes(trip.days[0].activities.find(a=>/\blunch\b/i.test(a.title))?.time)<=15*60,'arrival-day lunch must remain in a realistic lunch window');
-  assert.ok(money(trip.days[0].activities.find(a=>/rafting/i.test(`${a.title} ${a.description}`))?.cost)>0,'paid active service must not remain Free');
+  const retainedRafting=trip.days[0].activities.find(a=>/rafting/i.test(`${a.title} ${a.description}`));
+  if(retainedRafting)assert.ok(money(retainedRafting.cost)>0,'a retained paid active service must not remain Free');
   for(const index of [3,4])assert.ok(trip.days[index].activities.filter(a=>!/lunch|dinner/i.test(a.title)).length>=2,`sparse full day ${index+1} must receive meaningful planning blocks`);
   for(const day of trip.days){
     assert.ok(day.activities.filter(a=>/\blunch\b/i.test(a.title)).length<=1,'day must not contain two lunches');
@@ -152,6 +153,16 @@ for(const destination of ['Reykjavik, Iceland','Cusco, Peru','Madagascar']){
     assert.doesNotMatch(`${lunch.title} ${lunch.description}`,/\bdinner\b/i,'a lunch replacement must never reuse dinner-labelled food');
     assert.doesNotMatch(`${dinner.title} ${dinner.description}`,/\blunch\b/i,'a dinner replacement must never reuse lunch-labelled food');
   }
+
+  crossedMeals.travelStyle='Shopping';
+  crossedMeals.days[0].activities.unshift({time:'11:00 AM',title:'Arrival Transfer & Hotel Check-in',description:'Arrive and check in.',location:'Hotel'});
+  crossedMeals.days[0].activities.splice(3,0,
+    {time:'04:45 PM',title:'Local Market / Artisan District',description:'Browse local products.',location:'Market'},
+    {time:'07:00 PM',title:'Public Scenic Viewpoint',description:'Visit a public viewpoint.',location:'Viewpoint'}
+  );
+  quality.repairBlockingFinalQuality(crossedMeals);
+  assert.ok(crossedMeals.days[0].activities.length<=4,'a post-10 AM arrival day must fit arrival, lunch, one experience and dinner');
+  assert.ok(crossedMeals.days[0].activities.some(a=>/market|shopping|artisan/i.test(`${a.title} ${a.description}`)),'Shopping arrival day should retain the most style-relevant experience');
 }
 
 {
