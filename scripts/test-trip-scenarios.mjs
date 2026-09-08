@@ -32,6 +32,8 @@ assert.match(serverSource,/DESTINATION_CONTENT_UNAVAILABLE/,'generic fallback re
 assert.match(serverSource,/trip allowance has not been used/,'generic fallback rejection must protect the customer trip allowance');
 assert.match(serverSource,/recoverDestinationSpecificDetails/,'failed full itineraries must attempt a compact destination-specific recovery before rejection');
 assert.match(serverSource,/DESTINATION_RECOVERY_SUCCESS/,'validated destination recovery must be observable in production logs');
+assert.match(serverSource,/GEMINI_RECOVERY_MODEL\|\|'gemini-2\.5-flash'/,'recovery must use the independent fast model instead of inheriting the overloaded primary model');
+assert.match(serverSource,/controller\.abort\(\)/,'timed-out Gemini requests must be aborted rather than left running beside recovery');
 
 function fixture(destination, origin, placeNames, dayCount, source, budgetMode, scenarioIndex) {
   const places=placeNames.map((name,index)=>({name,description:`Verified visitor context for ${name}.`,bestTimeToVisit:index===0?'Morning':'Daytime',entryFee:index===1?'$12':'Free'}));
