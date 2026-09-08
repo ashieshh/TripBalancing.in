@@ -36,6 +36,7 @@ assert.match(serverSource,/GEMINI_RECOVERY_MODEL\|\|'gemini-3\.6-flash'/,'recove
 assert.match(serverSource,/GEMINI_ITINERARY_MODEL[\s\S]{0,120}gemini-3\.6-flash/,'the main itinerary path must default to the currently supported model');
 assert.doesNotMatch(serverSource,/GEMINI_(?:RECOVERY|ITINERARY)_MODEL[^\n]*gemini-2\.5-flash/,'customer itinerary paths must not default to the retired Gemini 2.5 Flash model');
 assert.match(serverSource,/controller\.abort\(\)/,'timed-out Gemini requests must be aborted rather than left running beside recovery');
+assert.match(serverSource,/dubai:\s*\{[\s\S]*Burj Khalifa and Downtown Dubai[\s\S]*Dubai Creek and Gold Souk/,'Dubai must have a provider-independent verified destination profile');
 
 function fixture(destination, origin, placeNames, dayCount, source, budgetMode, scenarioIndex) {
   const places=placeNames.map((name,index)=>({name,description:`Verified visitor context for ${name}.`,bestTimeToVisit:index===0?'Morning':'Daytime',entryFee:index===1?'$12':'Free'}));
