@@ -4168,7 +4168,7 @@ function repairResidualUserFacingQuality(itinerary:any) {
     acts=acts.filter((a:any)=>{
       if(isTransfer(a))return true;
       const p=matchPlace(a);if(!p)return true;const key=canonical(p.name);if(!key)return true;
-      if(seenPlaces.has(key)){const text=`${a.title||''} ${a.location||''}`;const genericAnchor=/central orientation district|heritage or museum visit|established public market|public park or scenic viewpoint/i.test(text);if(!genericAnchor&&/aarti|museum|performance|food|weav|market/i.test(text))return true;removedDuplicates++;return false;}
+      if(seenPlaces.has(key)){removedDuplicates++;return false;}
       seenPlaces.add(key);return true;
     });
     for(const a of acts){
@@ -7052,6 +7052,7 @@ export const itineraryQualityTestHooks = {
   repairFinalScheduleCompleteness,
   repairBlockingFinalQuality,
   repairFinalItineraryDiversity,
+  repairResidualUserFacingQuality,
   finalizeCustomerSpecificity,
   buildResilientDestinationDetails,
   recoverDestinationSpecificDetails,

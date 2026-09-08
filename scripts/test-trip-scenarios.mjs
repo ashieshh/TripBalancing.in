@@ -38,6 +38,17 @@ assert.doesNotMatch(serverSource,/GEMINI_(?:RECOVERY|ITINERARY)_MODEL[^\n]*gemin
 assert.match(serverSource,/controller\.abort\(\)/,'timed-out Gemini requests must be aborted rather than left running beside recovery');
 assert.match(serverSource,/dubai:\s*\{[\s\S]*Burj Khalifa and Downtown Dubai[\s\S]*Dubai Creek and Gold Souk/,'Dubai must have a provider-independent verified destination profile');
 
+{
+  const museum={name:'Museum of the Future',description:'A real museum.',bestTimeToVisit:'Daytime',entryFee:'Paid'};
+  const duplicateMuseumTrip={destination:'Dubai, UAE',placesToVisit:[museum],days:[
+    {theme:'Museum day',activities:[{time:'10:00 AM',title:'Museum of the Future',description:'Visit the museum.',location:'Museum of the Future'}]},
+    {theme:'Second museum day',activities:[{time:'04:00 PM',title:'Guided Visit: Museum of the Future',description:'Visit it again.',location:'Museum of the Future'}]}
+  ]};
+  quality.repairResidualUserFacingQuality(duplicateMuseumTrip);
+  const museumVisits=duplicateMuseumTrip.days.flatMap(day=>day.activities).filter(a=>/museum of the future/i.test(`${a.title} ${a.location}`));
+  assert.equal(museumVisits.length,1,'museums and other named attractions must not be exempt from the global no-repeat rule');
+}
+
 function fixture(destination, origin, placeNames, dayCount, source, budgetMode, scenarioIndex) {
   const places=placeNames.map((name,index)=>({name,description:`Verified visitor context for ${name}.`,bestTimeToVisit:index===0?'Morning':'Daytime',entryFee:index===1?'$12':'Free'}));
   const foods=Array.from({length:8},(_,index)=>({name:`${destination.split(',')[0]} Savory Dish ${index+1}`,description:'A complete savory regional meal with local accompaniments.',type:'veg',mustTryAt:`${destination.split(',')[0]} established restaurant ${index+1}`}));
