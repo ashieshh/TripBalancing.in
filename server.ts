@@ -3728,9 +3728,10 @@ function repairFinalItineraryDiversity(itinerary:any) {
   const usedMealVenues=new Set<string>();
   let mealRepairs=0, placeholderRepairs=0;
 
-  const suitableMeal=(f:any)=>{
+  const suitableMeal=(f:any,role:'Lunch'|'Dinner')=>{
     const text=`${f?.name||''} ${f?.description||''}`;
-    return !!f?.name && !/breakfast|brunch|lassi|paan|chaat|dessert|sweet|tea|coffee|juice|drink|beverage|snack|ice cream|gelato|betel/i.test(text);
+    const oppositeRole=role==='Lunch'?/\bdinner\b/i.test(text):/\blunch\b/i.test(text);
+    return !!f?.name && !oppositeRole && isCompleteMealFood(f,role.toLowerCase() as 'lunch'|'dinner') && !/breakfast|brunch|lassi|paan|chaat|dessert|sweet|tea|coffee|juice|drink|beverage|snack|ice cream|gelato|betel/i.test(text);
   };
 
   for (const [dayIndex,day] of itinerary.days.entries()) {
@@ -3742,7 +3743,8 @@ function repairFinalItineraryDiversity(itinerary:any) {
       const activityText=norm(`${a?.title||''} ${a?.description||''}`);
       const recognized=foods.find((f:any)=>{const k=foodKey(f);return k&&activityText.includes(k);});
       const venueKey=norm(a?.location);
-      const role=/\blunch\b|regional meal/i.test(title)?'Lunch':'Dinner';
+      const roleLabel=title.split(':',1)[0];
+      const role=/\blunch\b|regional meal/i.test(roleLabel)?'Lunch':'Dinner';
       const recognizedText=`${recognized?.name||''} ${recognized?.description||''}`;
       const oppositeRole=role==='Lunch'?/\bdinner\b/i.test(recognizedText):/\blunch\b|\bbreakfast\b|\bbrunch\b/i.test(recognizedText);
       const wrongMealRole=Boolean(recognized)&&(oppositeRole||/\bbreakfast\b/i.test(recognizedText)||!isCompleteMealFood(recognized,role.toLowerCase()==='dinner'?'dinner':'lunch'));
@@ -3753,7 +3755,7 @@ function repairFinalItineraryDiversity(itinerary:any) {
         if(venueKey) usedMealVenues.add(venueKey);
         continue;
       }
-      const replacement=foods.find((f:any)=>suitableMeal(f)&&!usedFoods.has(foodKey(f)));
+      const replacement=foods.find((f:any)=>suitableMeal(f,role)&&!usedFoods.has(foodKey(f)));
       if(replacement){
         a.title=`Upscale Regional ${role}: ${replacement.name}`;
         a.description=`${sanitizeGeneratedText(String(replacement.description||`Enjoy ${replacement.name} as a complete regional meal.`))} Serve it as a complete ${role.toLowerCase()} at a reputable, well-reviewed venue; confirm the current menu and price.`;
@@ -3979,7 +3981,7 @@ function repairFinalScheduleCompleteness(itinerary:any) {
   const norm=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|a|an|private|priority|guided|visit|experience|tour|at|to|of|and)\b/g,' ').replace(/\s+/g,' ').trim();
   const isArrival=(a:any)=>/(arrival|arrive|check[- ]?in|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`)&&!/(departure|return|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
   const isDeparture=(a:any)=>/(departure|to airport|return flight|return train|check[- ]?out)/i.test(`${a?.title||''} ${a?.description||''}`);
-  const mealRole=(a:any)=>{const title=String(a?.title||'');if(/\blunch\b|regional meal/i.test(title))return'lunch';if(/\bdinner\b|signature dining|evening meal/i.test(title))return'dinner';return'';};
+  const mealRole=(a:any)=>{const title=String(a?.title||'').split(':',1)[0];if(/\blunch\b|regional meal/i.test(title))return'lunch';if(/\bdinner\b|signature dining|evening meal/i.test(title))return'dinner';return'';};
   const isMeal=(a:any,role:string)=>mealRole(a)===role;
   const usedFoods=new Set<string>();
   for(const day of itinerary.days)for(const activity of Array.isArray(day?.activities)?day.activities:[]){for(const food of foods){const key=norm(food?.name);if(key&&norm(`${activity?.title||''} ${activity?.description||''}`).includes(key))usedFoods.add(key);}}
