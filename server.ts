@@ -5015,32 +5015,38 @@ function buildResilientDestinationDetails(destinationRaw:string):FallbackDestina
 async function recoverDestinationSpecificDetails(destinationRaw:string):Promise<FallbackDestinationDetails|null>{
   const destination=sanitizeGeneratedText(String(destinationRaw||'')).trim();
   if(!destination)return null;
-  try{
-    const ai=getGeminiClient();
+  const ai=getGeminiClient();
+  // Recovery must not share one model as a single point of failure with the full
+  // itinerary request. Use the lower-latency model first, then one independent
+  // fallback, while keeping the same total 25-second response budget.
+  const models=[process.env.GEMINI_RECOVERY_MODEL||'gemini-3.5-flash-lite',process.env.GEMINI_RECOVERY_FALLBACK_MODEL||'gemini-3.6-flash'].filter((model,index,all)=>model&&all.indexOf(model)===index);
+  const contents=`Return a compact factual travel profile for ${destination}. Use real, established place and food names specific to this destination. Provide exactly 6 distinct attractions and 8 distinct local foods. Do not use generic labels such as central district, heritage visit, public market, scenic viewpoint, regional selection or seasonal menu. Do not invent ratings, availability or live prices. Return strict JSON only.`;
+  const responseSchema={type:Type.OBJECT,properties:{places:{type:Type.ARRAY,minItems:6,maxItems:6,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},bestTimeToVisit:{type:Type.STRING},entryFee:{type:Type.STRING}},required:['name','description','bestTimeToVisit','entryFee']}},food:{type:Type.ARRAY,minItems:8,maxItems:8,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},type:{type:Type.STRING},mustTryAt:{type:Type.STRING}},required:['name','description','type','mustTryAt']}},packing:{type:Type.ARRAY,minItems:5,items:{type:Type.STRING}},tips:{type:Type.ARRAY,minItems:4,items:{type:Type.STRING}}},required:['places','food','packing','tips']};
+  const clean=(v:any)=>sanitizeGeneratedText(String(v||'')).trim();
+  const forbidden=/central orientation|central district|heritage or museum visit|established public market|public park or scenic viewpoint|regional (?:breakfast|lunch|dinner) selection|seasonal local (?:lunch|dinner) menu/i;
+  for(const model of models){
     const controller=new AbortController();
-    const timer=setTimeout(()=>controller.abort(),25_000);
-    const response=await ai.models.generateContent({
-      model:process.env.GEMINI_RECOVERY_MODEL||'gemini-3.6-flash',
-      contents:`Return a compact factual travel profile for ${destination}. Use real, established place and food names specific to this destination. Provide exactly 6 distinct attractions and 8 distinct local foods. Do not use generic labels such as central district, heritage visit, public market, scenic viewpoint, regional selection or seasonal menu. Do not invent ratings, availability or live prices. Return strict JSON only.`,
-      config:{abortSignal:controller.signal,responseMimeType:'application/json',responseSchema:{type:Type.OBJECT,properties:{places:{type:Type.ARRAY,minItems:6,maxItems:6,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},bestTimeToVisit:{type:Type.STRING},entryFee:{type:Type.STRING}},required:['name','description','bestTimeToVisit','entryFee']}},food:{type:Type.ARRAY,minItems:8,maxItems:8,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},type:{type:Type.STRING},mustTryAt:{type:Type.STRING}},required:['name','description','type','mustTryAt']}},packing:{type:Type.ARRAY,minItems:5,items:{type:Type.STRING}},tips:{type:Type.ARRAY,minItems:4,items:{type:Type.STRING}}},required:['places','food','packing','tips']}}
-    }).finally(()=>clearTimeout(timer));
-    const parsed=JSON.parse(String(response?.text||'{}'));
-    const places=Array.isArray(parsed?.places)?parsed.places:[];
-    const food=Array.isArray(parsed?.food)?parsed.food:[];
-    const forbidden=/central orientation|central district|heritage or museum visit|established public market|public park or scenic viewpoint|regional (?:breakfast|lunch|dinner) selection|seasonal local (?:lunch|dinner) menu/i;
-    const clean=(v:any)=>sanitizeGeneratedText(String(v||'')).trim();
-    const unique=(rows:any[],field:string)=>new Set(rows.map(row=>clean(row?.[field]).toLowerCase()).filter(Boolean)).size===rows.length;
-    if(places.length!==6||food.length!==8||!unique(places,'name')||!unique(food,'name')||places.some((p:any)=>!clean(p?.name)||forbidden.test(clean(p?.name)))||food.some((f:any)=>!clean(f?.name)||forbidden.test(clean(f?.name))))return null;
-    return {
-      places:places.map((p:any)=>({name:clean(p.name),description:clean(p.description),bestTimeToVisit:clean(p.bestTimeToVisit),entryFee:clean(p.entryFee)||'Confirm with official venue'})),
-      food:food.map((f:any)=>({name:clean(f.name),description:clean(f.description),type:clean(f.type)||'both',mustTryAt:clean(f.mustTryAt)||`${destination} established restaurant`})),
-      packing:(Array.isArray(parsed.packing)?parsed.packing:[]).map(clean).filter(Boolean).slice(0,10),
-      tips:(Array.isArray(parsed.tips)?parsed.tips:[]).map(clean).filter(Boolean).slice(0,8)
-    };
-  }catch(error:any){
-    console.warn(`[DESTINATION_RECOVERY_FAILED] ${error?.message||error}`);
-    return null;
+    const timer=setTimeout(()=>controller.abort(),12_000);
+    try{
+      const response=await ai.models.generateContent({model,contents,config:{abortSignal:controller.signal,responseMimeType:'application/json',responseSchema}});
+      const parsed=JSON.parse(String(response?.text||'{}'));
+      const places=Array.isArray(parsed?.places)?parsed.places:[];
+      const food=Array.isArray(parsed?.food)?parsed.food:[];
+      const unique=(rows:any[],field:string)=>new Set(rows.map(row=>clean(row?.[field]).toLowerCase()).filter(Boolean)).size===rows.length;
+      if(places.length!==6||food.length!==8||!unique(places,'name')||!unique(food,'name')||places.some((p:any)=>!clean(p?.name)||forbidden.test(clean(p?.name)))||food.some((f:any)=>!clean(f?.name)||forbidden.test(clean(f?.name))))throw new Error('Recovery model returned an invalid destination profile.');
+      console.warn(`[DESTINATION_RECOVERY_MODEL_SUCCESS] ${model}`);
+      return {
+        places:places.map((p:any)=>({name:clean(p.name),description:clean(p.description),bestTimeToVisit:clean(p.bestTimeToVisit),entryFee:clean(p.entryFee)||'Confirm with official venue'})),
+        food:food.map((f:any)=>({name:clean(f.name),description:clean(f.description),type:clean(f.type)||'both',mustTryAt:clean(f.mustTryAt)||`${destination} established restaurant`})),
+        packing:(Array.isArray(parsed.packing)?parsed.packing:[]).map(clean).filter(Boolean).slice(0,10),
+        tips:(Array.isArray(parsed.tips)?parsed.tips:[]).map(clean).filter(Boolean).slice(0,8)
+      };
+    }catch(error:any){
+      console.warn(`[DESTINATION_RECOVERY_MODEL_FAILED] ${model}: ${error?.message||error}`);
+    }finally{clearTimeout(timer);}
   }
+  console.warn(`[DESTINATION_RECOVERY_FAILED] All ${models.length} recovery model(s) failed for ${destination}.`);
+  return null;
 }
 
 app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
