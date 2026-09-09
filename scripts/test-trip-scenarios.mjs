@@ -40,6 +40,37 @@ assert.doesNotMatch(serverSource,/GEMINI_(?:RECOVERY|ITINERARY)_MODEL[^\n]*gemin
 assert.match(serverSource,/controller\.abort\(\)/,'timed-out Gemini requests must be aborted rather than left running beside recovery');
 assert.match(serverSource,/dubai:\s*\{[\s\S]*Burj Khalifa and Downtown Dubai[\s\S]*Dubai Creek and Gold Souk/,'Dubai must have a provider-independent verified destination profile');
 
+// Regression for the Sep 9 Rome guide: paid PDFs must not retain generic
+// orientation/nightlife placeholders, imply an unverified hotel restaurant,
+// omit honeymoon personalization, or show N/A route distance beside transit.
+{
+  const rome={
+    destination:'Rome, Lazio, Italy',travelStyle:'Nightlife',travelerType:'Honeymoon',travelers:2,budgetAmount:'USD 3900',budgetHotelName:"Giglio Dell'opera Hotel",
+    placesToVisit:[
+      {name:'Colosseum',description:'Ancient Roman amphitheatre.',entryFee:'Official ticket - verify current price'},
+      {name:'Vatican Museums',description:'Major Vatican museum collections.',entryFee:'Official ticket - verify current price'}
+    ],
+    localFood:[
+      {name:'Cacio e Pepe',description:'A complete Roman pasta dish.',mustTryAt:'Roscioli'},
+      {name:'Saltimbocca alla Romana',description:'A complete Roman veal main course.',mustTryAt:'Armando al Pantheon'}
+    ],
+    days:[{dayNumber:1,theme:'Arrival & Nightlife',activities:[
+      {time:'11:00 AM',title:'Arrival Transfer & Hotel Check-in',description:'Arrive and check in.',location:"Giglio Dell'opera Hotel",cost:'$12'},
+      {time:'12:30 PM',title:'Lunch & Live Entertainment',description:'Choose an energetic venue.',location:'Rome established entertainment district',cost:'$79'},
+      {time:'03:30 PM',title:'Nightlife Venue & Safe Return',description:'Use a reputable club, lounge or casino.',location:'Rome nightlife district',cost:'$5'},
+      {time:'07:30 PM',title:'Regional Dinner: Cacio e Pepe',description:'A complete Roman pasta dish.',location:'Roscioli',cost:'$78'}
+    ]}]
+  };
+  quality.finalizeCustomerSpecificity(rome);
+  const copy=JSON.stringify(rome);
+  assert.doesNotMatch(copy,/Morning Destination Orientation|Nightlife Venue|entertainment district|nightlife district|Lunch & Live Entertainment/i,'generic Rome placeholders must be removed');
+  assert.doesNotMatch(copy,/Chef's Rome Seasonal Menu.*Giglio Dell'opera Hotel/i,'fallback dining must not invent a hotel restaurant');
+  assert.match(copy,/Romantic Evening/i,'honeymoon itinerary needs a visible romantic experience');
+  const routed=quality.applySmartRouteAndTransport(rome);
+  assert.ok(routed.days[0].activities.slice(1).every(a=>Number(a.distanceFromPreviousKm)>0),'missing coordinates need labeled estimated route distances');
+  assert.ok(routed.days[0].activities.some(a=>a.distanceFromPreviousEstimated===true),'derived route distances must be marked estimated');
+}
+
 {
   const rome={destination:'Rome, Lazio, Italy',travelStyle:'Budget',budgetHotelName:'Ibis Roma Fiera',localFood:[
     {name:'Suppli',description:'Fried rice balls with mozzarella.',type:'street food',mustTryAt:'Suppli shop'},

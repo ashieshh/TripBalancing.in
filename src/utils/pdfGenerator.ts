@@ -1478,13 +1478,18 @@ export const exportPremiumTravelPDF = async (
 
   // Grid / Badges for Cover
   const coverTodayStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  const formatTravelDate = (value: any) => {
+    const date = new Date(`${String(value || '')}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+  const travelDateRange = [formatTravelDate(itinerary.startDate), formatTravelDate(itinerary.endDate)].filter(Boolean).join(' - ');
   const coverBadges = [
     { label: (itinerary as any).isAiBudgetPlanner ? "AI RECOMMENDED BUDGET" : "PLANNED BUDGET", val: String((itinerary as any).plannedBudget || itinerary.budgetAmount || "Bespoke"), color: [13, 148, 136] },
     { label: "REALISTIC ESTIMATE", val: String((itinerary as any).realisticEstimatedCost || itinerary.estimatedBudgetBreakdown?.total || "Calculating"), color: [2, 132, 199] },
     { label: "TRIP DURATION", val: `${itinerary.days?.length || 0} Days`, color: [79, 70, 229] },
     { label: "TRAVEL PARTY", val: `${itinerary.travelers} Pax${itinerary.travelerType ? ` - ${itinerary.travelerType}` : ""}`, color: [217, 119, 6] },
     { label: "TRAVEL STYLE", val: String(itinerary.travelStyle || "Premium").toUpperCase(), color: [20, 184, 166] },
-    { label: "GENERATION DATE", val: coverTodayStr.toUpperCase(), color: [225, 29, 72] },
+    { label: "TRAVEL DATES", val: (travelDateRange || "DATES NOT PROVIDED").toUpperCase(), color: [225, 29, 72] },
     itinerary.origin
       ? { label: "TRAVELING FROM", val: String(itinerary.origin).toUpperCase(), color: [147, 51, 234] }
       : { label: "VERSION CONTROL", val: "V1.0 PLATINUM", color: [100, 116, 139] },
@@ -1632,6 +1637,7 @@ export const exportPremiumTravelPDF = async (
   const destinationText = String(itinerary.destination || "").toLowerCase();
   const emergencyDirectory = (() => {
     if (/france|paris|lyon|nice|marseille/.test(destinationText)) return { general: "112", police: "17", medical: "15" };
+    if (/italy|rome|milan|venice|florence|naples|turin|bologna/.test(destinationText)) return { general: "112", police: "112", medical: "112 / 118" };
     if (/india|mumbai|delhi|goa|jaipur|bengaluru|bangalore|chennai|kolkata|hyderabad/.test(destinationText)) return { general: "112", police: "112 / 100", medical: "112 / 108" };
     if (/united kingdom|england|scotland|wales|london|manchester|edinburgh/.test(destinationText)) return { general: "999 / 112", police: "999 / 112", medical: "999 / 112" };
     if (/united states|usa|new york|los angeles|san francisco|chicago/.test(destinationText)) return { general: "911", police: "911", medical: "911" };
@@ -2001,11 +2007,12 @@ export const exportPremiumTravelPDF = async (
       // Quick parameters stats
       const actCount = day.activities?.length || 0;
       const routeDistance = (day.activities || []).reduce((sum: number, a: any) => sum + (Number(a.distanceFromPreviousKm) || 0), 0);
+      const routeDistanceEstimated = (day.activities || []).some((a:any)=>Boolean(a?.distanceFromPreviousEstimated));
       const walkingDistance = (day.activities || []).reduce((sum: number, a: any) => /walk/i.test(String(a.transportFromPrevious || '')) ? sum + (Number(a.distanceFromPreviousKm) || 0) : sum, 0);
       const routeMinutes = (day.activities || []).reduce((sum: number, a: any) => {
         const txt=String(a.travelTimeFromPrevious||''); const h=Number((txt.match(/(\d+)h/)||[])[1]||0); const m=Number((txt.match(/(\d+)m/)||[])[1]||0); const min=Number((txt.match(/(\d+) min/)||[])[1]||0); return sum+h*60+m+min;
       }, 0);
-      const dist = routeDistance > 0 ? routeDistance.toFixed(1) : "N/A";
+      const dist = routeDistance > 0 ? `${routeDistanceEstimated ? "~" : ""}${routeDistance.toFixed(1)}` : "Route pending";
       const travTime = routeMinutes > 0 ? `${Math.floor(routeMinutes/60)}h ${routeMinutes%60}m` : "Route based";
 
       let weatherLabel = "Season-aware planning";
@@ -2018,7 +2025,7 @@ export const exportPremiumTravelPDF = async (
       const dStats = [
         { label: "EST. DAILY REQUIREMENT", value: displayBudget, bg: [236, 253, 245], border: [13, 148, 136], txt: [13, 148, 136], icon: "budget" },
         { label: headerWeather && headerWeather[dIdx] ? "WEATHER OUTLOOK" : "WEATHER GUIDANCE", value: weatherLabel, bg: [240, 249, 255], border: [2, 132, 199], txt: [2, 132, 199], icon: "weather" },
-        { label: "ROUTE DISTANCE", value: dist === "N/A" ? "N/A" : `${dist} km`, bg: [255, 241, 242], border: [225, 29, 72], txt: [225, 29, 72], icon: "distance" },
+        { label: routeDistanceEstimated ? "EST. ROUTE DISTANCE" : "ROUTE DISTANCE", value: dist === "Route pending" ? dist : `${dist} km`, bg: [255, 241, 242], border: [225, 29, 72], txt: [225, 29, 72], icon: "distance" },
         { label: "TRANSIT TIME", value: travTime, bg: [238, 242, 255], border: [79, 70, 229], txt: [79, 70, 229], icon: "time" }
       ];
 
@@ -2400,7 +2407,7 @@ export const exportPremiumTravelPDF = async (
     { key: 'budget', name: "BUDGET STAYS", comfort: "Value Comfort", price: "Best rates", txt: [13, 148, 136] },
     { key: 'midRange', name: "MID-RANGE SUITES", comfort: "Premium Comfort", price: "Top quality suites", txt: [79, 70, 229] },
     { key: 'luxury', name: "LUXURY RETREATS", comfort: "Ultra Luxury", price: "Five-star premium", txt: [217, 119, 6] }
-  ];
+  ].filter((tier) => Array.isArray((hotelData as any)[tier.key]) && (hotelData as any)[tier.key].length > 0);
   const preferredTierKey = lodgingStyle === 'luxury' ? 'luxury' : lodgingStyle === 'smart luxury' ? 'midRange' : (lodgingStyle === 'budget' || lodgingStyle === 'backpacker') ? 'budget' : 'midRange';
   const hotelTiers = [...allHotelTiers].sort((a,b)=>Number(b.key===preferredTierKey)-Number(a.key===preferredTierKey));
   hotelTiers.forEach((tier, idx) => {

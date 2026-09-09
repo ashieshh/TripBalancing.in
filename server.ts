@@ -4483,8 +4483,15 @@ function applySmartRouteAndTransport(itinerary: any) {
       // single excursion into impossible 75-100 km day totals.
       if (previousIsRemote !== currentIsRemote && (km == null || km < 8)) km = 8;
       const r=routeMode(ordered[i-1],a,km);
+      const distanceIsEstimated=km==null;
+      // Do not show "N/A" beside a concrete transit time. When coordinates are
+      // absent, derive a conservative route-planning distance and label it.
+      if(km==null){
+        const speed=/walk/i.test(r.mode)?4.5:/private|taxi|rideshare|car/i.test(r.mode)?24:18;
+        km=Math.max(0.5,r.minutes/60*speed);
+      }
       const promisedPrivateTransfer = /chauffeur|private (?:car|transfer)|pre-arranged private/i.test(textOf(a));
-      return {...a,visitDuration:a.visitDuration||visitDuration(a),transportFromPrevious:promisedPrivateTransfer?'Private car / pre-booked transfer':r.mode,travelTimeFromPrevious:fmt(r.minutes),distanceFromPreviousKm:km==null?undefined:Math.round(km*10)/10};
+      return {...a,visitDuration:a.visitDuration||visitDuration(a),transportFromPrevious:promisedPrivateTransfer?'Private car / pre-booked transfer':r.mode,travelTimeFromPrevious:fmt(r.minutes),distanceFromPreviousKm:Math.round(km*10)/10,distanceFromPreviousEstimated:distanceIsEstimated};
     });
     const tips=activities.slice(1).map((a:any)=>`${a.transportFromPrevious}: about ${a.travelTimeFromPrevious} from the previous stop${a.distanceFromPreviousKm!=null?` (${a.distanceFromPreviousKm} km)`:''}.`);
     return {...day,activities,transportationSuggestions:tips.length?tips:day.transportationSuggestions};
@@ -4515,6 +4522,18 @@ function finalizeCustomerSpecificity(itinerary: any) {
   const estimate=(n:number,label='group estimate')=>`${sym}${Math.max(1,Math.round(n)).toLocaleString('en-US')} ${label}`;
   const vague=/check current|verify (?:live |current )?(?:rate|price|menu)|per person$|fine dining - per person|premium dining - per person|premium experience|premium service|mid-premium|low cost$|optional$|calculated by/i;
   let foodCursor=0, placeCursor=0;
+  const usedFinalFoods=new Set<string>();
+  const usedFinalPlaces=new Set<string>();
+  for(const day of itinerary.days){
+    for(const activity of Array.isArray(day?.activities)?day.activities:[]){
+      const hay=String(`${activity?.title||''} ${activity?.description||''}`).toLowerCase();
+      const matched=foods.find((food:any)=>food?.name&&hay.includes(String(food.name).toLowerCase()));
+      if(matched) usedFinalFoods.add(String(matched.name).toLowerCase());
+      const genericActivity=/morning destination orientation|nightlife venue|nightlife district|entertainment district/i.test(hay);
+      const matchedPlace=places.find((place:any)=>place?.name&&hay.includes(String(place.name).toLowerCase()));
+      if(matchedPlace&&!genericActivity) usedFinalPlaces.add(String(matchedPlace.name).toLowerCase());
+    }
+  }
 
   const usedMajorPlaces=new Set<string>();
   const placeIdentity=(activity:any)=>{
@@ -4533,8 +4552,8 @@ function finalizeCustomerSpecificity(itinerary: any) {
       const isMeal=/breakfast|brunch|lunch|dinner|dining|meal|culinary|tasting|cafe/i.test(text);
       const isTransfer=/transfer|chauffeur|pick[- ]?up|drop[- ]?off|airport|station/i.test(text);
       const isSpa=/spa|wellness|massage/i.test(text);
-      const isGenericPlace=/private\s*\/\s*(?:priority|advance-planned)|cultural context|second sight|selective premium experience|destination experience/i.test(text);
-      const isGenericMeal=/different local|chef'?s local|signature dinner(?!: [A-Z])|boutique dining|complete destination-appropriate|acclaimed fine-dining/i.test(text);
+      const isGenericPlace=/private\s*\/\s*(?:priority|advance-planned)|cultural context|second sight|selective premium experience|destination experience|morning destination orientation|nightlife venue|nightlife district|entertainment district/i.test(text);
+      const isGenericMeal=/different local|chef'?s local|chef'?s .* seasonal menu|signature dinner(?!: [A-Z])|boutique dining|complete destination-appropriate|acclaimed fine-dining|lunch\s*&\s*live entertainment/i.test(text);
 
       if (isGenericMeal) {
         const timeMatch=String(a?.time||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);
@@ -4542,22 +4561,28 @@ function finalizeCustomerSpecificity(itinerary: any) {
         if(timeMatch){let hour=Number(timeMatch[1])%12;if(timeMatch[3]==='PM')hour+=12;timeMinutes=hour*60+Number(timeMatch[2]||0);}
         const role=/dinner/i.test(text)||timeMinutes>=17*60?'Dinner':'Lunch';
         const suitableFoods=foods.filter((food:any)=>isCompleteMealFood(food,role.toLowerCase()==='dinner'?'dinner':'lunch'));
-        const food=suitableFoods.length?suitableFoods[(dayIndex+foodCursor++)%suitableFoods.length]:null;
+        const food=suitableFoods.find((candidate:any)=>!usedFinalFoods.has(String(candidate?.name||'').toLowerCase()))
+          || (suitableFoods.length?suitableFoods[(dayIndex+foodCursor++)%suitableFoods.length]:null);
         if(food){
           a.title=`Regional ${role}: ${food.name}`;
           a.description=String(food.description||`Enjoy ${food.name}, a complete local ${role.toLowerCase()} specialty of ${destination}.`);
           a.location=String(food.mustTryAt||selectedHotel||destination);
+          usedFinalFoods.add(String(food.name).toLowerCase());
         }else{
           const cityName=destination.split(',')[0].trim()||destination;
           a.title=`Upscale Regional ${role}: Chef's ${cityName} Menu - Day ${dayIndex+1}`;
           a.description=`Enjoy a complete savory ${cityName} ${role.toLowerCase()} with a main course and accompaniments. Confirm the current menu, reservation availability and final price before dining.`;
-          a.location=selectedHotel||destination;
+          a.location=`${destination} established restaurant`;
         }
       } else if (isGenericPlace && places.length) {
-        const place=places[(dayIndex+placeCursor++)%places.length];
+        const place=places.find((candidate:any)=>!usedFinalPlaces.has(String(candidate?.name||'').toLowerCase()));
+        // If every verified attraction is already scheduled, omit the generic
+        // filler instead of manufacturing a duplicate visit under a new title.
+        if(!place) return {...a,__removeGeneric:true};
         a.title=`Guided Visit: ${place.name}`;
         a.description=String(place.description||`Explore ${place.name} with a local guide.`);
         a.location=String(place.name);
+        usedFinalPlaces.add(String(place.name).toLowerCase());
       } else if (isSpa && selectedHotel) {
         a.title=`Spa & Wellness Session at ${selectedHotel}`;
         a.description=`Reserve a wellness treatment at ${selectedHotel}; confirm the treatment menu and availability before arrival.`;
@@ -4566,11 +4591,14 @@ function finalizeCustomerSpecificity(itinerary: any) {
 
       const paidService=/boat|cruise|guided (?:tour|visit)|spa|massage|rafting|kayak|diving|climbing|bike|bicycle|rental|scenic flight|helicopter|safari|private experience/i.test(text);
       const incorrectlyFree=(isTransfer||paidService)&&/\bfree\b/i.test(String(a.cost||''))&&!/\bpaid\b/i.test(String(a.cost||''));
-      if (!a.cost || vague.test(String(a.cost)) || incorrectlyFree) {
+      const numericCost=Number(String(a.cost||'').replace(/,/g,'').match(/[0-9]+(?:\.[0-9]+)?/)?.[0]||0);
+      const implausiblyLowPaidService=paidService&&numericCost>0&&numericCost<(style==='budget'||style==='backpacker'?5:10);
+      if (!a.cost || vague.test(String(a.cost)) || incorrectlyFree || implausiblyLowPaidService) {
         a.cost=isTransfer?estimate(transferEstimate):isMeal?estimate(mealEstimate,'for all travelers'):estimate(activityEstimate);
       }
       return a;
     }).filter((activity:any)=>{
+      if(activity?.__removeGeneric) return false;
       const identity=placeIdentity(activity);
       if(!identity) return true;
       // Museums, performances and other clearly distinct sub-experiences remain
@@ -4586,6 +4614,18 @@ function finalizeCustomerSpecificity(itinerary: any) {
     const honestTheme=promisesBoat&&!hasBoat
       ? activities.filter((a:any)=>!/breakfast|lunch|dinner|meal/i.test(String(a.title||''))).slice(0,2).map((a:any)=>String(a.title||'').replace(/^(?:Explore|Excursion to|Sacred|Guided Visit:)\s*/i,'')).join(' & ')
       : themeText;
+    if(String(itinerary.travelerType||'').toLowerCase()==='honeymoon'){
+      const eveningActivities=activities.filter((a:any)=>{
+        const time=String(a?.time||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);
+        let hour=0;if(time){hour=Number(time[1])%12;if(time[3]==='PM')hour+=12;}
+        return hour>=16&&!/transfer|airport|station/i.test(String(a?.title||''));
+      });
+      const romantic=eveningActivities.find((a:any)=>!/lunch|dinner/i.test(String(a?.title||'')))||eveningActivities[0];
+      if(romantic&&!/romantic/i.test(`${romantic.title||''} ${romantic.description||''}`)){
+        romantic.title=`Romantic Evening: ${String(romantic.title||'Destination Experience').replace(/^Guided Visit:\s*/i,'')}`;
+        romantic.description=`${String(romantic.description||'').trim()} Enjoy this as an unhurried shared experience with time for photographs and a relaxed moment together.`.trim();
+      }
+    }
     return {...day,theme:honestTheme||`Day ${dayIndex+1} Exploration`,activities};
   });
   return itinerary;
@@ -7112,6 +7152,7 @@ export const itineraryQualityTestHooks = {
   repairFinalItineraryDiversity,
   repairResidualUserFacingQuality,
   finalizeCustomerSpecificity,
+  applySmartRouteAndTransport,
   buildResilientDestinationDetails,
   recoverDestinationSpecificDetails,
   alignLodgingLogisticsToBudgetHotel,
