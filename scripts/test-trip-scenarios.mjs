@@ -65,6 +65,7 @@ assert.match(serverSource,/dubai:\s*\{[\s\S]*Burj Khalifa and Downtown Dubai[\s\
   const copy=JSON.stringify(rome);
   assert.doesNotMatch(copy,/Morning Destination Orientation|Nightlife Venue|entertainment district|nightlife district|Lunch & Live Entertainment/i,'generic Rome placeholders must be removed');
   assert.doesNotMatch(copy,/Chef's Rome Seasonal Menu.*Giglio Dell'opera Hotel/i,'fallback dining must not invent a hotel restaurant');
+  assert.doesNotMatch(copy,/"cost":"\$5"/i,'a converted paid attraction must not retain the generic nightlife placeholder price');
   assert.match(copy,/Romantic Evening/i,'honeymoon itinerary needs a visible romantic experience');
   const routed=quality.applySmartRouteAndTransport(rome);
   assert.ok(routed.days[0].activities.slice(1).every(a=>Number(a.distanceFromPreviousKm)>0),'missing coordinates need labeled estimated route distances');

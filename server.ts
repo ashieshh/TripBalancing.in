@@ -4589,12 +4589,20 @@ function finalizeCustomerSpecificity(itinerary: any) {
         a.location=selectedHotel;
       }
 
-      const paidService=/boat|cruise|guided (?:tour|visit)|spa|massage|rafting|kayak|diving|climbing|bike|bicycle|rental|scenic flight|helicopter|safari|private experience/i.test(text);
-      const incorrectlyFree=(isTransfer||paidService)&&/\bfree\b/i.test(String(a.cost||''))&&!/\bpaid\b/i.test(String(a.cost||''));
+      const finalText=`${a.title||''} ${a.description||''} ${a.location||''}`;
+      const finalIsMeal=/breakfast|brunch|lunch|dinner|dining|meal|culinary|tasting|cafe/i.test(finalText);
+      const finalIsTransfer=/transfer|chauffeur|pick[- ]?up|drop[- ]?off|airport|station/i.test(finalText);
+      const paidService=/boat|cruise|guided (?:tour|visit)|spa|massage|rafting|kayak|diving|climbing|bike|bicycle|rental|scenic flight|helicopter|safari|private experience/i.test(finalText);
+      const incorrectlyFree=(finalIsTransfer||paidService)&&/\bfree\b/i.test(String(a.cost||''))&&!/\bpaid\b/i.test(String(a.cost||''));
       const numericCost=Number(String(a.cost||'').replace(/,/g,'').match(/[0-9]+(?:\.[0-9]+)?/)?.[0]||0);
       const implausiblyLowPaidService=paidService&&numericCost>0&&numericCost<(style==='budget'||style==='backpacker'?5:10);
       if (!a.cost || vague.test(String(a.cost)) || incorrectlyFree || implausiblyLowPaidService) {
-        a.cost=isTransfer?estimate(transferEstimate):isMeal?estimate(mealEstimate,'for all travelers'):estimate(activityEstimate);
+        a.cost=finalIsTransfer?estimate(transferEstimate):finalIsMeal?estimate(mealEstimate,'for all travelers'):estimate(activityEstimate);
+      } else if(paidService&&/^[₹$€£¥]\s*[0-9][0-9,]*(?:\.[0-9]+)?$/.test(String(a.cost||'').trim())) {
+        a.cost=`${String(a.cost).trim()} planning estimate; verify official ticket`;
+      }
+      if(/museum|gallery/i.test(finalText)&&!/timed-entry|closing time/i.test(String(a.description||''))){
+        a.description=`${String(a.description||'').trim()} Reserve an official timed-entry slot and confirm the opening and closing time for your travel date.`.trim();
       }
       return a;
     }).filter((activity:any)=>{
