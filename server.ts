@@ -6029,6 +6029,34 @@ Return the response in strict JSON format.`;
         packing: ["Comfortable shoes for cobblestones", "Windproof light jacket", "European-style travel adapter", "Small AZN cash notes", "Modest clothing for mosques", "Sun protection"],
         tips: ["Use Baku Metro for suitable central routes and Bolt/taxi for point-to-point travel.", "Allow a road transfer or organized tour for Gobustan and Absheron Peninsula sights.", "Baku can be windy, especially at exposed viewpoints.", "Use official/app-based taxis rather than accepting unsolicited airport rides."]
       },
+      rome: {
+        places: [
+          { name: "Colosseum, Roman Forum and Palatine Hill", description: "Rome's principal ancient archaeological area, combining the amphitheatre with the Forum and Palatine Hill on a timed-entry route.", bestTimeToVisit: "Reserved morning slot", entryFee: "Paid timed ticket - verify the current official ticket and access rules" },
+          { name: "Pantheon", description: "Exceptionally preserved ancient Roman monument in the historic centre, later consecrated as a church.", bestTimeToVisit: "Morning or late afternoon", entryFee: "Paid entry for most visitors - verify current official exemptions and booking rules" },
+          { name: "Vatican Museums and Sistine Chapel", description: "Major papal art and archaeology collections culminating in the Sistine Chapel; allow substantial time and reserve through the official ticket channel.", bestTimeToVisit: "Reserved morning slot", entryFee: "Paid timed ticket - verify the current official price and closure calendar" },
+          { name: "Galleria Borghese", description: "Reservation-only art museum in Villa Borghese with major Bernini, Caravaggio, Raphael and Canova works.", bestTimeToVisit: "Reserved daytime slot", entryFee: "Paid timed ticket - advance reservation normally required; verify current rules" },
+          { name: "Castel Sant'Angelo", description: "Roman mausoleum transformed into a fortress and museum beside the Tiber, with terraces overlooking central Rome.", bestTimeToVisit: "Late afternoon", entryFee: "Paid museum entry - verify the current official ticket" },
+          { name: "Trastevere and Piazza di Santa Maria", description: "Historic lanes and public squares on the west bank of the Tiber, suitable for an early-evening walk before a reserved meal or performance.", bestTimeToVisit: "Late afternoon or early evening", entryFee: "Free to walk; food, drinks and performances cost extra" }
+        ],
+        food: [
+          { name: "Spaghetti alla Carbonara", description: "A complete Roman pasta dish traditionally made with guanciale, egg, Pecorino Romano and black pepper.", type: "non-veg", mustTryAt: "A well-reviewed Roman trattoria in Testaccio, Monti or the historic centre" },
+          { name: "Tonnarelli Cacio e Pepe", description: "A complete Roman pasta dish built around Pecorino Romano and black pepper, emulsified with pasta water.", type: "veg", mustTryAt: "An established Roman trattoria" },
+          { name: "Bucatini all'Amatriciana", description: "A substantial Lazio pasta dish with tomato, guanciale and Pecorino Romano.", type: "non-veg", mustTryAt: "A traditional Roman trattoria" },
+          { name: "Saltimbocca alla Romana", description: "A complete Roman veal main course prepared with prosciutto and sage, normally paired with a vegetable or potato side.", type: "non-veg", mustTryAt: "An established Roman osteria" },
+          { name: "Coda alla Vaccinara", description: "A rich Roman oxtail main course slowly braised with tomato, celery and aromatics.", type: "non-veg", mustTryAt: "A traditional Testaccio restaurant" },
+          { name: "Abbacchio Scottadito", description: "Grilled lamb chops served as a complete Roman main course with seasonal vegetables or potatoes.", type: "non-veg", mustTryAt: "A well-reviewed Roman restaurant serving cucina romana" },
+          { name: "Trippa alla Romana", description: "Roman-style tripe cooked with tomato and herbs and finished with Pecorino Romano, served as a savory main course.", type: "non-veg", mustTryAt: "A traditional Roman trattoria" },
+          { name: "Pizza Romana with Savory Toppings", description: "Thin, crisp Roman-style pizza ordered as a complete savory meal with a salad or vegetable side where desired.", type: "both", mustTryAt: "An established Roman pizzeria" }
+        ],
+        nightlife: [
+          { name: "Gregory's Jazz Club", description: "Established jazz and whisky club near the Spanish Steps with scheduled live sets; reserve for the actual programme rather than assuming walk-in availability.", bestTimeToVisit: "Evening - check the current concert time", entryFee: "Ticket or minimum spend may apply - verify the current programme" },
+          { name: "Alcazar Live", description: "Trastevere performance venue in a former cinema hosting live music, comedy, screenings and other ticketed events.", bestTimeToVisit: "Evening - only when a suitable event is scheduled", entryFee: "Event-dependent ticket - verify the official programme" },
+          { name: "Freni e Frizioni", description: "Long-running Trastevere cocktail bar near Piazza Trilussa, suitable for a late aperitivo or drinks after dinner.", bestTimeToVisit: "Late evening", entryFee: "No assumed cover; drinks are extra and current policy should be confirmed" },
+          { name: "Drink Kong", description: "Established cocktail bar in the Monti area with a late-evening format; check its current opening day, reservations and entry policy.", bestTimeToVisit: "Late evening", entryFee: "No assumed cover; drinks are extra and current policy should be confirmed" }
+        ],
+        packing: ["Comfortable shoes for cobblestones and long museum routes", "Modest shoulder-and-knee covering for churches and Vatican sites", "Compact refillable bottle for Rome's public nasoni drinking fountains", "Light layers for cooler evenings", "Type C/F/L power adapter as required", "Secure cross-body day bag", "Passport and travel documents"],
+        tips: ["Reserve the Colosseum archaeological area, Vatican Museums and Galleria Borghese through their official channels and use the booked entry time.", "Use Metro, tram or bus where they genuinely fit the route, but allow extra time and use a verified taxi for late-night returns.", "Rome's public nasoni drinking fountains provide potable water unless a sign states otherwise; do not drink from decorative fountains.", "Check the current event calendar, opening day, dress policy and reservation requirements before visiting any evening venue.", "Keep shoulders and knees covered where required at churches and Vatican religious sites, and follow posted security rules."]
+      },
       dubai: {
         places: [
           { name: "Burj Khalifa and Downtown Dubai", description: "Dubai's landmark tower and the surrounding Downtown district beside Dubai Mall.", bestTimeToVisit: "Late afternoon / evening", entryFee: "Downtown public areas free; observation decks are paid" },
@@ -6160,8 +6188,8 @@ Return the response in strict JSON format.`;
     for (let dayIdx = 0; dayIdx < diffDays; dayIdx++) {
       const primary = details.places[dayIdx % details.places.length];
       const secondary = details.places[(dayIdx + 1) % details.places.length];
-      const meal1 = mealAt(dayIdx);
-      const meal2 = mealAt(dayIdx + 1);
+      const meal1 = mealAt(dayIdx * 2);
+      const meal2 = mealAt(dayIdx * 2 + 1);
       const tasting = tastingAt(dayIdx);
       let theme = `${primary.name} & Local Discovery`;
       let activities: any[] = [];
@@ -6380,6 +6408,23 @@ Return the response in strict JSON format.`;
               { name: "The Kayon Jungle Resort", rating: 4.8, distanceFromCenter: "Ubud area", description: "Luxury jungle resort experience outside central Ubud, best suited to travellers prioritizing retreat time." },
               { name: "AYANA Resort Bali", rating: 4.8, distanceFromCenter: "Jimbaran", description: "Large luxury resort complex in Jimbaran with extensive on-site facilities." },
               { name: "Maya Ubud Resort & Spa", rating: 4.7, distanceFromCenter: "Ubud", description: "Upscale Ubud resort blending a natural setting with convenient access to the cultural centre." }
+            ]
+          },
+          rome: {
+            budget: [
+              { name: "The RomeHello", distanceFromCenter: "Repubblica / central Rome", description: "Hostel and private-room option near Repubblica and Termini; verify the current room type, total rate and cancellation terms." },
+              { name: "Generator Rome", distanceFromCenter: "Esquilino / near Termini", description: "Design-led hostel with dormitory and private-room formats near Vittorio Emanuele; confirm the exact room category and current neighborhood transport plan." },
+              { name: "Hotel Trastevere", distanceFromCenter: "Trastevere", description: "Three-star hotel in the Trastevere district; verify live rates, room conditions and late-night access before booking." }
+            ],
+            midRange: [
+              { name: "Hotel Santa Maria", distanceFromCenter: "Trastevere", description: "Courtyard-style hotel near Piazza di Santa Maria in Trastevere, useful for evening dining and walking routes." },
+              { name: "iQ Hotel Roma", distanceFromCenter: "Repubblica / near Termini", description: "Central hotel close to Repubblica and Termini with practical access to the historic centre and Metro A." },
+              { name: "Hotel Artemide", distanceFromCenter: "Via Nazionale", description: "Established central hotel on Via Nazionale; verify the room category, inclusions and current rate." }
+            ],
+            luxury: [
+              { name: "Hotel de Russie", distanceFromCenter: "Piazza del Popolo", description: "Five-star Rocco Forte property between Piazza del Popolo and the Spanish Steps with a central historic-district setting." },
+              { name: "Hotel de la Ville", distanceFromCenter: "Spanish Steps", description: "Five-star Rocco Forte property above the Spanish Steps, positioned for central sightseeing and premium service." },
+              { name: "Rome Cavalieri, A Waldorf Astoria Hotel", distanceFromCenter: "Monte Mario", description: "Full-service luxury hilltop hotel with panoramic views; plan transfers because it is outside the most walkable historic-centre routes." }
             ]
           },
           goa: {

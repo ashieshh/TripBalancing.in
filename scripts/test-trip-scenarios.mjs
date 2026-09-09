@@ -39,6 +39,15 @@ assert.match(serverSource,/GEMINI_ITINERARY_MODEL[\s\S]{0,120}gemini-3\.6-flash/
 assert.doesNotMatch(serverSource,/GEMINI_(?:RECOVERY|ITINERARY)_MODEL[^\n]*gemini-2\.5-flash/,'customer itinerary paths must not default to the retired Gemini 2.5 Flash model');
 assert.match(serverSource,/controller\.abort\(\)/,'timed-out Gemini requests must be aborted rather than left running beside recovery');
 assert.match(serverSource,/dubai:\s*\{[\s\S]*Burj Khalifa and Downtown Dubai[\s\S]*Dubai Creek and Gold Souk/,'Dubai must have a provider-independent verified destination profile');
+const curatedFallbackStart=serverSource.indexOf('const curatedFallbackDetails');
+const curatedRomeStart=serverSource.indexOf('rome: {',curatedFallbackStart);
+const curatedRomeEnd=serverSource.indexOf('dubai: {',curatedRomeStart);
+const curatedRomeProfile=serverSource.slice(curatedRomeStart,curatedRomeEnd);
+assert.ok(curatedFallbackStart>=0&&curatedRomeStart>curatedFallbackStart&&curatedRomeEnd>curatedRomeStart,'Rome must have a provider-independent fallback profile');
+for(const landmark of ['Colosseum, Roman Forum and Palatine Hill','Vatican Museums and Sistine Chapel','Galleria Borghese','Castel Sant\'Angelo'])assert.match(curatedRomeProfile,new RegExp(landmark.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')),'Rome fallback must retain verified named landmarks');
+for(const venue of ["Gregory's Jazz Club",'Alcazar Live','Freni e Frizioni','Drink Kong'])assert.match(curatedRomeProfile,new RegExp(venue.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')),'Rome Nightlife fallback must contain real named evening venues');
+for(const meal of ['Spaghetti alla Carbonara','Tonnarelli Cacio e Pepe',"Bucatini all'Amatriciana",'Saltimbocca alla Romana','Coda alla Vaccinara','Abbacchio Scottadito','Trippa alla Romana','Pizza Romana with Savory Toppings'])assert.match(curatedRomeProfile,new RegExp(meal.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')),'Rome fallback must contain enough complete savory meals');
+assert.match(serverSource,/const meal1 = mealAt\(dayIdx \* 2\)[\s\S]{0,100}const meal2 = mealAt\(dayIdx \* 2 \+ 1\)/,'multi-day fallback meals must not overlap adjacent days');
 assert.match(serverSource,/completeMeals\.length<7/,'recovery profiles must contain enough complete meals for multi-day trips');
 assert.match(serverSource,/DESTINATION_NIGHTLIFE_UNAVAILABLE/,'nightlife fallbacks without verified named evening venues must be rejected');
 
