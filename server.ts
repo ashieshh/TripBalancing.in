@@ -2425,7 +2425,7 @@ function validateGeneratedItinerary(itinerary: any, expectedTravelStyle?: string
     'nightlife':/(night market|live music|club|lounge|rooftop|show|entertainment|late-night)/i
   };
   const requiredStyleSignal=styleSignals[style];
-  if(requiredStyleSignal&&activityText.filter((text:string)=>requiredStyleSignal.test(text)).length<Math.max(1,Math.ceil(days.length/2))) errors.push(`${expectedTravelStyle} style is not meaningfully reflected across the itinerary`);
+  if(requiredStyleSignal&&activityText.filter((text:string)=>requiredStyleSignal.test(text)).length<Math.max(1,Math.ceil(days.length/2))) errors.push(`${itinerary?.travelStyle||expectedTravelStyle||'Selected'} style is not meaningfully reflected across the itinerary`);
   if(style==='beach escape'){
     const namedCoastalPlaces=(Array.isArray(itinerary?.placesToVisit)?itinerary.placesToVisit:[]).filter((p:any)=>/\b(beach|coast|ocean|sea|island|bay|cove|shore|lagoon)\b/i.test(String(p?.name||'')));
     if(!namedCoastalPlaces.length)errors.push('Beach Escape has no named coastal place verified in the destination recommendations');
@@ -2482,8 +2482,8 @@ function isCompleteMealFood(food: any, role: 'lunch' | 'dinner' = 'dinner') {
   const kind = String(food?.type || '').toLowerCase().trim();
   const text = `${food?.name || ''} ${food?.description || ''} ${food?.type || ''}`.toLowerCase();
 
-  if (/(dessert|beverage|drink|tasting|snack|sweet)/i.test(kind)) return false;
-  if (/(dessert|sweet|cake|pastr(?:y|ies)|ice cream|gelato|pudding|cookie|biscuit|macaron|bebinca|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni|coffee|tea|juice|lassi|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|digestive|tasting|snack|suppl[iì]|rice balls?|arancini)/i.test(text)) return false;
+  if (/(dessert|beverage|drink|tasting|snack|sweet|appetizer|appetiser|starter|side dish)/i.test(kind)) return false;
+  if (/(dessert|sweet|cake|pastr(?:y|ies)|ice cream|gelato|pudding|cookie|biscuit|macaron|bebinca|drink|beverage|cocktail|wine|beer|spirit|liqueur|feni|coffee|tea|juice|lassi|\bpaan\b|\bchaat\b|betel[- ]?leaf|mouth freshener|digestive|tasting|snack|appetizer|appetiser|starter|suppl[iì]|rice balls?|arancini|carciofi alla giudia|fried artichoke)/i.test(text)) return false;
   if (/(breakfast|bakery|bread paired|small plate)/i.test(text)) return false;
   if (role === 'dinner' && /(omelette|toast|salad only)/i.test(text)) return false;
   return true;
@@ -3725,7 +3725,11 @@ function repairFinalContentTrust(itinerary:any) {
     if(after!==before){ obj[key]=after; claimRepairs++; }
   };
   softenField(itinerary,'summary');
-  for(const p of Array.isArray(itinerary.placesToVisit)?itinerary.placesToVisit:[]){ softenField(p,'name'); softenField(p,'description'); softenField(p,'bestTimeToVisit'); }
+  for(const p of Array.isArray(itinerary.placesToVisit)?itinerary.placesToVisit:[]){
+    softenField(p,'name'); softenField(p,'description'); softenField(p,'bestTimeToVisit');
+    const entry=String(p?.entryFee||'').trim();
+    if(/^[₹$€£¥]\s*[0-9][0-9,]*(?:\.[0-9]+)?$/.test(entry)) p.entryFee=`${entry} planning estimate - verify official ticket`;
+  }
   for(const d of Array.isArray(itinerary.days)?itinerary.days:[]){
     softenField(d,'title');
     for(const a of Array.isArray(d?.activities)?d.activities:[]){ softenField(a,'title'); softenField(a,'description'); }
@@ -3735,6 +3739,12 @@ function repairFinalContentTrust(itinerary:any) {
     softenField(tip,'title'); softenField(tip,'description'); softenField(tip,'tip'); return tip;
   });
   if(Array.isArray(itinerary.safetyTips)) itinerary.safetyTips=itinerary.safetyTips.map((tip:any)=>typeof tip==='string'?soften(tip):tip);
+  if(Array.isArray(itinerary.travelTips)) itinerary.travelTips=itinerary.travelTips.map((tip:any)=>{
+    const cleaned=typeof tip==='string'?soften(tip):tip;
+    return typeof cleaned==='string'&&/rome|italy/i.test(String(itinerary.destination||''))
+      ? cleaned.replace(/public\s+castelli\s+fountains?/gi,'public nasoni drinking fountains')
+      : cleaned;
+  });
   if(claimRepairs>0) console.warn(`[FINAL_CONTENT_TRUST_REPAIR] Softened ${claimRepairs} unsupported access/availability claim(s) before output.`);
   return itinerary;
 }
@@ -3856,13 +3866,17 @@ function alignLodgingLogisticsToBudgetHotel(itinerary:any) {
   const airportMatch=arrivalText.match(/(?:\bat\s+|\bto\s+)([A-Z][A-Za-z' -]{2,60}?Airport(?:\s*\([A-Z]{3}\))?)/);
   const stationMatch=arrivalText.match(/\b([A-Z][A-Za-z' -]{2,60}(?:Railway|Train|Bus)\s+Station)/);
   const verifiedGateway=sanitizeGeneratedText(String(airportMatch?.[1]||stationMatch?.[1]||''));
+  const destinationText=String(itinerary?.destination||'').toLowerCase();
+  const honestGatewayFallback=/\brome\b/.test(destinationText)
+    ? 'Confirm Fiumicino (FCO) or Ciampino (CIA) from your booking'
+    : `${itinerary.destination} - confirmed departure airport / station`;
   for (const day of itinerary.days) {
     for (const activity of Array.isArray(day?.activities) ? day.activities : []) {
       const logistics = /arrival|landing|airport (?:transfer|pick[- ]?up|pickup)|hotel check[- ]?in|check[- ]?out|departure (?:preparation|transfer)|to airport|to station|return flight|return train|packing/i.test(`${activity?.title || ''} ${activity?.description || ''}`);
       if (!logistics) continue;
       activity.description = String(activity.description || '').replace(namedHotel, selected);
       if (/arrival|airport (?:pick[- ]?up|pickup)|check[- ]?in/i.test(`${activity?.title || ''} ${activity?.description || ''}`)) activity.location = selected;
-      if (/departure|to airport|to station|return flight|return train/i.test(`${activity?.title||''} ${activity?.description||''}`)) activity.location=verifiedGateway||`${itinerary.destination} - confirmed departure airport / station`;
+      if (/departure|to airport|to station|return flight|return train/i.test(`${activity?.title||''} ${activity?.description||''}`)) activity.location=verifiedGateway||honestGatewayFallback;
     }
   }
   return itinerary;
@@ -3914,12 +3928,13 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
   const seenMeals = new Map<string,number>();
   const isArrival=(a:any)=>/(arrival|arrive|airport transfer.*stay|airport transfer.*check|station transfer.*stay|hotel check[- ]?in|heritage check[- ]?in|premium stay|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`) && !/(departure|return flight|head .*airport|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
   const isDeparture=(a:any)=>/(departure transfer|airport departure|transfer to airport|to the airport|head .*airport|return flight|return train|station departure|check[- ]?out.*airport|airport lounge.*before boarding)/i.test(`${a?.title||''} ${a?.description||''}`);
+  const gapDuration=(a:any)=>{const raw=String(a?.visitDuration||'').toLowerCase();const range=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(range){const n=Number(range[2]);return /min/.test(range[3])?n:n*60}const hm=raw.match(/(\d+)\s*h(?:our|r)?s?\s*(\d+)\s*m/);if(hm)return Number(hm[1])*60+Number(hm[2]);const one=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(one){const n=Number(one[1]);return /min/.test(one[2])?n:n*60}return 75;};
   days.forEach((d:any,i:number)=>{
     const acts=Array.isArray(d?.activities)?d.activities:[];
     const boundaryDay=acts.some((a:any)=>isArrival(a)||isDeparture(a));
     if(!boundaryDay&&acts.length<3) errors.push(`day ${i+1} has fewer than three user-facing blocks`);
-    const times=acts.map((a:any,j:number)=>parseTime(a?.time,j)).sort((a:number,b:number)=>a-b);
-    for(let j=0;j<times.length-1;j++) if(times[j+1]-times[j]>300) errors.push(`day ${i+1} has an unexplained schedule gap over five hours`);
+    const chronological=acts.map((a:any,j:number)=>({activity:a,time:parseTime(a?.time,j)})).sort((a:any,b:any)=>a.time-b.time);
+    for(let j=0;j<chronological.length-1;j++) if(chronological[j+1].time-(chronological[j].time+gapDuration(chronological[j].activity))>300) errors.push(`day ${i+1} has an unexplained schedule gap over five hours`);
     const sig=acts.slice(0,4).map((a:any)=>norm(a?.title)).join('|');
     if(sig && sigs.has(sig)) errors.push(`day ${i+1} repeats a previous day template`);
     sigs.add(sig);
@@ -3927,6 +3942,16 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
     acts.forEach((a:any,ai:number)=>{
       const isTransfer=/(transfer|chauffeur|drive|travel to)/i.test(String(a?.title||''));
       const p=placeMatch(a);
+      const activityMinutes=parseTime(a?.time,ai);
+      const activityTitle=String(a?.title||'');
+      if(activityMinutes<15*60&&/sunset|pre-evening|romantic evening/i.test(activityTitle)) errors.push(`day ${i+1} has a time-of-day label that conflicts with its scheduled time`);
+      if(activityMinutes>=12*60&&/^morning\b/i.test(activityTitle)) errors.push(`day ${i+1} has a morning label after noon`);
+      if(/chef'?s .*?(?:seasonal|market-inspired|regional specialties|menu\s*-\s*day)/i.test(activityTitle)) errors.push(`day ${i+1} contains a generic chef-menu placeholder`);
+      const primaryMeal=/\blunch\b|\bdinner\b|signature dining|evening meal/i.test(activityTitle);
+      if(primaryMeal){
+        const food=(Array.isArray(itinerary?.localFood)?itinerary.localFood:[]).find((item:any)=>item?.name&&`${a?.title||''} ${a?.description||''}`.toLowerCase().includes(String(item.name).toLowerCase()));
+        if(food&&!isCompleteMealFood(food,/dinner|evening meal/i.test(activityTitle)?'dinner':'lunch')) errors.push(`day ${i+1} uses an appetizer, snack or dessert as a primary meal`);
+      }
       if(p&&isTransfer){
         const pk=norm(p.name);
         const visit=acts.find((x:any)=>!/(transfer|chauffeur|drive|travel to)/i.test(String(x?.title||'')) && placeMatch(x) && norm(placeMatch(x)?.name)===pk);
@@ -3993,7 +4018,7 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
 
 /** Only defects that can make the visible journey impossible or expose internal copy block delivery. */
 function blockingFinalQualityErrors(errors:string[]):string[] {
-  const blocking=/(internal AI instruction leaked|before arrival\/check-in|after departure transfer|transfer to .+ after or at the visit time|overlapping activity times|Goa-specific fallback wording leaked)/i;
+  const blocking=/(internal AI instruction leaked|before arrival\/check-in|after departure transfer|transfer to .+ after or at the visit time|overlapping activity times|Goa-specific fallback wording leaked|unexplained schedule gap|time-of-day label|morning label after noon|generic chef-menu placeholder|appetizer, snack or dessert as a primary meal|style is not meaningfully reflected|outside (?:its |the )?(?:recommended|stated).*(?:window|time)|schedules .+ too late for)/i;
   return errors.filter((error)=>blocking.test(error));
 }
 
@@ -4089,7 +4114,7 @@ function repairBlockingFinalQuality(itinerary:any) {
   const destination=String(itinerary.destination||'');
   const parseTime=(v:any,idx=0)=>{const m=String(v||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);if(!m)return 9*60+idx*150;let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0)};
   const fmtTime=(mins:number)=>{mins=Math.max(5*60,Math.min(23*60+45,Math.ceil(mins/15)*15));const h24=Math.floor(mins/60),mm=mins%60,ap=h24>=12?'PM':'AM',h=h24%12||12;return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')} ${ap}`};
-  const duration=(a:any)=>{const raw=String(a?.visitDuration||'').toLowerCase();const range=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(range)return /min/.test(range[3])?Number(range[2]):Number(range[2])*60;const one=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(one)return /min/.test(one[2])?Number(one[1]):Number(one[1])*60;return /meal|breakfast|lunch|dinner|tasting/i.test(String(a?.title||''))?75:60};
+  const duration=(a:any)=>{const raw=String(a?.visitDuration||'').toLowerCase();const range=raw.match(/(\d+(?:\.\d+)?)\s*[–-]\s*(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(range)return /min/.test(range[3])?Number(range[2]):Number(range[2])*60;const hm=raw.match(/(\d+)\s*h(?:our|r)?s?\s*(\d+)\s*m/);if(hm)return Number(hm[1])*60+Number(hm[2]);const one=raw.match(/(\d+(?:\.\d+)?)\s*(hour|hr|min)/);if(one)return /min/.test(one[2])?Number(one[1]):Number(one[1])*60;return /meal|breakfast|lunch|dinner|tasting/i.test(String(a?.title||''))?75:60};
   const travelMinutes=(a:any)=>{const raw=String(a?.travelTimeFromPrevious||'').toLowerCase();const hours=raw.match(/(\d+(?:\.\d+)?)\s*h(?:our)?/);const mins=raw.match(/(\d+)\s*m(?:in)?/);return Math.round((hours?Number(hours[1])*60:0)+(mins?Number(mins[1]):0));};
   const isArrival=(a:any)=>/(arrival|arrive|airport transfer.*stay|airport transfer.*check|station transfer.*stay|hotel check[- ]?in|heritage check[- ]?in|premium stay|bag drop)/i.test(`${a?.title||''} ${a?.description||''}`)&&!/(departure|return flight|head .*airport|to airport)/i.test(`${a?.title||''} ${a?.description||''}`);
   const isDeparture=(a:any)=>/(departure transfer|airport departure|transfer to airport|to the airport|head .*airport|return flight|return train|station departure|check[- ]?out.*airport|airport lounge.*before boarding)/i.test(`${a?.title||''} ${a?.description||''}`);
@@ -4155,6 +4180,24 @@ function repairBlockingFinalQuality(itinerary:any) {
       const keepSightseeing=new Set(sightseeing.slice(0,allowed));
       acts=acts.filter((a:any)=>!sightseeing.includes(a)||keepSightseeing.has(a));
     }
+    // Close one genuinely empty afternoon (>5 hours after the preceding block)
+    // with a named food/tasting stop already verified for this destination.
+    // This avoids both hollow full days and invented generic attractions.
+    acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
+    for(let i=0;i<acts.length-1;i++){
+      const gapStart=parseTime(acts[i]?.time,i)+duration(acts[i]);
+      const gapEnd=parseTime(acts[i+1]?.time,i+1);
+      if(gapEnd-gapStart<=300)continue;
+      const foods=Array.isArray(itinerary.localFood)?itinerary.localFood:[];
+      const dayText=acts.map((a:any)=>`${a?.title||''} ${a?.description||''}`).join(' ').toLowerCase();
+      const food=foods.find((item:any)=>item?.name&&!dayText.includes(String(item.name).toLowerCase())&&!isCompleteMealFood(item,'dinner'))
+        || foods.find((item:any)=>item?.name&&!dayText.includes(String(item.name).toLowerCase()));
+      if(food){
+        const tastingTime=Math.min(gapEnd-90,Math.max(gapStart+90,15*60+30));
+        acts.push({time:fmtTime(tastingTime),title:`Afternoon Local Tasting: ${food.name}`,description:`Sample ${food.name} as a separate local tasting or cafe stop; keep it distinct from lunch and dinner.`,location:String(food.mustTryAt||destination),cost:'Tasting allowance',visitDuration:'1h'});
+      }
+      break;
+    }
     acts.sort((a:any,b:any)=>parseTime(a?.time)-parseTime(b?.time));
     for(let i=1;i<acts.length;i++){
       const previous=acts[i-1],current=acts[i],minimum=parseTime(previous.time,i-1)+Math.max(30,duration(previous))+Math.max(15,travelMinutes(current));
@@ -4163,8 +4206,22 @@ function repairBlockingFinalQuality(itinerary:any) {
       else if(minimum+Math.max(30,duration(current))>23*60+45){acts.splice(i,1);i--;}
       else current.time=fmtTime(minimum);
     }
+    // Titles must agree with their final clock time after every collision repair.
+    // This prevents labels such as "sunset" at 09:30 or "romantic evening" at noon.
+    for(const activity of acts){
+      const mins=parseTime(activity?.time);
+      let title=String(activity?.title||'');
+      if(mins<15*60) title=title.replace(/Sunset\s*\/\s*Pre-evening Visit/gi,mins<12*60?'Morning Visit':'Afternoon Visit');
+      if(mins<16*60) title=title.replace(/Romantic Evening/gi,'Romantic Experience');
+      if(mins>=12*60) title=title.replace(/^Morning\s+/i,'Afternoon ');
+      activity.title=sanitizeGeneratedText(title);
+    }
     const hasArrival=acts.some(isArrival),hasDeparture=acts.some(isDeparture);
-    const theme=hasDeparture?'Departure Day':hasArrival?'Arrival & Settling In':day.theme;
+    let theme=hasDeparture?'Departure Day':hasArrival?'Arrival & Settling In':String(day.theme||'');
+    if(!hasArrival&&!hasDeparture){
+      const earliest=Math.min(...acts.map((a:any)=>parseTime(a?.time)));
+      if(earliest<15*60) theme=theme.replace(/Sunset\s*\/\s*Pre-evening Visit/gi,earliest<12*60?'Morning Visit':'Afternoon Visit').replace(/Romantic Evening/gi,'Romantic Experience');
+    }
     return {...day,theme,activities:acts};
   });
   return itinerary;
@@ -4487,7 +4544,9 @@ function applySmartRouteAndTransport(itinerary: any) {
       // Do not show "N/A" beside a concrete transit time. When coordinates are
       // absent, derive a conservative route-planning distance and label it.
       if(km==null){
-        const speed=/walk/i.test(r.mode)?4.5:/private|taxi|rideshare|car/i.test(r.mode)?24:18;
+        // Urban stop-to-stop estimates include waiting, junctions and traffic;
+        // use conservative effective speeds rather than open-road speeds.
+        const speed=/walk/i.test(r.mode)?4.5:/private|taxi|rideshare|car/i.test(r.mode)?9:8;
         km=Math.max(0.5,r.minutes/60*speed);
       }
       const promisedPrivateTransfer = /chauffeur|private (?:car|transfer)|pre-arranged private/i.test(textOf(a));
@@ -4553,7 +4612,7 @@ function finalizeCustomerSpecificity(itinerary: any) {
       const isTransfer=/transfer|chauffeur|pick[- ]?up|drop[- ]?off|airport|station/i.test(text);
       const isSpa=/spa|wellness|massage/i.test(text);
       const isGenericPlace=/private\s*\/\s*(?:priority|advance-planned)|cultural context|second sight|selective premium experience|destination experience|morning destination orientation|nightlife venue|nightlife district|entertainment district/i.test(text);
-      const isGenericMeal=/different local|chef'?s local|chef'?s .* seasonal menu|signature dinner(?!: [A-Z])|boutique dining|complete destination-appropriate|acclaimed fine-dining|lunch\s*&\s*live entertainment/i.test(text);
+      const isGenericMeal=/different local|chef'?s (?:local|[^:]{0,60}(?:seasonal|market-inspired|regional specialties|menu\s*-\s*day))|signature dinner(?!: [A-Z])|boutique dining|complete destination-appropriate|acclaimed fine-dining|lunch\s*&\s*live entertainment/i.test(text);
 
       if (isGenericMeal) {
         const timeMatch=String(a?.time||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/);
@@ -4590,6 +4649,7 @@ function finalizeCustomerSpecificity(itinerary: any) {
       }
 
       const finalText=`${a.title||''} ${a.description||''} ${a.location||''}`;
+      const matchedAttraction=places.find((place:any)=>place?.name&&finalText.toLowerCase().includes(String(place.name).toLowerCase()));
       const finalIsMeal=/breakfast|brunch|lunch|dinner|dining|meal|culinary|tasting|cafe/i.test(finalText);
       const finalIsTransfer=/transfer|chauffeur|pick[- ]?up|drop[- ]?off|airport|station/i.test(finalText);
       const paidService=/boat|cruise|guided (?:tour|visit)|spa|massage|rafting|kayak|diving|climbing|bike|bicycle|rental|scenic flight|helicopter|safari|private experience/i.test(finalText);
@@ -4598,7 +4658,7 @@ function finalizeCustomerSpecificity(itinerary: any) {
       const implausiblyLowPaidService=paidService&&numericCost>0&&numericCost<(style==='budget'||style==='backpacker'?5:10);
       if (!a.cost || vague.test(String(a.cost)) || incorrectlyFree || implausiblyLowPaidService) {
         a.cost=finalIsTransfer?estimate(transferEstimate):finalIsMeal?estimate(mealEstimate,'for all travelers'):estimate(activityEstimate);
-      } else if(paidService&&/^[₹$€£¥]\s*[0-9][0-9,]*(?:\.[0-9]+)?$/.test(String(a.cost||'').trim())) {
+      } else if((paidService||matchedAttraction)&&/^[₹$€£¥]\s*[0-9][0-9,]*(?:\.[0-9]+)?$/.test(String(a.cost||'').trim())) {
         a.cost=`${String(a.cost).trim()} planning estimate; verify official ticket`;
       }
       if(/museum|gallery/i.test(finalText)&&!/timed-entry|closing time/i.test(String(a.description||''))){
@@ -5046,6 +5106,7 @@ app.get('/api/travelpayouts/resolve-location', async (req, res) => {
 type FallbackDestinationDetails = {
   places: { name: string, description: string, bestTimeToVisit: string, entryFee: string }[];
   food: { name: string, description: string, type: string, mustTryAt: string }[];
+  nightlife?: { name: string, description: string, bestTimeToVisit: string, entryFee: string }[];
   packing: string[];
   tips: string[];
 };
@@ -5085,16 +5146,23 @@ function buildResilientDestinationDetails(destinationRaw:string):FallbackDestina
  * second full itinerary, keeping latency and malformed-output risk much lower.
  * The result is still validated before the normal itinerary pipeline may use it.
  */
-async function recoverDestinationSpecificDetails(destinationRaw:string):Promise<FallbackDestinationDetails|null>{
+async function recoverDestinationSpecificDetails(destinationRaw:string, travelStyleRaw=''):Promise<FallbackDestinationDetails|null>{
   const destination=sanitizeGeneratedText(String(destinationRaw||'')).trim();
   if(!destination)return null;
+  const needsNightlife=String(travelStyleRaw||'').toLowerCase().trim()==='nightlife';
   const ai=getGeminiClient();
   // Recovery must not share one model as a single point of failure with the full
   // itinerary request. Use the lower-latency model first, then one independent
   // fallback, while keeping the same total 25-second response budget.
   const models=[process.env.GEMINI_RECOVERY_MODEL||'gemini-3.5-flash-lite',process.env.GEMINI_RECOVERY_FALLBACK_MODEL||'gemini-3.6-flash'].filter((model,index,all)=>model&&all.indexOf(model)===index);
-  const contents=`Return a compact factual travel profile for ${destination}. Use real, established place and food names specific to this destination. Provide exactly 6 distinct attractions and 8 distinct local foods. Do not use generic labels such as central district, heritage visit, public market, scenic viewpoint, regional selection or seasonal menu. Do not invent ratings, availability or live prices. Return strict JSON only.`;
-  const responseSchema={type:Type.OBJECT,properties:{places:{type:Type.ARRAY,minItems:6,maxItems:6,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},bestTimeToVisit:{type:Type.STRING},entryFee:{type:Type.STRING}},required:['name','description','bestTimeToVisit','entryFee']}},food:{type:Type.ARRAY,minItems:8,maxItems:8,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},type:{type:Type.STRING},mustTryAt:{type:Type.STRING}},required:['name','description','type','mustTryAt']}},packing:{type:Type.ARRAY,minItems:5,items:{type:Type.STRING}},tips:{type:Type.ARRAY,minItems:4,items:{type:Type.STRING}}},required:['places','food','packing','tips']};
+  const contents=`Return a compact factual travel profile for ${destination}. Use real, established place and food names specific to this destination. Provide exactly 6 distinct attractions and 8 distinct local foods; at least 7 foods must be complete savory dishes suitable for lunch or dinner, with no more than 1 snack, drink, appetizer or dessert.${needsNightlife?' Also provide exactly 4 real, established evening venues, performance venues, licensed nightlife venues or named nightlife districts appropriate to this destination. Do not return generic labels such as nightlife district, entertainment district, city centre, club, lounge or rooftop by themselves.':''} Do not use generic labels such as central district, heritage visit, public market, scenic viewpoint, regional selection or seasonal menu. Do not invent ratings, availability or live prices. Return strict JSON only.`;
+  const profileProperties:any={places:{type:Type.ARRAY,minItems:6,maxItems:6,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},bestTimeToVisit:{type:Type.STRING},entryFee:{type:Type.STRING}},required:['name','description','bestTimeToVisit','entryFee']}},food:{type:Type.ARRAY,minItems:8,maxItems:8,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},type:{type:Type.STRING},mustTryAt:{type:Type.STRING}},required:['name','description','type','mustTryAt']}},packing:{type:Type.ARRAY,minItems:5,items:{type:Type.STRING}},tips:{type:Type.ARRAY,minItems:4,items:{type:Type.STRING}}};
+  const profileRequired=['places','food','packing','tips'];
+  if(needsNightlife){
+    profileProperties.nightlife={type:Type.ARRAY,minItems:4,maxItems:4,items:{type:Type.OBJECT,properties:{name:{type:Type.STRING},description:{type:Type.STRING},bestTimeToVisit:{type:Type.STRING},entryFee:{type:Type.STRING}},required:['name','description','bestTimeToVisit','entryFee']}};
+    profileRequired.push('nightlife');
+  }
+  const responseSchema={type:Type.OBJECT,properties:profileProperties,required:profileRequired};
   const clean=(v:any)=>sanitizeGeneratedText(String(v||'')).trim();
   const forbidden=/central orientation|central district|heritage or museum visit|established public market|public park or scenic viewpoint|regional (?:breakfast|lunch|dinner) selection|seasonal local (?:lunch|dinner) menu/i;
   for(const model of models){
@@ -5105,12 +5173,16 @@ async function recoverDestinationSpecificDetails(destinationRaw:string):Promise<
       const parsed=JSON.parse(String(response?.text||'{}'));
       const places=Array.isArray(parsed?.places)?parsed.places:[];
       const food=Array.isArray(parsed?.food)?parsed.food:[];
+      const nightlife=Array.isArray(parsed?.nightlife)?parsed.nightlife:[];
       const unique=(rows:any[],field:string)=>new Set(rows.map(row=>clean(row?.[field]).toLowerCase()).filter(Boolean)).size===rows.length;
-      if(places.length!==6||food.length!==8||!unique(places,'name')||!unique(food,'name')||places.some((p:any)=>!clean(p?.name)||forbidden.test(clean(p?.name)))||food.some((f:any)=>!clean(f?.name)||forbidden.test(clean(f?.name))))throw new Error('Recovery model returned an invalid destination profile.');
+      const completeMeals=food.filter((item:any)=>isCompleteMealFood(item,'dinner'));
+      const genericNightlife=/^(?:nightlife district|entertainment district|city cent(?:er|re)|club|lounge|rooftop)$/i;
+      if(places.length!==6||food.length!==8||completeMeals.length<7||!unique(places,'name')||!unique(food,'name')||places.some((p:any)=>!clean(p?.name)||forbidden.test(clean(p?.name)))||food.some((f:any)=>!clean(f?.name)||forbidden.test(clean(f?.name)))||needsNightlife&&(nightlife.length!==4||!unique(nightlife,'name')||nightlife.some((v:any)=>!clean(v?.name)||genericNightlife.test(clean(v?.name)))))throw new Error('Recovery model returned an invalid destination profile.');
       console.warn(`[DESTINATION_RECOVERY_MODEL_SUCCESS] ${model}`);
       return {
         places:places.map((p:any)=>({name:clean(p.name),description:clean(p.description),bestTimeToVisit:clean(p.bestTimeToVisit),entryFee:clean(p.entryFee)||'Confirm with official venue'})),
         food:food.map((f:any)=>({name:clean(f.name),description:clean(f.description),type:clean(f.type)||'both',mustTryAt:clean(f.mustTryAt)||`${destination} established restaurant`})),
+        nightlife:needsNightlife?nightlife.map((v:any)=>({name:clean(v.name),description:clean(v.description),bestTimeToVisit:clean(v.bestTimeToVisit)||'Evening',entryFee:clean(v.entryFee)||'Confirm current cover or ticket'})):undefined,
         packing:(Array.isArray(parsed.packing)?parsed.packing:[]).map(clean).filter(Boolean).slice(0,10),
         tips:(Array.isArray(parsed.tips)?parsed.tips:[]).map(clean).filter(Boolean).slice(0,8)
       };
@@ -5777,6 +5849,7 @@ Return the response in strict JSON format.`;
     repairFinalScheduleCompleteness(reconciledItinerary);
     finalizeCustomerSpecificity(reconciledItinerary);
     repairFinalItineraryDiversity(reconciledItinerary);
+    finalizeCustomerSpecificity(reconciledItinerary);
     // Diversity repair can change a location anchor. Re-run route enrichment so
     // visible route distance/transport is calculated from the final customer itinerary.
     const finalRoutedItinerary = applySmartRouteAndTransport(reconciledItinerary);
@@ -5984,7 +6057,7 @@ Return the response in strict JSON format.`;
     let details = destinationDetails[Object.keys(destinationDetails).find(k => destNormalized.includes(k)) || ""];
     let fallbackDataQuality='curated-destination-profile';
     if (!details) {
-      details=await recoverDestinationSpecificDetails(destination);
+      details=await recoverDestinationSpecificDetails(destination, travelStyle);
       fallbackDataQuality=details?'recovered-destination-profile':'resilient-destination-planning-profile';
       if(!details){
         console.error(`[GLOBAL_FALLBACK_REJECTED] No verified destination profile for "${String(destination).slice(0,120)}" after ${geminiFailure.classified.kind}. Generic planning anchors cannot be sold as a Premium Guide.`);
@@ -6049,6 +6122,17 @@ Return the response in strict JSON format.`;
     // instead of falling back to the old generic "Attraction & Local Flavors" template.
     const daysList: any[] = [];
     const fallbackStyle = String(travelStyle || 'Budget').toLowerCase().trim();
+    if(fallbackStyle==='nightlife'&&(!Array.isArray(details.nightlife)||details.nightlife.length<2)){
+      const nightlifeRecovery=await recoverDestinationSpecificDetails(destination, travelStyle);
+      if(!nightlifeRecovery?.nightlife?.length){
+        console.error(`[NIGHTLIFE_FALLBACK_REJECTED] No verified named evening venues for "${String(destination).slice(0,120)}".`);
+        return res.status(503).json({
+          error:'Verified destination-specific nightlife recommendations are temporarily unavailable. Please try again. Your completed form is preserved and your trip allowance has not been used.',
+          code:'DESTINATION_NIGHTLIFE_UNAVAILABLE',retryable:true,preservedInput:true,billableGeneration:false
+        });
+      }
+      details={...details,nightlife:nightlifeRecovery.nightlife};
+    }
     const mkActivity = (time: string, title: string, description: string, location: string, cost: string, dayIdx: number, slot: number) => ({
       time, title, description, location, cost,
       latitude: Number((baseLat + Math.sin(dayIdx * 10 + slot) * 0.015).toFixed(4)),
@@ -6070,6 +6154,8 @@ Return the response in strict JSON format.`;
     const tastingAt = (index: number) => tastingItems.length
       ? tastingItems[index % tastingItems.length]
       : (foodItems[(index + 1) % Math.max(1, foodItems.length)] || { name: 'Regional Tasting', description: 'Add a destination-specific dessert, beverage or tasting.', mustTryAt: `${destination} specialty shop` });
+    const nightlifeItems=Array.isArray(details.nightlife)?details.nightlife:[];
+    const nightlifeAt=(index:number)=>nightlifeItems[index%Math.max(1,nightlifeItems.length)];
 
     for (let dayIdx = 0; dayIdx < diffDays; dayIdx++) {
       const primary = details.places[dayIdx % details.places.length];
@@ -6110,12 +6196,13 @@ Return the response in strict JSON format.`;
           mkActivity('07:30 PM', 'Recovery Dinner & Rest', `Refuel, hydrate and allow recovery time before the next active day.`, meal2.mustTryAt || destination, 'Per person', dayIdx, 4)
         ];
       } else if (fallbackStyle === 'nightlife') {
+        const eveningVenue=nightlifeAt(dayIdx);
         theme = `Late Start, Sunset & Nightlife around ${primary.name}`;
         activities = [
-          mkActivity('11:30 AM', 'Late Brunch & Easy Start', `Keep the morning light after a late night and use a well-reviewed cafe or brunch venue.`, meal1.mustTryAt || destination, 'Per person', dayIdx, 1),
+          mkActivity('11:30 AM', `Late Brunch: ${meal1.name}`, meal1.description, meal1.mustTryAt || destination, 'Per person', dayIdx, 1),
           mkActivity('04:30 PM', `Sunset / Pre-evening Visit: ${primary.name}`, primary.description, primary.name, primary.entryFee || 'Free / verify', dayIdx, 2),
-          mkActivity('07:30 PM', 'Dinner & Live Entertainment', `Choose a reputable venue with music, performance or an energetic evening atmosphere appropriate to ${destination}.`, `${destination} established entertainment district`, 'Per person', dayIdx, 3),
-          mkActivity('10:30 PM', 'Nightlife Venue & Safe Return', `Use a reputable club, lounge, casino or night venue where legal and appropriate, then return by verified taxi/rideshare/private transfer.`, `${destination} nightlife district`, 'Cover/drinks - verify live rate', dayIdx, 4)
+          mkActivity('07:30 PM', `Regional Dinner: ${meal2.name}`, meal2.description, meal2.mustTryAt || destination, 'Per person', dayIdx, 3),
+          mkActivity('10:30 PM', `Evening at ${eveningVenue.name}`, `${eveningVenue.description} Confirm the current programme, entry policy and closing time, then return by verified taxi or pre-arranged transport.`, eveningVenue.name, eveningVenue.entryFee || 'Confirm current cover or ticket', dayIdx, 4)
         ];
         transportTips = ['Use verified taxi/rideshare or pre-arranged transport for late-night returns.'];
       } else if (fallbackStyle === 'wellness & spa') {
@@ -6411,6 +6498,7 @@ Return the response in strict JSON format.`;
     repairFinalScheduleCompleteness(reconciledFallback);
     finalizeCustomerSpecificity(reconciledFallback);
     repairFinalItineraryDiversity(reconciledFallback);
+    finalizeCustomerSpecificity(reconciledFallback);
     const routedFallback = applySmartRouteAndTransport(reconciledFallback);
     Object.assign(reconciledFallback, routedFallback);
     reconcileItineraryBudget(reconciledFallback);

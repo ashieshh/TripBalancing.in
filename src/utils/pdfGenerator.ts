@@ -1058,6 +1058,11 @@ export const exportPremiumTravelPDF = async (
   })();
 
   const itinerary = optimizeItineraryForPDF(rawItinerary, currencySym);
+  const tripStartMs = itinerary.startDate ? new Date(`${itinerary.startDate}T00:00:00`).getTime() : NaN;
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const daysUntilTrip = Number.isFinite(tripStartMs) ? Math.floor((tripStartMs - todayStart.getTime()) / 86400000) : NaN;
+  // Open-Meteo daily forecasts are not treated as exact long-range forecasts.
+  const weatherWithinLiveHorizon = Number.isFinite(daysUntilTrip) && daysUntilTrip >= 0 && daysUntilTrip <= 15;
 
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({
@@ -2016,7 +2021,7 @@ export const exportPremiumTravelPDF = async (
       const travTime = routeMinutes > 0 ? `${Math.floor(routeMinutes/60)}h ${routeMinutes%60}m` : "Route based";
 
       let weatherLabel = "Season-aware planning";
-      if (headerWeather && headerWeather[dIdx]) {
+      if (weatherWithinLiveHorizon && headerWeather && headerWeather[dIdx]) {
         let cond = headerWeather[dIdx].condition || "Clear";
         if (/storm with (?:slight|heavy) hail/i.test(cond)) cond = "Thunderstorm risk";
         weatherLabel = `${cond}, ${headerWeather[dIdx].tempMax || "24"}°C`;
@@ -2024,7 +2029,7 @@ export const exportPremiumTravelPDF = async (
 
       const dStats = [
         { label: "EST. DAILY REQUIREMENT", value: displayBudget, bg: [236, 253, 245], border: [13, 148, 136], txt: [13, 148, 136], icon: "budget" },
-        { label: headerWeather && headerWeather[dIdx] ? "WEATHER OUTLOOK" : "WEATHER GUIDANCE", value: weatherLabel, bg: [240, 249, 255], border: [2, 132, 199], txt: [2, 132, 199], icon: "weather" },
+        { label: weatherWithinLiveHorizon && headerWeather && headerWeather[dIdx] ? "WEATHER OUTLOOK" : "WEATHER GUIDANCE", value: weatherWithinLiveHorizon ? weatherLabel : "Check 7-10 days before", bg: [240, 249, 255], border: [2, 132, 199], txt: [2, 132, 199], icon: "weather" },
         { label: routeDistanceEstimated ? "EST. ROUTE DISTANCE" : "ROUTE DISTANCE", value: dist === "Route pending" ? dist : `${dist} km`, bg: [255, 241, 242], border: [225, 29, 72], txt: [225, 29, 72], icon: "distance" },
         { label: "TRANSIT TIME", value: travTime, bg: [238, 242, 255], border: [79, 70, 229], txt: [79, 70, 229], icon: "time" }
       ];
@@ -2220,7 +2225,7 @@ export const exportPremiumTravelPDF = async (
 
         // Row 2 - Badge 6: Weather (Proportional Center Grouping based on forecast length)
         let weatherVal = "Season-aware";
-        if (headerWeather && headerWeather[dIdx]) {
+        if (weatherWithinLiveHorizon && headerWeather && headerWeather[dIdx]) {
           const rawCondition = headerWeather[dIdx].condition || "Clear";
           const cond = /storm with (?:slight|heavy) hail/i.test(rawCondition) ? "Thunderstorm risk" : rawCondition;
           const temp = headerWeather[dIdx].tempMax || "24";

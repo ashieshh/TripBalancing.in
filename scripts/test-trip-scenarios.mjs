@@ -39,6 +39,8 @@ assert.match(serverSource,/GEMINI_ITINERARY_MODEL[\s\S]{0,120}gemini-3\.6-flash/
 assert.doesNotMatch(serverSource,/GEMINI_(?:RECOVERY|ITINERARY)_MODEL[^\n]*gemini-2\.5-flash/,'customer itinerary paths must not default to the retired Gemini 2.5 Flash model');
 assert.match(serverSource,/controller\.abort\(\)/,'timed-out Gemini requests must be aborted rather than left running beside recovery');
 assert.match(serverSource,/dubai:\s*\{[\s\S]*Burj Khalifa and Downtown Dubai[\s\S]*Dubai Creek and Gold Souk/,'Dubai must have a provider-independent verified destination profile');
+assert.match(serverSource,/completeMeals\.length<7/,'recovery profiles must contain enough complete meals for multi-day trips');
+assert.match(serverSource,/DESTINATION_NIGHTLIFE_UNAVAILABLE/,'nightlife fallbacks without verified named evening venues must be rejected');
 
 // Regression for the Sep 9 Rome guide: paid PDFs must not retain generic
 // orientation/nightlife placeholders, imply an unverified hotel restaurant,
@@ -73,6 +75,18 @@ assert.match(serverSource,/dubai:\s*\{[\s\S]*Burj Khalifa and Downtown Dubai[\s\
 }
 
 {
+  const temporal={destination:'Rome, Lazio, Italy',days:[{theme:'Romantic Evening & Sunset / Pre-evening Visit: Pantheon',activities:[
+    {time:'09:30 AM',title:'Sunset / Pre-evening Visit: Vatican Museums',description:'Museum visit.',location:'Vatican Museums'},
+    {time:'12:30 PM',title:'Romantic Evening: Pantheon',description:'Shared visit.',location:'Pantheon'}
+  ]}]};
+  quality.repairBlockingFinalQuality(temporal);
+  const temporalCopy=JSON.stringify(temporal);
+  assert.doesNotMatch(temporalCopy,/Sunset \/ Pre-evening Visit|Romantic Evening/i,'final titles and themes must agree with their clock time');
+  assert.match(temporalCopy,/Morning Visit: Vatican Museums/i,'09:30 attraction must receive a morning label');
+  assert.match(temporalCopy,/Romantic Experience: Pantheon/i,'daytime honeymoon activity must not be called an evening');
+}
+
+{
   const rome={destination:'Rome, Lazio, Italy',travelStyle:'Budget',budgetHotelName:'Ibis Roma Fiera',localFood:[
     {name:'Suppli',description:'Fried rice balls with mozzarella.',type:'street food',mustTryAt:'Suppli shop'},
     {name:'Cacio e Pepe',description:'A complete savory Roman pasta.',type:'pasta dish',mustTryAt:'Roman trattoria'}
@@ -88,6 +102,15 @@ assert.match(serverSource,/dubai:\s*\{[\s\S]*Burj Khalifa and Downtown Dubai[\s\
   assert.ok(rome.days[0].activities.some(a=>/\blunch\b/i.test(a.title)),'arrival day must restore a missing lunch after late activity transformation');
   assert.ok(!rome.days[0].activities.some(a=>!/\blunch\b|\bdinner\b/i.test(a.title)&&/food allocation/i.test(String(a.cost))),'non-meal activities must not retain a food allocation label');
   assert.ok(!rome.days[0].activities.some(a=>/\bdinner\b/i.test(a.title)&&/suppl[iì]|rice ball/i.test(`${a.title} ${a.description}`)),'snacks such as suppli must not survive as dinner');
+}
+
+{
+  const rome={destination:'Rome, Lazio, Italy',localFood:[
+    {name:'Carciofi alla Giudia',description:'Deep-fried artichoke appetizer.',type:'appetizer',mustTryAt:'Jewish Ghetto restaurant'},
+    {name:'Saltimbocca alla Romana',description:'A complete Roman veal main course.',type:'main course',mustTryAt:'Roman trattoria'}
+  ],days:[{theme:'Rome dining',activities:[{time:'07:30 PM',title:'Regional Dinner: Carciofi alla Giudia',description:'Deep-fried artichoke appetizer.',location:'Jewish Ghetto restaurant',cost:'$20'}]}]};
+  quality.repairFinalItineraryDiversity(rome);
+  assert.ok(!rome.days[0].activities.some(a=>/\bdinner\b/i.test(a.title)&&/carciofi|artichoke/i.test(`${a.title} ${a.description}`)),'an appetizer such as Carciofi alla Giudia must not be the complete dinner');
 }
 
 {
@@ -150,7 +173,8 @@ for(const [destination,origin,placeNames] of destinations){
     const destinationSpend=trip.days.reduce((sum,day)=>sum+money(day.dailyBudget),0);
     const expectedDestination=money(trip.realisticEstimatedCost)-money(trip.estimatedBudgetBreakdown.originToDestinationTravel)-money(trip.estimatedBudgetBreakdown.visaAndInsurance);
     assert.equal(destinationSpend,expectedDestination,`${destination}: daily totals do not equal destination spend`);
-    assert.deepEqual(quality.blockingFinalQualityErrors(quality.validateFinalUserFacingItinerary(trip)),[],`${destination}: blocking final-quality error remains`);
+    const blocking=quality.blockingFinalQualityErrors(quality.validateFinalUserFacingItinerary(trip));
+    assert.deepEqual(blocking,[],`${destination}: blocking final-quality error remains`);
     scenarios++;
   }
 }
@@ -163,6 +187,9 @@ for(const [destination,origin,placeNames] of destinations){
 }
 
 const pdf=fs.readFileSync(new URL('../src/utils/pdfGenerator.ts',import.meta.url),'utf8');
+assert.match(pdf,/weatherWithinLiveHorizon/,'PDF must distinguish live-range weather from long-range guidance');
+assert.match(pdf,/italy\|rome\|milan\|venice/,'PDF must include verified Italy emergency-number mapping');
+assert.match(pdf,/allHotelTiers[\s\S]{0,500}\.filter\(\(tier\)/,'empty accommodation tiers must not be advertised');
 
 for(const destination of ['Reykjavik, Iceland','Cusco, Peru','Madagascar']){
   const details=quality.buildResilientDestinationDetails(destination);
