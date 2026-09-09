@@ -321,13 +321,36 @@ function classifyGeminiError(error: any): GeminiServiceError {
   const code = Number(error?.code || error?.statusCode || 0);
   const text = `${error?.message || ""} ${String(error || "")}`.toLowerCase();
 
+  // Gemini includes the authoritative delay in either RetryInfo (for example
+  // `retryDelay: "22s"`) or the human-readable message (`retry in 22.5s`).
+  // Respect it instead of immediately retrying and spending another RPM slot.
+  const retryDelayCandidates = [
+    error?.retryAfterSeconds,
+    error?.retryDelay,
+    error?.details?.find?.((detail: any) => detail?.retryDelay)?.retryDelay,
+    ...(Array.isArray(error?.error?.details)
+      ? error.error.details.map((detail: any) => detail?.retryDelay)
+      : [])
+  ];
+  let providerRetryAfterSeconds = retryDelayCandidates
+    .map((value: any) => {
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      const match = String(value || "").match(/([0-9]+(?:\.[0-9]+)?)\s*s/i);
+      return match ? Number(match[1]) : NaN;
+    })
+    .find((value: number) => Number.isFinite(value) && value > 0);
+  if (!providerRetryAfterSeconds) {
+    const messageMatch = text.match(/retry(?:ing)?(?:\s+in|\s+after)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:s|sec|second)/i);
+    if (messageMatch) providerRetryAfterSeconds = Number(messageMatch[1]);
+  }
+
   if (status === "RESOURCE_EXHAUSTED" || code === 429 || text.includes("resource_exhausted") || text.includes("quota") || text.includes("429")) {
     return new GeminiServiceError(
       "The AI service has temporarily reached its usage limit. Please try again shortly.",
       "quota",
       true,
       error,
-      60
+      Math.max(1, Math.ceil(providerRetryAfterSeconds || 60))
     );
   }
 
@@ -337,7 +360,7 @@ function classifyGeminiError(error: any): GeminiServiceError {
       "overloaded",
       true,
       error,
-      20
+      Math.max(1, Math.ceil(providerRetryAfterSeconds || 20))
     );
   }
 
@@ -423,7 +446,7 @@ async function generateContentWithRetry(
       attempt++;
 
       if (error.kind === "quota" || error.kind === "overloaded") {
-        const cooldownSeconds = error.kind === "quota" ? 60 : 20;
+        const cooldownSeconds = error.retryAfterSeconds || (error.kind === "quota" ? 60 : 20);
         GEMINI_COOLDOWN_UNTIL = Math.max(
           GEMINI_COOLDOWN_UNTIL,
           Date.now() + cooldownSeconds * 1000
@@ -431,16 +454,16 @@ async function generateContentWithRetry(
       }
 
       if (error.retryable && attempt <= maxRetries) {
-        const backoffDelay =
-          delayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 300);
+        const exponentialDelay = delayMs * Math.pow(2, attempt - 1);
+        const providerDelay = (error.retryAfterSeconds || 0) * 1000;
+        const backoffDelay = Math.max(exponentialDelay, providerDelay) + Math.floor(Math.random() * 300);
         console.warn(
           `[Gemini ${error.kind}] Attempt ${attempt} failed. Retrying in ${backoffDelay}ms.`
         );
         await new Promise((resolve) => setTimeout(resolve, backoffDelay));
 
-        // The cooldown is intended to protect against new concurrent requests.
-        // This in-flight request is allowed to perform its bounded retry.
-        GEMINI_COOLDOWN_UNTIL = 0;
+        // Keep the shared cooldown intact. This request has already waited long
+        // enough, while newly arriving requests must not create a retry storm.
         continue;
       }
 
@@ -449,7 +472,9 @@ async function generateContentWithRetry(
   }
 }
 
-const ITINERARY_AI_TIMEOUT_MS = 45_000;
+// A quota response commonly asks us to wait 20-60 seconds. The former 45-second
+// deadline aborted a valid provider-directed retry before it could complete.
+const ITINERARY_AI_TIMEOUT_MS = 90_000;
 
 async function generateItineraryContentWithDeadline(
   ai: GoogleGenAI,
@@ -460,7 +485,7 @@ async function generateItineraryContentWithDeadline(
   const boundedOptions={...options,config:{...(options.config||{}),abortSignal:controller.signal}};
   try {
     return await Promise.race([
-      generateContentWithRetry(ai, boundedOptions, 1, 750),
+      generateContentWithRetry(ai, boundedOptions, 2, 2_000),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           controller.abort();
