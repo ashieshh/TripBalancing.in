@@ -24,14 +24,17 @@ const money = value => Number(String(value ?? '').replace(/,/g, '').match(/[0-9]
 const minutes = value => { const m=String(value||'').toUpperCase().match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/); if(!m)return 0; let h=Number(m[1])%12;if(m[3]==='PM')h+=12;return h*60+Number(m[2]||0); };
 const normalize = value => String(value||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
 
-// A resilient generic planning profile may help internal repair logic, but the
-// production endpoint must never return it as a completed Premium Guide.
+// Provider quota must never turn every unfamiliar destination into a 503. The
+// production endpoint first uses current named map records and retains an honest,
+// confirmation-based final fallback without charging the customer's allowance.
 const serverSource=fs.readFileSync(new URL('../server.ts',import.meta.url),'utf8');
-assert.match(serverSource,/GLOBAL_FALLBACK_REJECTED/,'generic fallback must be rejected before customer delivery');
-assert.match(serverSource,/DESTINATION_CONTENT_UNAVAILABLE/,'generic fallback rejection must return a stable retry code');
-assert.match(serverSource,/trip allowance has not been used/,'generic fallback rejection must protect the customer trip allowance');
+assert.match(serverSource,/DESTINATION_OPEN_DATA_SUCCESS/,'unfamiliar destinations need a provider-independent named-place recovery path');
+assert.match(serverSource,/DESTINATION_SAFE_FALLBACK/,'valid destinations need an availability-guaranteeing final fallback');
+assert.doesNotMatch(serverSource,/GLOBAL_FALLBACK_REJECTED|DESTINATION_CONTENT_UNAVAILABLE/,'an unfamiliar valid destination must not be rejected only because Gemini is unavailable');
+assert.match(serverSource,/your trip allowance was not used/,'degraded generation must protect the customer trip allowance');
 assert.match(serverSource,/recoverDestinationSpecificDetails/,'failed full itineraries must attempt a compact destination-specific recovery before rejection');
 assert.match(serverSource,/DESTINATION_RECOVERY_SUCCESS/,'validated destination recovery must be observable in production logs');
+assert.match(serverSource,/generateContentWithRetry\(ai, boundedOptions, 0, 2_000\)/,'the main itinerary request must fail over immediately after a provider error');
 assert.match(serverSource,/GEMINI_RECOVERY_MODEL\|\|'gemini-3\.5-flash-lite'/,'recovery must default to the independent lower-latency model');
 assert.match(serverSource,/GEMINI_RECOVERY_FALLBACK_MODEL\|\|'gemini-3\.6-flash'/,'recovery must have a second supported model when its primary model is unavailable');
 assert.match(serverSource,/for\(const model of models\)/,'destination recovery must attempt its bounded model chain globally');
@@ -49,7 +52,63 @@ for(const venue of ["Gregory's Jazz Club",'Alcazar Live','Freni e Frizioni','Dri
 for(const meal of ['Spaghetti alla Carbonara','Tonnarelli Cacio e Pepe',"Bucatini all'Amatriciana",'Saltimbocca alla Romana','Coda alla Vaccinara','Abbacchio Scottadito','Trippa alla Romana','Pizza Romana with Savory Toppings'])assert.match(curatedRomeProfile,new RegExp(meal.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')),'Rome fallback must contain enough complete savory meals');
 assert.match(serverSource,/const meal1 = mealAt\(dayIdx \* 2\)[\s\S]{0,100}const meal2 = mealAt\(dayIdx \* 2 \+ 1\)/,'multi-day fallback meals must not overlap adjacent days');
 assert.match(serverSource,/completeMeals\.length<7/,'recovery profiles must contain enough complete meals for multi-day trips');
-assert.match(serverSource,/DESTINATION_NIGHTLIFE_UNAVAILABLE/,'nightlife fallbacks without verified named evening venues must be rejected');
+assert.doesNotMatch(serverSource,/DESTINATION_NIGHTLIFE_UNAVAILABLE/,'provider failure must not reject an unfamiliar Nightlife trip');
+
+// Current named map records must produce a complete profile without Gemini.
+{
+  const elements=[
+    {tags:{name:'Central History Museum',tourism:'museum',wikidata:'Q1',fee:'yes'}},
+    {tags:{name:'Riverside Heritage Fort',historic:'castle',wikidata:'Q2'}},
+    {tags:{name:'City Art Gallery',tourism:'gallery'}},
+    {tags:{name:'Sunset Public Garden',leisure:'garden',fee:'no'}},
+    {tags:{name:'Old Market Square',place:'square'}},
+    {tags:{name:'River Viewpoint',tourism:'viewpoint'}},
+    ...Array.from({length:8},(_,index)=>({tags:{name:`Mapped Restaurant ${index+1}`,amenity:'restaurant'}})),
+    {tags:{name:'Mapped Bakery',shop:'bakery'}},
+    {tags:{name:'Blue Note Hall',amenity:'music_venue'}},
+    {tags:{name:'City Arts Theatre',amenity:'theatre'}},
+    {tags:{name:'Lantern Pub',amenity:'pub'}},
+    {tags:{name:'Night Owl Club',amenity:'nightclub'}},
+  ];
+  const profile=quality.buildOpenDataDestinationDetails('Testopolis, Test State, Testland',elements,'Nightlife');
+  assert.ok(profile,'mapped unfamiliar destination should produce a profile');
+  assert.equal(profile.source,'openstreetmap');
+  assert.equal(profile.places.length,6);
+  assert.equal(profile.food.length,8);
+  assert.equal(profile.nightlife.length,4);
+  assert.match(profile.places[0].description,/mapped in or near Testopolis/i);
+  assert.ok(profile.food.slice(0,7).every(item=>/complete savory regional main course/i.test(item.description)));
+  assert.deepEqual(profile.nightlife.map(item=>item.name),['Blue Note Hall','City Arts Theatre','Lantern Pub','Night Owl Club']);
+
+  const originalFetch=globalThis.fetch;
+  let requestedEndpoint='';
+  let requestedBody='';
+  try{
+    globalThis.fetch=async (url,options={})=>{
+      requestedEndpoint=String(url);
+      requestedBody=String(options.body||'');
+      return new Response(JSON.stringify({elements}),{status:200,headers:{'content-type':'application/json'}});
+    };
+    const recovered=await quality.recoverDestinationDetailsFromOpenData('Network Testopolis, Testland',12.34,56.78,'Nightlife');
+    assert.ok(recovered,'open-data network recovery should accept a valid provider response');
+    assert.match(requestedEndpoint,/overpass-api\.de\/api\/interpreter/);
+    assert.match(decodeURIComponent(requestedBody),/around:22000,12\.34000,56\.78000/);
+  }finally{
+    globalThis.fetch=originalFetch;
+  }
+}
+
+// Even when both AI and map providers are unavailable, a valid location still
+// receives an honest, visibly-confirmable non-billable plan profile.
+{
+  const profile=quality.buildResilientDestinationDetails('Smallville, Testland');
+  assert.equal(profile.source,'safe-planning');
+  assert.equal(profile.places.length,6);
+  assert.equal(profile.food.length,8);
+  assert.equal(profile.nightlife.length,4);
+  assert.ok(profile.places.every(item=>/Smallville/i.test(item.name)));
+  assert.ok(profile.tips.some(item=>/must be confirmed/i.test(item)));
+}
 
 // Regression for the Sep 9 Rome guide: paid PDFs must not retain generic
 // orientation/nightlife placeholders, imply an unverified hotel restaurant,
@@ -294,11 +353,12 @@ assert.match(pdf,/allHotelTiers[\s\S]{0,500}\.filter\(\(tier\)/,'empty accommoda
 
 for(const destination of ['Reykjavik, Iceland','Cusco, Peru','Madagascar']){
   const details=quality.buildResilientDestinationDetails(destination);
-  assert.equal(details.places.length,4,`${destination}: global fallback needs four planning anchors`);
-  assert.ok(details.food.length>=6,`${destination}: global fallback needs enough meal variety`);
+  assert.equal(details.places.length,6,`${destination}: global fallback needs six planning anchors`);
+  assert.equal(details.food.length,8,`${destination}: global fallback needs enough meal variety`);
+  assert.equal(details.nightlife.length,4,`${destination}: global fallback needs safe evening alternatives`);
   assert.equal(new Set(details.food.map(item=>normalize(item.name))).size,details.food.length,`${destination}: global fallback foods must be distinct`);
   assert.ok(details.places.every(place=>place.name.startsWith(destination)),`${destination}: fallback anchors must preserve the selected destination`);
-  assert.ok(details.places.every(place=>/confirm|choose|use a mapped|begin in/i.test(place.description)),`${destination}: fallback must label confirmation instead of fabricating facts`);
+  assert.ok(details.places.every(place=>/confirm|choose|select|current|mapped/i.test(place.description)),`${destination}: fallback must label confirmation instead of fabricating facts`);
 }
 
 // Regression for the Bali/Nepal PDFs: boundary anchors must survive, arrival-day

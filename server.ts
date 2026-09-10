@@ -228,6 +228,7 @@ interface CacheEntry {
 }
 const ITINERARY_CACHE = new Map<string, CacheEntry>();
 const GEOCODE_CACHE = new Map<string, CacheEntry>();
+const DESTINATION_PROFILE_CACHE = new Map<string, CacheEntry>();
 const TRAVEL_TIPS_CACHE = new Map<string, CacheEntry>();
 const WEATHER_CACHE = new Map<string, CacheEntry>();
 const OPEN_WEATHER_CACHE = new Map<string, CacheEntry>();
@@ -237,6 +238,7 @@ const RATES_CACHE = { data: null as any, timestamp: 0 };
 
 const ITINERARY_TTL = 24 * 60 * 60 * 1000; // Cache itineraries for 24 hours
 const GEOCODE_TTL = 30 * 24 * 60 * 60 * 1000; // Cache coordinates for 30 days
+const DESTINATION_PROFILE_TTL = 7 * 24 * 60 * 60 * 1000; // Cache map-backed destination anchors for 7 days
 const TRAVEL_TIPS_TTL = 6 * 60 * 60 * 1000; // Cache travel advisories/tips for 6 hours
 const WEATHER_TTL = 3 * 60 * 60 * 1000; // Cache weather forecast for 3 hours
 const OPEN_WEATHER_TTL = 60 * 60 * 1000; // Fresh Open-Meteo forecast cache: 1 hour
@@ -472,8 +474,9 @@ async function generateContentWithRetry(
   }
 }
 
-// A quota response commonly asks us to wait 20-60 seconds. The former 45-second
-// deadline aborted a valid provider-directed retry before it could complete.
+// The main request gets one provider attempt. A quota/overload response should
+// move straight to the provider-independent destination path instead of spending
+// another 20-60 seconds retrying the same exhausted service.
 const ITINERARY_AI_TIMEOUT_MS = 90_000;
 
 async function generateItineraryContentWithDeadline(
@@ -485,7 +488,7 @@ async function generateItineraryContentWithDeadline(
   const boundedOptions={...options,config:{...(options.config||{}),abortSignal:controller.signal}};
   try {
     return await Promise.race([
-      generateContentWithRetry(ai, boundedOptions, 2, 2_000),
+      generateContentWithRetry(ai, boundedOptions, 0, 2_000),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           controller.abort();
@@ -5282,6 +5285,7 @@ type FallbackDestinationDetails = {
   nightlife?: { name: string, description: string, bestTimeToVisit: string, entryFee: string }[];
   packing: string[];
   tips: string[];
+  source?: 'openstreetmap' | 'safe-planning';
 };
 
 /**
@@ -5292,25 +5296,175 @@ type FallbackDestinationDetails = {
  */
 function buildResilientDestinationDetails(destinationRaw:string):FallbackDestinationDetails {
   const destination=sanitizeGeneratedText(String(destinationRaw||'Selected destination')).trim()||'Selected destination';
+  const city=destination.split(',')[0].trim()||destination;
   const at=(label:string)=>`${destination}: ${label}`;
   return {
     places:[
-      {name:at('Central Orientation District'),description:`Begin in a central, well-connected public district of ${destination}; use the official tourism desk or current map listings to choose the exact neighborhood.`,bestTimeToVisit:'Morning',entryFee:'Public-area access is generally free; verify selected venues'},
-      {name:at('Heritage or Museum Visit'),description:`Choose one currently operating official museum, monument or heritage site in ${destination} after confirming its official hours and tickets.`,bestTimeToVisit:'Late morning / early afternoon',entryFee:'Confirm with the official venue'},
-      {name:at('Established Public Market'),description:`Choose a currently operating public market or established shopping district in ${destination} after confirming it from current local or official listings.`,bestTimeToVisit:'Daytime',entryFee:'Free to browse; purchases extra'},
-      {name:at('Public Park or Scenic Viewpoint'),description:`Use a mapped public park, promenade or scenic viewpoint in ${destination}; confirm access, weather and closing time before leaving.`,bestTimeToVisit:'Late afternoon',entryFee:'Verify locally'}
+      {name:at('Official Visitor Centre Selection'),description:`Start with a currently operating official visitor centre or central public district in ${destination}; confirm the exact place in current maps before leaving.`,bestTimeToVisit:'Morning',entryFee:'Public-area access is generally free; verify selected venues'},
+      {name:at('Current Museum or Heritage Selection'),description:`Select one currently operating official museum, monument or heritage site in ${destination} after confirming its name, hours and tickets.`,bestTimeToVisit:'Late morning or early afternoon',entryFee:'Confirm with the official venue'},
+      {name:at('Established Public Market Selection'),description:`Select a currently operating public market or established shopping district in ${destination} from current map or tourism listings.`,bestTimeToVisit:'Daytime',entryFee:'Free to browse; purchases extra'},
+      {name:at('Mapped Park or Promenade Selection'),description:`Select a mapped public park, promenade or scenic public space in ${destination}; confirm access, weather and closing time before leaving.`,bestTimeToVisit:'Late afternoon',entryFee:'Confirm current access rules'},
+      {name:at('Current Cultural District Selection'),description:`Choose a named cultural, craft or historic district from current official or map listings for ${destination}.`,bestTimeToVisit:'Afternoon',entryFee:'Public areas may be free; verify individual venues'},
+      {name:at('Current Scenic Public Space Selection'),description:`Choose a currently accessible named square, viewpoint, waterfront or other scenic public space in ${destination}.`,bestTimeToVisit:'Late afternoon or early evening',entryFee:'Confirm current access rules'}
     ],
     food:[
-      {name:'Regional Breakfast Selection',description:`Choose a savory breakfast recognized locally in ${destination}, confirmed from the current menu.`,type:'both',mustTryAt:at('well-reviewed breakfast venue')},
-      {name:'Regional Lunch Selection',description:`Choose a complete savory regional lunch with a main dish and accompaniments.`,type:'both',mustTryAt:at('well-reviewed local restaurant')},
-      {name:'Seasonal Local Lunch Menu',description:`Select a different complete seasonal lunch featuring locally appropriate ingredients.`,type:'both',mustTryAt:at('established neighborhood restaurant')},
-      {name:'Regional Dinner Selection',description:`Choose a complete regional dinner from the venue's current menu.`,type:'both',mustTryAt:at('well-reviewed dinner venue')},
-      {name:'Seasonal Local Dinner Menu',description:`Select a distinct savory evening meal appropriate to ${destination}.`,type:'both',mustTryAt:at('established central restaurant')},
-      {name:'Local Bakery or Tasting',description:`Add an optional locally appropriate bakery, dessert or beverage tasting separate from the main meals.`,type:'tasting',mustTryAt:at('established specialty shop')}
+      {name:`${city} Traditional Savory Main`,description:`A complete savory regional main course selected from a current menu in ${destination}, with ingredients and dietary suitability confirmed at the venue.`,type:'dietary options to confirm',mustTryAt:at('well-reviewed local restaurant to confirm')},
+      {name:`${city} Regional Lunch Plate`,description:`A complete regional lunch plate with a substantial main and appropriate accompaniments, selected from the venue's current menu.`,type:'dietary options to confirm',mustTryAt:at('established lunch venue to confirm')},
+      {name:`${city} Seasonal Local Main`,description:`A distinct complete savory main course using locally appropriate seasonal ingredients.`,type:'dietary options to confirm',mustTryAt:at('established neighborhood restaurant to confirm')},
+      {name:`${city} Regional Dinner Plate`,description:`A complete savory regional dinner selected from the restaurant's current menu.`,type:'dietary options to confirm',mustTryAt:at('well-reviewed dinner venue to confirm')},
+      {name:`${city} Traditional One-pot Main`,description:`A substantial local stew, braise, curry or one-pot main served as a complete meal where regionally appropriate.`,type:'dietary options to confirm',mustTryAt:at('traditional restaurant to confirm')},
+      {name:`${city} Grilled or Roasted Main`,description:`A complete locally appropriate grilled or roasted main course with accompaniments.`,type:'dietary options to confirm',mustTryAt:at('established regional restaurant to confirm')},
+      {name:`${city} Plant-based Regional Main`,description:`A complete savory plant-based regional main course rather than a snack or side dish; confirm ingredients and preparation at the venue.`,type:'dietary options to confirm',mustTryAt:at('well-reviewed dietary-friendly venue to confirm')},
+      {name:`${city} Optional Local Tasting`,description:`An optional locally appropriate bakery, dessert or beverage tasting kept separate from lunch and dinner.`,type:'tasting',mustTryAt:at('established specialty venue to confirm')}
+    ],
+    nightlife:[
+      {name:`${city} Current Live-Music Pick`,description:`Select a named, currently operating live-music or performance venue in ${destination} from current official or map listings.`,bestTimeToVisit:'Evening - confirm the current programme',entryFee:'Confirm current ticket or cover policy'},
+      {name:`${city} Current Theatre or Cultural Show Pick`,description:`Select a named theatre, cultural show or scheduled evening performance in ${destination} and reserve only after checking the official programme.`,bestTimeToVisit:'Evening - confirm the scheduled start',entryFee:'Confirm with the official venue'},
+      {name:`${city} Current Licensed Evening Venue Pick`,description:`Select a named, currently operating licensed evening venue in ${destination}; confirm age, entry and closing policies.`,bestTimeToVisit:'Late evening - verify current hours',entryFee:'Confirm current cover or minimum spend'},
+      {name:`${city} Current Night Market or Evening District Pick`,description:`Select a named night market or established evening district from current tourism or map listings and arrange dependable return transport.`,bestTimeToVisit:'Evening - verify current operating day',entryFee:'Public access may be free; purchases extra'}
     ],
     packing:['Government-issued ID and travel documents','Comfortable walking shoes','Weather-appropriate layers','Refillable water bottle','Phone charger and power bank','Required medicines'],
-    tips:[`Confirm exact attraction names, opening hours and tickets using official or current local sources in ${destination}.`,`Use mapped, well-reviewed transport and allow extra time for unfamiliar routes.`,`Keep the selected hotel as the daily start/end anchor unless an overnight excursion is explicitly planned.`,`Treat all prices as planning estimates until confirmed with the provider.`]
+    tips:[`This provider-independent plan clearly marks selections that must be confirmed from current official or map listings in ${destination}.`,`Confirm exact attraction and venue names, opening hours and tickets before travel.`,`Use mapped, well-reviewed transport and allow extra time for unfamiliar routes.`,`Keep the selected hotel as the daily start/end anchor unless an overnight excursion is explicitly planned.`,`Treat all prices as planning estimates until confirmed with the provider.`],
+    source:'safe-planning'
   };
+}
+
+type OpenMapElement = {
+  id?: number;
+  type?: string;
+  tags?: Record<string,string>;
+  lat?: number;
+  lon?: number;
+  center?: { lat?: number; lon?: number };
+};
+
+/**
+ * Convert current named OpenStreetMap features into an honest destination
+ * profile. Places and venues are real map records; descriptions never claim
+ * live prices, ratings, availability or opening hours.
+ */
+function buildOpenDataDestinationDetails(destinationRaw:string,elementsRaw:any[],travelStyleRaw=''):FallbackDestinationDetails|null{
+  const destination=sanitizeGeneratedText(String(destinationRaw||'')).trim();
+  if(!destination)return null;
+  const city=destination.split(',')[0].trim()||destination;
+  const elements=(Array.isArray(elementsRaw)?elementsRaw:[]) as OpenMapElement[];
+  const clean=(value:any)=>sanitizeGeneratedText(String(value||'')).replace(/\s+/g,' ').trim();
+  const genericName=/^(?:restaurant|cafe|coffee shop|bar|pub|nightclub|museum|park|garden|market|hotel|temple|church|mosque|theatre|cinema|viewpoint|attraction)$/i;
+  const rows=elements.map((element)=>{
+    const tags=element?.tags||{};
+    const name=clean(tags['name:en']||tags.name);
+    return {element,tags,name,key:name.toLowerCase()};
+  }).filter((row)=>row.name.length>=3&&row.name.length<=100&&!genericName.test(row.name));
+  const unique=(items:typeof rows)=>{
+    const seen=new Set<string>();
+    return items.filter((item)=>{if(!item.key||seen.has(item.key))return false;seen.add(item.key);return true;});
+  };
+  const amenity=(row:any)=>String(row.tags?.amenity||'').toLowerCase();
+  const tourism=(row:any)=>String(row.tags?.tourism||'').toLowerCase();
+  const leisure=(row:any)=>String(row.tags?.leisure||'').toLowerCase();
+  const natural=(row:any)=>String(row.tags?.natural||'').toLowerCase();
+  const attractionRows=unique(rows.filter((row)=>
+    /^(?:attraction|museum|gallery|viewpoint|zoo|aquarium|theme_park|artwork|information)$/.test(tourism(row))||
+    Boolean(row.tags?.historic)||
+    /^(?:park|garden|nature_reserve)$/.test(leisure(row))||
+    /^(?:beach|waterfall|peak|cliff|spring)$/.test(natural(row))||
+    String(row.tags?.place||'').toLowerCase()==='square'||
+    /^(?:marketplace|place_of_worship)$/.test(amenity(row))
+  )).sort((a,b)=>{
+    const score=(row:any)=>(row.tags?.wikipedia||row.tags?.wikidata?8:0)+(/museum|gallery|attraction/.test(tourism(row))?5:0)+(row.tags?.historic?4:0)+(/park|garden|nature_reserve/.test(leisure(row))?3:0)+(/beach|waterfall/.test(natural(row))?3:0);
+    return score(b)-score(a)||a.name.localeCompare(b.name);
+  });
+  if(attractionRows.length<3)return null;
+  const category=(row:any)=>{
+    const value=tourism(row)||String(row.tags?.historic||'').toLowerCase()||leisure(row)||natural(row)||amenity(row)||String(row.tags?.place||'').toLowerCase();
+    return clean(value.replace(/_/g,' '))||'visitor place';
+  };
+  const entry=(row:any)=>String(row.tags?.fee||'').toLowerCase()==='no'
+    ? 'Map listing indicates free access - verify current rules'
+    : String(row.tags?.fee||'').toLowerCase()==='yes'
+      ? 'Paid access indicated - verify the official price'
+      : 'Confirm access and tickets with the official venue';
+  const resilient=buildResilientDestinationDetails(destination);
+  const mappedPlaces=attractionRows.slice(0,6).map((row)=>({
+    name:row.name,
+    description:`A named ${category(row)} mapped in or near ${destination}. Confirm the current official description, access conditions and operating day before visiting.`,
+    bestTimeToVisit:/museum|gallery|place of worship/.test(category(row))?'Daytime - verify current hours':/viewpoint|beach|park|garden/.test(category(row))?'Morning or late afternoon':'Daytime - verify current hours',
+    entryFee:entry(row)
+  }));
+  const places=[...mappedPlaces,...resilient.places].slice(0,6);
+
+  const diningRows=unique(rows.filter((row)=>/^(?:restaurant|food_court|cafe)$/.test(amenity(row))||String(row.tags?.shop||'').toLowerCase()==='bakery'));
+  const mealVenues=diningRows.filter((row)=>/^(?:restaurant|food_court)$/.test(amenity(row))).slice(0,7);
+  const safeMealNames=['Traditional Savory Main','Regional Lunch Plate','Seasonal Local Main','Regional Dinner Plate','Traditional One-pot Main','Grilled or Roasted Main','Vegetarian Regional Main'];
+  const food=Array.from({length:7},(_,index)=>{
+    const venue=mealVenues[index];
+    const venueName=venue?.name||`${destination}: dining venue ${index+1} to confirm`;
+    return {
+      name:venue?`${city} Complete Meal at ${venue.name}`:`${city} ${safeMealNames[index]}`,
+      description:`A complete savory regional main course selected from the current menu at ${venueName}; confirm ingredients, dietary suitability and the price before ordering.`,
+      type:'dietary options to confirm',
+      mustTryAt:venueName
+    };
+  });
+  const tastingVenue=diningRows.find((row)=>!mealVenues.some((venue)=>venue.key===row.key));
+  food.push({
+    name:tastingVenue?`${city} Optional Tasting at ${tastingVenue.name}`:`${city} Optional Local Tasting`,
+    description:`An optional local bakery, dessert or beverage tasting kept separate from primary meals; confirm the current menu and price.`,
+    type:'tasting',
+    mustTryAt:tastingVenue?.name||`${destination}: specialty venue to confirm`
+  });
+
+  const nightlifeRows=unique(rows.filter((row)=>/^(?:bar|pub|nightclub|theatre|cinema|arts_centre|music_venue)$/.test(amenity(row))||/^(?:nightclub|dance)$/.test(leisure(row))));
+  const mappedNightlife=nightlifeRows.slice(0,4).map((row)=>({
+    name:row.name,
+    description:`A named ${category(row)} mapped in or near ${destination}. Check its current programme, operating day, entry policy and safe return options before visiting.`,
+    bestTimeToVisit:'Evening - verify the current programme and hours',
+    entryFee:'Confirm current ticket, cover or minimum-spend policy'
+  }));
+  const nightlife=[...mappedNightlife,...(resilient.nightlife||[])].slice(0,4);
+  const needsNightlife=String(travelStyleRaw||'').toLowerCase().trim()==='nightlife';
+  if(needsNightlife&&mappedNightlife.length<1)return null;
+
+  return {
+    places,
+    food,
+    nightlife,
+    packing:resilient.packing,
+    tips:[`Named places and venues in this recovery plan came from current OpenStreetMap records for ${destination}; confirm official hours, tickets, menus and operating status before travel.`,...resilient.tips.slice(1)],
+    source:'openstreetmap'
+  };
+}
+
+/** Fetch one bounded OpenStreetMap/Overpass snapshot for an unfamiliar place. */
+async function recoverDestinationDetailsFromOpenData(destinationRaw:string,latitude:number|undefined,longitude:number|undefined,travelStyleRaw=''):Promise<FallbackDestinationDetails|null>{
+  const destination=sanitizeGeneratedText(String(destinationRaw||'')).trim();
+  if(!destination||!Number.isFinite(latitude)||!Number.isFinite(longitude))return null;
+  const cacheKey=`${destination.toLowerCase()}|${Number(latitude).toFixed(3)}|${Number(longitude).toFixed(3)}|${String(travelStyleRaw||'').toLowerCase()==='nightlife'?'nightlife':'general'}`;
+  const cached=DESTINATION_PROFILE_CACHE.get(cacheKey);
+  if(cached&&(Date.now()-cached.timestamp<DESTINATION_PROFILE_TTL))return cached.data as FallbackDestinationDetails;
+  const radius=destination.includes(',')?22000:45000;
+  const lat=Number(latitude).toFixed(5),lon=Number(longitude).toFixed(5);
+  const query=`[out:json][timeout:10];\n(\n nwr(around:${radius},${lat},${lon})[name][tourism~"attraction|museum|gallery|viewpoint|zoo|aquarium|theme_park|artwork|information"];\n nwr(around:${radius},${lat},${lon})[name][historic];\n nwr(around:${radius},${lat},${lon})[name][leisure~"park|garden|nature_reserve"];\n nwr(around:${radius},${lat},${lon})[name][natural~"beach|waterfall|peak|cliff|spring"];\n nwr(around:${radius},${lat},${lon})[name][place=square];\n nwr(around:${radius},${lat},${lon})[name][amenity~"marketplace|place_of_worship"];\n)->.sights;\n(\n nwr(around:${radius},${lat},${lon})[name][amenity~"restaurant|food_court|cafe"];\n nwr(around:${radius},${lat},${lon})[name][shop=bakery];\n)->.dining;\n(\n nwr(around:${radius},${lat},${lon})[name][amenity~"bar|pub|nightclub|theatre|cinema|arts_centre|music_venue"];\n nwr(around:${radius},${lat},${lon})[name][leisure~"nightclub|dance"];\n)->.evening;\n.sights out tags center 70;\n.dining out tags center 35;\n.evening out tags center 25;`;
+  const endpoints=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+  for(const endpoint of endpoints){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),8_000);
+    try{
+      const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json','User-Agent':'TripBalancing/2.1 (destination recovery; support@tripbalancing.in)'},body:`data=${encodeURIComponent(query)}`,signal:controller.signal});
+      if(!response.ok)throw new Error(`Open-data HTTP ${response.status}`);
+      const payload:any=await response.json();
+      const details=buildOpenDataDestinationDetails(destination,Array.isArray(payload?.elements)?payload.elements:[],travelStyleRaw);
+      if(details){
+        DESTINATION_PROFILE_CACHE.set(cacheKey,{data:details,timestamp:Date.now()});
+        console.warn(`[DESTINATION_OPEN_DATA_SUCCESS] Built a map-backed profile for "${destination.slice(0,120)}".`);
+        return details;
+      }
+      console.warn(`[DESTINATION_OPEN_DATA_THIN] Map data was too limited for "${destination.slice(0,120)}".`);
+    }catch(error:any){
+      console.warn(`[DESTINATION_OPEN_DATA_FAILED] ${endpoint}: ${error?.message||error}`);
+    }finally{clearTimeout(timer);}
+  }
+  return null;
 }
 
 /**
@@ -6262,20 +6416,27 @@ Return the response in strict JSON format.`;
 
     let details = destinationDetails[Object.keys(destinationDetails).find(k => destNormalized.includes(k)) || ""];
     let fallbackDataQuality='curated-destination-profile';
+    const providerUnavailable=['quota','overloaded','config'].includes(geminiFailure.classified.kind);
     if (!details) {
-      details=await recoverDestinationSpecificDetails(destination, travelStyle);
-      fallbackDataQuality=details?'recovered-destination-profile':'resilient-destination-planning-profile';
-      if(!details){
-        console.error(`[GLOBAL_FALLBACK_REJECTED] No verified destination profile for "${String(destination).slice(0,120)}" after ${geminiFailure.classified.kind}. Generic planning anchors cannot be sold as a Premium Guide.`);
-        return res.status(503).json({
-          error: 'Verified destination-specific recommendations are temporarily unavailable. Please try again. Your completed form is preserved and your trip allowance has not been used.',
-          code: 'DESTINATION_CONTENT_UNAVAILABLE',
-          retryable: true,
-          preservedInput: true,
-          billableGeneration: false
-        });
+      // A quota/503/config failure must not be followed by another request to the
+      // same unavailable provider. Prefer current named OpenStreetMap features,
+      // then use the honest confirmation-based planning profile as the final
+      // availability guarantee for every strictly validated destination.
+      if(!providerUnavailable){
+        details=await recoverDestinationSpecificDetails(destination, travelStyle);
+        if(details)fallbackDataQuality='recovered-destination-profile';
       }
-      console.warn(`[DESTINATION_RECOVERY_SUCCESS] Built a validated destination-specific recovery profile for "${String(destination).slice(0,120)}".`);
+      if(!details){
+        details=await recoverDestinationDetailsFromOpenData(destination,geoCoords?.latitude,geoCoords?.longitude,travelStyle);
+        if(details)fallbackDataQuality='map-backed-destination-profile';
+      }
+      if(!details){
+        details=buildResilientDestinationDetails(destination);
+        fallbackDataQuality='safe-planning-profile';
+        console.warn(`[DESTINATION_SAFE_FALLBACK] Current named recommendations were unavailable for "${String(destination).slice(0,120)}"; returning a confirmation-based non-billable plan.`);
+      }else{
+        console.warn(`[DESTINATION_RECOVERY_SUCCESS] Built a provider-independent destination profile for "${String(destination).slice(0,120)}".`);
+      }
     }
 
     // Build the budget calculations based on budget level and numbers
@@ -6329,15 +6490,14 @@ Return the response in strict JSON format.`;
     const daysList: any[] = [];
     const fallbackStyle = String(travelStyle || 'Budget').toLowerCase().trim();
     if(fallbackStyle==='nightlife'&&(!Array.isArray(details.nightlife)||details.nightlife.length<2)){
-      const nightlifeRecovery=await recoverDestinationSpecificDetails(destination, travelStyle);
-      if(!nightlifeRecovery?.nightlife?.length){
-        console.error(`[NIGHTLIFE_FALLBACK_REJECTED] No verified named evening venues for "${String(destination).slice(0,120)}".`);
-        return res.status(503).json({
-          error:'Verified destination-specific nightlife recommendations are temporarily unavailable. Please try again. Your completed form is preserved and your trip allowance has not been used.',
-          code:'DESTINATION_NIGHTLIFE_UNAVAILABLE',retryable:true,preservedInput:true,billableGeneration:false
-        });
-      }
-      details={...details,nightlife:nightlifeRecovery.nightlife};
+      const openNightlife=await recoverDestinationDetailsFromOpenData(destination,geoCoords?.latitude,geoCoords?.longitude,travelStyle);
+      const aiNightlife=!openNightlife&&!providerUnavailable?await recoverDestinationSpecificDetails(destination,travelStyle):null;
+      const safeNightlife=buildResilientDestinationDetails(destination).nightlife||[];
+      const recoveredNightlife=openNightlife?.nightlife||aiNightlife?.nightlife||safeNightlife;
+      details={...details,nightlife:recoveredNightlife};
+      if(openNightlife?.nightlife?.length)fallbackDataQuality='map-backed-destination-profile';
+      else if(aiNightlife?.nightlife?.length)fallbackDataQuality='recovered-destination-profile';
+      else fallbackDataQuality='safe-planning-profile';
     }
     const mkActivity = (time: string, title: string, description: string, location: string, cost: string, dayIdx: number, slot: number) => ({
       time, title, description, location, cost,
@@ -6749,12 +6909,17 @@ Return the response in strict JSON format.`;
       generation: {
         source: "curated-fallback",
         degraded: true,
-        reason: geminiFailure.body.code
+        reason: geminiFailure.body.code,
+        dataQuality: fallbackDataQuality
       },
       billableGeneration: false,
       notice: fallbackDataQuality==='recovered-destination-profile'
         ? "The full AI itinerary needed recovery, so TripBalancing rebuilt it from a validated destination-specific profile. Your trip allowance was not used."
-        : "AI generation is temporarily unavailable, so TripBalancing used a verified destination profile. Your trip allowance was not used."
+        : fallbackDataQuality==='map-backed-destination-profile'
+          ? "AI generation was temporarily unavailable, so TripBalancing used current named map records and clearly marked details that need official confirmation. Your trip allowance was not used."
+          : fallbackDataQuality==='safe-planning-profile'
+            ? "AI and current named map recommendations were temporarily unavailable. TripBalancing still created a confirmation-based planning guide without inventing places or prices, and your trip allowance was not used."
+            : "AI generation is temporarily unavailable, so TripBalancing used a verified destination profile. Your trip allowance was not used."
     });
   }
 });
@@ -7478,6 +7643,8 @@ export const itineraryQualityTestHooks = {
   enforceFinalMealDensityAndVariety,
   applySmartRouteAndTransport,
   buildResilientDestinationDetails,
+  buildOpenDataDestinationDetails,
+  recoverDestinationDetailsFromOpenData,
   recoverDestinationSpecificDetails,
   alignLodgingLogisticsToBudgetHotel,
 };

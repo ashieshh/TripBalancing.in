@@ -214,6 +214,7 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [generationNotice, setGenerationNotice] = useState<string | null>(null);
   const [publicReviews, setPublicReviews] = useState<any[]>([]);
 
   useEffect(() => {
@@ -271,6 +272,7 @@ export default function App() {
       tripHistoryEntry.current = false;
       setActiveItinerary(null);
       setActiveTripId(null);
+      setGenerationNotice(null);
       requestAnimationFrame(() => window.scrollTo({
         top: dashboardScrollPosition.current,
         left: 0,
@@ -288,6 +290,7 @@ export default function App() {
     }
     setActiveItinerary(null);
     setActiveTripId(null);
+    setGenerationNotice(null);
     requestAnimationFrame(() => window.scrollTo({
       top: dashboardScrollPosition.current,
       left: 0,
@@ -509,6 +512,7 @@ export default function App() {
       setUser(null);
       setActiveItinerary(null);
       setActiveTripId(null);
+      setGenerationNotice(null);
     } catch (err) {
       console.error("Sign out error:", err);
     }
@@ -534,6 +538,7 @@ export default function App() {
     lastTripInput.current = input;
     pendingTripResultScroll.current = true;
     setApiError(null);
+    setGenerationNotice(null);
     setActiveItinerary(null);
     setActiveTripId(null);
 
@@ -562,6 +567,7 @@ export default function App() {
       }
       if (data.itinerary) {
         setActiveItinerary(data.itinerary);
+        setGenerationNotice(typeof data.notice === "string" && data.notice.trim() ? data.notice : null);
         
         // The server is the only authority that consumes free trips or paid credits.
         // Refresh the UI from the entitlement returned after the server-side atomic update.
@@ -575,6 +581,7 @@ export default function App() {
       }
     } catch (err: any) {
       pendingTripResultScroll.current = false;
+      setGenerationNotice(null);
       console.error("Generation failed:", err);
       setApiError(err.message || "An unexpected error occurred during trip generation.");
     } finally {
@@ -1037,6 +1044,13 @@ export default function App() {
               Back to Travel Hub
             </button>
 
+            {generationNotice && (
+              <div role="status" className="print:hidden flex items-start gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sky-900 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200">
+                <Info className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                <p className="text-xs font-semibold leading-relaxed">{generationNotice}</p>
+              </div>
+            )}
+
             <Suspense fallback={<SuspenseFallback />}>
               <ItineraryView 
                 itinerary={activeItinerary} 
@@ -1130,6 +1144,7 @@ export default function App() {
                       pendingTripResultScroll.current = true;
                       window.history.pushState({ tripView: true }, "", window.location.href);
                       tripHistoryEntry.current = true;
+                      setGenerationNotice(null);
                       setActiveItinerary(trip.itinerary);
                       setActiveTripId(trip.id);
                       setActiveTripIsReadOnly(isReadOnly);

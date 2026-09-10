@@ -55,6 +55,7 @@ assert.match(server,/applyTravelerTypePersonalization\(reconciledItinerary, trav
 assert.match(server,/applyTravelerTypePersonalization\(reconciledFallback, travelerType\)/);
 assert.match(itineraryView,/itinerary\.travelerType/);
 assert.match(pdf,/itinerary\.travelerType/);
+assert.match(read('src/App.tsx'),/setGenerationNotice\(typeof data\.notice/,'degraded generation notice must be shown instead of a red error');
 
 // Smart Luxury must support both budget modes without silently changing the selected style.
 assert.match(form,/const recommendBudget = budgetMode === "recommended"/);
