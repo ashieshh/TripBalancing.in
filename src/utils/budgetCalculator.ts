@@ -527,6 +527,20 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
   });
 
   const currencySym = calculated.currencySymbol;
+  const tripCurrency = detectCurrencyCode(userBudgetInput, destination);
+  const sourceMoneyToTrip = (raw:any):number => {
+    const text=String(raw??'').trim();
+    if(!text || /\bfree\b|included|n\/?a|price (?:to )?confirm/i.test(text)) return 0;
+    const match=text.replace(/,/g,'').match(/[0-9]+(?:\.[0-9]+)?/);
+    if(!match)return 0;
+    const amount=Math.max(0,Number(match[0])||0);
+    const sourceCurrency=detectCurrencyCode(text,destination);
+    return Math.max(0,Math.round(amount*getLiveCrossRate(sourceCurrency,tripCurrency)));
+  };
+  const sourcePartyMultiplier=(raw:any)=>/\b(group|family|all travelers|total)\b/i.test(String(raw||''))?1:travelers;
+  // Preserve the provider/model statement before any display formatting. Repeated
+  // reconciliation must never multiply an already-converted group estimate again.
+  if(Array.isArray(itinerary.placesToVisit))for(const place of itinerary.placesToVisit)if(place&&place.entryFeeSource==null)place.entryFeeSource=String(place.entryFee||'');
 
   // When Agoda has already returned live hotel options, price the accommodation
   // category from the first recommended hotel in the selected travel-style tier.
@@ -589,18 +603,7 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
   // in the itinerary instead of blindly charging a fixed per-day sightseeing allowance.
   // Admission, private service and premium experience costs are estimated separately.
   if (Array.isArray(itinerary.days) && itinerary.days.length > 0) {
-    const tripCurrency = detectCurrencyCode(userBudgetInput, destination);
     const toTrip = (inr:number) => Math.max(0, Math.round(convertInrToTripCurrency(inr, tripCurrency)));
-    const parseSourceMoneyToTrip = (raw:any):number => {
-      const text=String(raw??'').trim();
-      if(!text || /\bfree\b|included|n\/?a/i.test(text)) return 0;
-      const m=text.replace(/,/g,'').match(/[0-9]+(?:\.[0-9]+)?/);
-      if(!m) return 0;
-      const n=Math.max(0,Number(m[0])||0);
-      const source=detectCurrencyCode(text,destination);
-      const inr=n*getLiveCrossRate(source,'INR');
-      return Math.max(0,Math.round(inr*getLiveCrossRate('INR',tripCurrency)));
-    };
     const placeRows=Array.isArray(itinerary.placesToVisit)?itinerary.placesToVisit:[];
     const norm=(v:any)=>String(v||'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\b(the|a|an|private|priority|visit|experience|tour|guided|at|to|of|and)\b/g,' ').replace(/\s+/g,' ').trim();
     const styleKey=String(travelStyle||'').toLowerCase();
@@ -616,7 +619,8 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
         const place=placeRows.find((p:any)=>{const pk=norm(p?.name);return pk&&(ak.includes(pk)||pk.includes(ak));});
         if(place){
           const pk=norm(place?.name);
-          if(!chargedPlaces.has(pk)){ componentActivityTotal+=parseSourceMoneyToTrip(place?.entryFee); chargedPlaces.add(pk); }
+          const feeSource=String(place?.entryFeeSource??place?.entryFee??'');
+          if(!chargedPlaces.has(pk)){ componentActivityTotal+=sourceMoneyToTrip(feeSource)*sourcePartyMultiplier(feeSource); chargedPlaces.add(pk); }
           if(/private|priority|reserved|guide|premium/i.test(text)) componentActivityTotal+=toTrip(premiumBlockInr);
           continue;
         }
@@ -831,11 +835,14 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
   if (Array.isArray(itinerary.days) && itinerary.days.length > 0) {
     const firstMoneyNumber = (value:any):number => { const text=String(value??"").replace(/,/g,""); if(/\bfree\b|included/i.test(text))return 0; const m=text.match(/[0-9]+(?:\.[0-9]+)?/); return m?Math.max(0,Number(m[0])||0):0; };
     const key=(v:any)=>String(v||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").replace(/\b(the|a|an|private|priority|visit|experience|tour|guided|at|to|of|and)\b/g," ").replace(/\s+/g," ").trim();
-    const neutralAdmissionBudget = calculateRealWorldBudget({ destination, origin, travelers, days, travelStyle:'Budget', userBudgetInput, flightEstimateInr:Number(itinerary.flightEstimateInr)||undefined, startDate:itinerary.startDate, endDate:itinerary.endDate });
     const places=Array.isArray(itinerary.placesToVisit)?itinerary.placesToVisit:[];
-    const paidCount=Math.max(1,places.filter((p:any)=>!/\bfree\b/i.test(String(p?.entryFee||""))).length);
-    const standardAdmission=Math.max(0,neutralAdmissionBudget.sightseeing/travelers/paidCount);
-    const placeFees=places.map((p:any)=>({key:key(p?.name),free:/\bfree\b/i.test(String(p?.entryFee||"")),fee:/\bfree\b/i.test(String(p?.entryFee||""))?0:standardAdmission})).filter((p:any)=>p.key);
+    const placeFees=places.map((p:any)=>{
+      const source=String(p?.entryFeeSource??p?.entryFee??'');
+      const free=/\bfree\b/i.test(source);
+      const fee=free?0:sourceMoneyToTrip(source)*sourcePartyMultiplier(source);
+      const display=free?'Free':fee>0?`${fmtMoney(fee)} group planning estimate; verify official ticket`:'Price to confirm; verify official ticket';
+      return {key:key(p?.name),free,fee,display};
+    }).filter((p:any)=>p.key);
     const serviceRows:Array<{activity:any;weight:number}>=[]; let fixedAdmissionTotal=0;
     itinerary.days.forEach((day:any)=>{ (Array.isArray(day?.activities)?day.activities:[]).forEach((activity:any)=>{
       const raw=String(activity?.cost??""); const ak=key(`${activity?.title||""} ${activity?.location||""}`);
@@ -845,8 +852,11 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
       // Food and local transport are reconciled in their own visible daily
       // categories. Do not accidentally consume the sightseeing pool again.
       if(isMeal || isTransfer) return;
-      const matched=isTransfer||isPaidService ? undefined : placeFees.find((p:any)=>ak.includes(p.key)||p.key.includes(ak));
-      if(matched){ if(matched.free)activity.cost="Free"; else { const fee=Math.max(1,Math.round(matched.fee)); activity.cost=fmtMoney(fee); fixedAdmissionTotal+=fee; } return; }
+      // A named attraction keeps the same admission basis even if its activity
+      // title begins "Guided Visit". Otherwise the day card can silently inherit
+      // a generic guide-service allocation and disagree with the attraction card.
+      const matched=isTransfer ? undefined : placeFees.find((p:any)=>ak.includes(p.key)||p.key.includes(ak));
+      if(matched){activity.cost=matched.display;if(!matched.free&&matched.fee>0)fixedAdmissionTotal+=Math.round(matched.fee);return;}
       const weight=firstMoneyNumber(raw); if(isPaidService){serviceRows.push({activity,weight:Math.max(1,weight)});return;} if(/\bfree\b|included/i.test(raw)||weight<=0){ if(!raw.trim()||/\bfree\b|included/i.test(raw))activity.cost="Free"; return; } serviceRows.push({activity,weight});
     }); });
     const remaining=Math.max(0,Math.round(calculated.sightseeing-fixedAdmissionTotal));
@@ -941,19 +951,15 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     airportTransfer: fmtMoney(perPersonTransportDay * 1.5),
   };
 
-  // Attraction cards show STANDARD ENTRY estimates and must not become more expensive merely
-  // because the user selected Luxury. Premium/private tours remain separate itinerary activities.
+  // Preserve distinct source prices when supplied and otherwise say that the
+  // price is pending. Never manufacture one identical amount for every landmark.
   if (Array.isArray(itinerary.placesToVisit) && itinerary.placesToVisit.length) {
-    const neutralAdmissionBudget = calculateRealWorldBudget({
-      destination, origin, travelers, days, travelStyle: 'Budget', userBudgetInput,
-      flightEstimateInr: Number(itinerary.flightEstimateInr) || undefined, startDate: itinerary.startDate, endDate: itinerary.endDate
-    });
-    const paidPlaces = itinerary.placesToVisit.filter((p: any) => !/\bfree\b/i.test(String(p.entryFee || "")));
-    const perPaidPlace = paidPlaces.length ? neutralAdmissionBudget.sightseeing / travelers / paidPlaces.length : 0;
     itinerary.placesToVisit.forEach((place: any) => {
-      if (/\bfree\b/i.test(String(place.entryFee || ""))) place.entryFee = "Free";
-      else place.entryFee = fmtMoney(perPaidPlace);
-      place.entryFeeBasis = 'Standard entry estimate';
+      const source=String(place.entryFeeSource??place.entryFee??'');
+      const free=/\bfree\b/i.test(source);
+      const groupEstimate=free?0:sourceMoneyToTrip(source)*sourcePartyMultiplier(source);
+      place.entryFee=free?'Free':groupEstimate>0?`${fmtMoney(groupEstimate)} group estimate`:'Price to confirm';
+      place.entryFeeBasis=free?'Public/free-access statement; verify current rules':groupEstimate>0?'Planning estimate; verify official ticket':'Price pending; verify official ticket';
     });
     itinerary.attractionCosts = itinerary.placesToVisit.map((p: any) => ({ name: p.name, fee: p.entryFee, basis: p.entryFeeBasis }));
   }

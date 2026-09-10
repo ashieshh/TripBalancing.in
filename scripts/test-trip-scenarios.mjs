@@ -77,7 +77,8 @@ assert.match(serverSource,/DESTINATION_NIGHTLIFE_UNAVAILABLE/,'nightlife fallbac
   assert.doesNotMatch(copy,/Morning Destination Orientation|Nightlife Venue|entertainment district|nightlife district|Lunch & Live Entertainment/i,'generic Rome placeholders must be removed');
   assert.doesNotMatch(copy,/Chef's Rome Seasonal Menu.*Giglio Dell'opera Hotel/i,'fallback dining must not invent a hotel restaurant');
   assert.doesNotMatch(copy,/"cost":"\$5"/i,'a converted paid attraction must not retain the generic nightlife placeholder price');
-  assert.match(copy,/Romantic Evening/i,'honeymoon itinerary needs a visible romantic experience');
+  assert.match(copy,/Romantic/i,'honeymoon itinerary needs a visible romantic experience');
+  assert.match(copy,/Romantic [^\"]*Dinner/i,'romantic meal wording must retain an explicit dinner role');
   const routed=quality.applySmartRouteAndTransport(rome);
   assert.ok(routed.days[0].activities.slice(1).every(a=>Number(a.distanceFromPreviousKm)>0),'missing coordinates need labeled estimated route distances');
   assert.ok(routed.days[0].activities.some(a=>a.distanceFromPreviousEstimated===true),'derived route distances must be marked estimated');
@@ -93,6 +94,97 @@ assert.match(serverSource,/DESTINATION_NIGHTLIFE_UNAVAILABLE/,'nightlife fallbac
   assert.doesNotMatch(temporalCopy,/Sunset \/ Pre-evening Visit|Romantic Evening/i,'final titles and themes must agree with their clock time');
   assert.match(temporalCopy,/Morning Visit: Vatican Museums/i,'09:30 attraction must receive a morning label');
   assert.match(temporalCopy,/Romantic Experience: Pantheon/i,'daytime honeymoon activity must not be called an evening');
+}
+
+// Exact regression for the second Sep 9 Rome PDF: do not infer a hotel spa,
+// count brunch as lunch, keep real late-night venues, feed a 4 PM departure day,
+// and never assign a distance to an unresolved FCO/CIA choice.
+{
+  const rome={
+    destination:'Rome, Lazio, Italy',origin:'Mumbai, Maharashtra, India',startDate:'2026-09-30',endDate:'2026-10-03',travelStyle:'Nightlife',travelerType:'Honeymoon',travelers:2,budgetAmount:'$4,100',budgetHotelName:'Domus Livia Luxury Suite',selectedHotelName:'Domus Livia Luxury Suite',
+    hotelRecommendations:{budget:[],midRange:[{name:'Domus Livia Luxury Suite',description:'Central rooms with Wi-Fi.',source:'agoda',dailyRate:253,rateCurrency:'USD'}],luxury:[]},
+    placesToVisit:[
+      {name:'Colosseum, Roman Forum and Palatine Hill',description:'Ancient archaeological area.',bestTimeToVisit:'Reserved morning slot',entryFee:'€24 per adult planning estimate'},
+      {name:'Galleria Borghese',description:'Reservation-only art museum.',bestTimeToVisit:'Reserved daytime slot',entryFee:'Paid timed ticket - verify current official price'},
+      {name:'Vatican Museums and Sistine Chapel',description:'Major papal collections.',bestTimeToVisit:'Reserved morning slot',entryFee:'€25 per adult planning estimate'},
+      {name:'Pantheon',description:'Ancient monument.',bestTimeToVisit:'Late afternoon',entryFee:'Paid entry - verify current official price'}
+    ],
+    localFood:[
+      {name:'Tonnarelli Cacio e Pepe',description:'A complete Roman pasta dish.',type:'veg',mustTryAt:'An established Roman trattoria'},
+      {name:"Bucatini all'Amatriciana",description:'A substantial Lazio pasta dish.',type:'non-veg',mustTryAt:'A traditional Roman trattoria'},
+      {name:'Saltimbocca alla Romana',description:'A complete Roman veal main course.',type:'non-veg',mustTryAt:'An established Roman osteria'},
+      {name:'Coda alla Vaccinara',description:'A complete Roman oxtail main course.',type:'non-veg',mustTryAt:'A Testaccio restaurant'},
+      {name:'Abbacchio Scottadito',description:'A complete Roman lamb main course.',type:'non-veg',mustTryAt:'A Roman restaurant'},
+      {name:'Pizza Romana',description:'A complete savory Roman pizza meal.',type:'both',mustTryAt:'An established Roman pizzeria'},
+      {name:'Spaghetti alla Carbonara',description:'A complete Roman pasta dish.',type:'non-veg',mustTryAt:'A Roman trattoria'}
+    ],
+    nightlife:[
+      {name:"Gregory's Jazz Club",description:'Established jazz club with scheduled live sets.',bestTimeToVisit:'Late evening',entryFee:'Ticket or minimum spend may apply'},
+      {name:'Alcazar Live',description:'Trastevere performance venue with scheduled events.',bestTimeToVisit:'Late evening',entryFee:'Event-dependent ticket'},
+      {name:'Freni e Frizioni',description:'Long-running Trastevere cocktail bar.',bestTimeToVisit:'Late evening',entryFee:'Drinks extra'},
+      {name:'Drink Kong',description:'Established Monti cocktail bar.',bestTimeToVisit:'Late evening',entryFee:'Drinks extra'}
+    ],
+    days:[
+      {dayNumber:1,theme:'Arrival',activities:[
+        {time:'11:00 AM',title:'Arrival Transfer & Hotel Check-in',description:'Arrive and check in.',location:'Domus Livia Luxury Suite',visitDuration:'1h'},
+        {time:'02:15 PM',title:'Afternoon Visit: Colosseum, Roman Forum and Palatine Hill',description:'Ancient archaeological area.',location:'Colosseum, Roman Forum and Palatine Hill',visitDuration:'1h 30m'},
+        {time:'07:30 PM',title:'Romantic Evening: Spa & Wellness Session at Domus Livia Luxury Suite',description:'Reserve a hotel wellness treatment.',location:'Domus Livia Luxury Suite',visitDuration:'1h 30m'},
+        {time:'10:30 PM',title:'Spa & Wellness Session at Domus Livia Luxury Suite',description:'Reserve a hotel wellness treatment.',location:'Domus Livia Luxury Suite',visitDuration:'1h'}
+      ]},
+      {dayNumber:2,theme:'Morning Destination Orientation - Day 2 & Late Brunch',activities:[
+        {time:'09:30 AM',title:'Guided Visit: Galleria Borghese',description:'Reservation-only art museum.',location:'Galleria Borghese',visitDuration:'1h 30m'},
+        {time:'11:45 AM',title:"Late Brunch: Bucatini all'Amatriciana",description:'A substantial Lazio pasta dish.',location:'A traditional Roman trattoria',visitDuration:'1h 15m'},
+        {time:'02:15 PM',title:'Regional Lunch: Saltimbocca alla Romana',description:'A complete Roman veal main course.',location:'An established Roman osteria',visitDuration:'1h 15m'},
+        {time:'04:00 PM',title:'Romantic Evening: Pantheon',description:'Ancient monument.',location:'Pantheon',visitDuration:'1h'},
+        {time:'07:30 PM',title:'Regional Dinner: Coda alla Vaccinara',description:'A complete Roman oxtail main course.',location:'A Testaccio restaurant',visitDuration:'1h 15m'},
+        {time:'10:30 PM',title:'Romantic Evening: Evening at Alcazar Live',description:'Trastevere performance venue.',location:'Alcazar Live',visitDuration:'1h 30m'}
+      ]},
+      {dayNumber:3,theme:'An excessively long theme that previously crossed the right page edge',activities:[
+        {time:'09:30 AM',title:'Morning Visit: Vatican Museums and Sistine Chapel',description:'Major papal collections.',location:'Vatican Museums and Sistine Chapel',visitDuration:'1h 30m'},
+        {time:'11:45 AM',title:'Late Brunch: Abbacchio Scottadito',description:'A complete Roman lamb main course.',location:'A Roman restaurant',visitDuration:'1h 15m'},
+        {time:'02:15 PM',title:'Regional Lunch: Pizza Romana',description:'A complete savory Roman pizza meal.',location:'An established Roman pizzeria',visitDuration:'1h 15m'},
+        {time:'04:45 PM',title:'Romantic Evening: Evening at Freni e Frizioni',description:'Long-running Trastevere cocktail bar.',location:'Freni e Frizioni',visitDuration:'1h'},
+        {time:'07:30 PM',title:'Regional Dinner: Tonnarelli Cacio e Pepe',description:'A complete Roman pasta dish.',location:'An established Roman trattoria',visitDuration:'1h 15m'}
+      ]},
+      {dayNumber:4,theme:'Departure',activities:[
+        {time:'11:30 AM',title:'Spa & Wellness Session at Domus Livia Luxury Suite',description:'Reserve a hotel wellness treatment.',location:'Domus Livia Luxury Suite',visitDuration:'1h 30m'},
+        {time:'01:30 PM',title:'Spa & Wellness Session at Domus Livia Luxury Suite',description:'Reserve a hotel wellness treatment.',location:'Domus Livia Luxury Suite',visitDuration:'1h 15m'},
+        {time:'04:00 PM',title:'Departure Transfer to Airport / Station',description:'Leave for the booked airport.',location:'Confirm Fiumicino (FCO) or Ciampino (CIA) from your booking',latitude:41.9,longitude:12.5,visitDuration:'45m'}
+      ]}
+    ]
+  };
+  quality.finalizeCustomerSpecificity(rome);
+  quality.repairFinalScheduleCompleteness(rome);
+  quality.finalizeCustomerSpecificity(rome);
+  quality.repairFinalItineraryDiversity(rome);
+  Object.assign(rome,quality.enforceFinalMealDensityAndVariety(rome));
+  quality.repairFinalStyleIntegrity(rome);
+  quality.repairBlockingFinalQuality(rome);
+  quality.repairFinalStyleIntegrity(rome);
+  const routed=quality.applySmartRouteAndTransport(rome);
+  Object.assign(rome,routed);
+  reconcileItineraryBudget(rome);
+
+  const all=rome.days.flatMap(day=>day.activities);
+  assert.ok(!all.some(a=>/spa|wellness treatment/i.test(`${a.title} ${a.description}`)&&/Domus Livia Luxury Suite/i.test(`${a.title} ${a.location}`)),'a hotel spa must not be inferred from an Agoda property name');
+  for(const index of [1,2])assert.equal(rome.days[index].activities.filter(a=>/\bbrunch\b|\blunch\b/i.test(a.title)).length,1,`Nightlife day ${index+1} must not contain both brunch and lunch`);
+  assert.ok(rome.days[0].activities.some(a=>/\bdinner\b/i.test(a.title)),'arrival day before 5 PM needs dinner');
+  assert.ok(rome.days[3].activities.some(a=>/\bbrunch\b|\blunch\b/i.test(a.title)),'4 PM departure day needs lunch');
+  for(const index of [1,2])assert.ok(rome.days[index].activities.some(a=>minutes(a.time)>=20*60&&/Alcazar Live|Freni e Frizioni/i.test(`${a.title} ${a.location}`)),`full Nightlife day ${index+1} needs a named late-evening venue`);
+  assert.doesNotMatch(rome.days[1].theme,/Morning Destination Orientation/i,'generic orientation must not survive in the final day theme');
+  assert.ok(!all.some(a=>minutes(a.time)<18*60&&/Romantic Evening|Romantic Night Out/i.test(a.title)),'daytime activities must not be called Romantic Evening');
+  const departure=rome.days[3].activities.find(a=>/departure/i.test(a.title));
+  assert.equal(departure?.distanceFromPreviousKm,undefined,'an unresolved FCO/CIA choice must not receive a numeric route distance');
+  assert.equal(departure?.routeStatus,'Confirm booked airport','unresolved airport routes need an explicit confirmation status');
+  assert.deepEqual(quality.blockingFinalQualityErrors(quality.validateFinalUserFacingItinerary(rome)),[],'Rome Nightlife regression must pass the final quality gate');
+
+  const colosseum=rome.placesToVisit.find(p=>/Colosseum/i.test(p.name));
+  const colosseumActivity=all.find(a=>/Colosseum/i.test(`${a.title} ${a.location}`));
+  const galleria=rome.placesToVisit.find(p=>/Galleria Borghese/i.test(p.name));
+  const galleriaActivity=all.find(a=>/Galleria Borghese/i.test(`${a.title} ${a.location}`));
+  if(colosseumActivity)assert.equal(colosseumActivity.cost,colosseum.entryFee.replace(' group estimate',' group planning estimate; verify official ticket'),'a named attraction day card must use the same source-based estimate as its attraction card');
+  assert.match(galleria.entryFee,/Price to confirm/i,'unknown official admission must not receive a fabricated equal-share amount');
+  assert.match(String(galleriaActivity?.cost),/Price to confirm/i,'unknown admission must remain consistent in the day card');
 }
 
 {
@@ -301,5 +393,11 @@ assert.doesNotMatch(pdf,/const simulatedRating\s*=/,'PDF must not fabricate food
 assert.doesNotMatch(pdf,/const rating\s*=\s*4\.5/,'PDF must not fabricate attraction ratings');
 assert.match(pdf,/finalBlockReserve/,'PDF must keep the last activity with its route/summary panels');
 assert.match(pdf,/dailyCostBreakdown/,'PDF must render reconciled daily cost components');
+assert.match(pdf,/fitSingleLineText/,'PDF must hard-limit single-line headings and badges to their cards');
+assert.match(pdf,/checkPageEnd\(138\)/,'PDF must reserve the complete seven-card financial dashboard');
+assert.match(pdf,/Confirm airport/,'PDF must label unresolved airport routes instead of printing a fake distance');
+assert.match(pdf,/Est\. entry:/,'PDF must label attraction amounts as estimates');
+assert.doesNotMatch(pdf,/Five-star premium|Ultra Luxury/,'PDF must not claim an unverified hotel star class');
+assert.match(pdf,/GUEST SCORE[\s\S]*PROPERTY CLASS[\s\S]*RATING: CHECK LIVE/,'PDF must distinguish live guest scores, property class and unverified ratings');
 
 console.log(`Destination scenario regression passed: ${scenarios} behavioral scenarios across ${destinations.length} representative destinations.`);

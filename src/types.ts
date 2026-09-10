@@ -53,6 +53,8 @@ export interface Activity {
   transportFromPrevious?: string;
   travelTimeFromPrevious?: string;
   distanceFromPreviousKm?: number;
+  distanceFromPreviousEstimated?: boolean;
+  routeStatus?: string;
 }
 
 export interface DayItinerary {
@@ -90,6 +92,8 @@ export interface PlaceToVisit {
   description: string;
   bestTimeToVisit: string;
   entryFee: string;
+  entryFeeSource?: string;
+  entryFeeBasis?: string;
 }
 
 export interface HotelRecommend {
@@ -187,6 +191,7 @@ export interface Itinerary {
   estimatedBudgetBreakdown: BudgetBreakdown;
   placesToVisit: PlaceToVisit[];
   localFood: FoodItem[];
+  nightlife?: { name: string; description: string; bestTimeToVisit: string; entryFee: string }[];
   packingChecklist: string[];
   transportationSuggestions: TransportSuggestion[];
   travelTips: string[];

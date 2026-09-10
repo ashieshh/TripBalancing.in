@@ -47,6 +47,22 @@ const drawSpacedText = (doc: any, text: string, x: number, y: number, spacing: n
   }
 };
 
+// Fit a single-line label into a known box. jsPDF's maxWidth option does not
+// reliably clip long strings, so explicitly shrink and then ellipsize at a hard
+// minimum size to prevent text from crossing cards or page edges.
+const fitSingleLineText = (doc:any, value:any, maxWidth:number, preferredSize:number, minimumSize:number=4.5):{text:string;fontSize:number} => {
+  const original=String(value??'').replace(/\s+/g,' ').trim();
+  let fontSize=preferredSize;
+  doc.setFontSize(fontSize);
+  const initialWidth=doc.getTextWidth(original);
+  if(initialWidth>maxWidth&&initialWidth>0){fontSize=Math.max(minimumSize,preferredSize*(maxWidth/initialWidth));doc.setFontSize(fontSize);}
+  if(doc.getTextWidth(original)<=maxWidth)return{text:original,fontSize};
+  const suffix='...';
+  let low=0,high=original.length;
+  while(low<high){const mid=Math.ceil((low+high)/2);if(doc.getTextWidth(`${original.slice(0,mid).trimEnd()}${suffix}`)<=maxWidth)low=mid;else high=mid-1;}
+  return{text:`${original.slice(0,low).trimEnd()}${suffix}`,fontSize};
+};
+
 // Premium card with visual shadow and left colored bar
 const drawPremiumCard = (doc: any, x: number, y: number, w: number, h: number, rx: number = 2, ry: number = 2, borderLeftColor?: number[], bgSelectedColor?: number[]) => {
   doc.setFillColor(243, 244, 246); // subtle shadow
@@ -332,24 +348,13 @@ const drawPriceBadge = (doc: any, x: number, y: number, w: number, h: number, pr
   drawPremiumCard(doc, x, y, w, h, 0.8, 0.8, badgeColor, badgeBg);
   
   doc.setFont("helvetica", "bold");
-  let fs = 6.5;
-  const chars = priceStr.length;
-  const estimatedTextWidth = chars * 0.95; // mm
-  const maxAvailableWidth = w - 4; // 4mm safety margin
-
-  if (estimatedTextWidth > maxAvailableWidth) {
-    fs = 6.5 * (maxAvailableWidth / estimatedTextWidth);
-    if (fs < 4.5) {
-      fs = 4.5;
-    }
-  }
-
-  doc.setFontSize(fs);
+  const fitted=fitSingleLineText(doc,priceStr,w-4,6.5,4.5);
+  const fs=fitted.fontSize;
   doc.setTextColor(txtColor[0], txtColor[1], txtColor[2]);
   
   // Center the text vertically and horizontally
   const yOffset = h / 2 + (fs / 20) + 0.45;
-  doc.text(priceStr, x + w / 2, y + yOffset, { align: "center" });
+  doc.text(fitted.text, x + w / 2, y + yOffset, { align: "center" });
 };
 
 const drawCenteredBadge = (
@@ -362,28 +367,18 @@ const drawCenteredBadge = (
   borderColor: number[] | undefined,
   bgColor: number[],
   textColor: number[],
-  iconType?: "clock" | "calendar" | "weather" | "map" | "hotel"
+  iconType?: "clock" | "calendar" | "weather" | "map" | "hotel" | "transport"
 ) => {
   // Draw the rounded card/box
   drawPremiumCard(doc, x, y, w, h, 0.8, 0.8, borderColor, bgColor);
 
   doc.setFont("helvetica", "bold");
-  let fs = 6.5;
-  
   const hasIcon = !!iconType;
   const iconSpace = hasIcon ? 4.5 : 0;
   const maxAvailableTextWidth = w - 4 - iconSpace;
-  
-  doc.setFontSize(fs);
-  let actualTextWidth = doc.getTextWidth(text);
-  if (actualTextWidth > maxAvailableTextWidth) {
-    fs = fs * (maxAvailableTextWidth / actualTextWidth);
-    if (fs < 4.5) {
-      fs = 4.5;
-    }
-    doc.setFontSize(fs);
-    actualTextWidth = doc.getTextWidth(text);
-  }
+  const fitted=fitSingleLineText(doc,text,maxAvailableTextWidth,6.5,4.5);
+  const fs=fitted.fontSize;
+  const actualTextWidth=doc.getTextWidth(fitted.text);
   doc.setTextColor(textColor[0], textColor[1], textColor[2]);
 
   // Compute total width of icon + text for horizontal centering inside the badge box
@@ -404,13 +399,15 @@ const drawCenteredBadge = (
       drawMapPinIcon(doc, iconX, iconY, textColor);
     } else if (iconType === "hotel") {
       drawHotelIcon(doc, iconX, iconY, textColor);
+    } else if (iconType === "transport") {
+      drawTransportIcon(doc, iconX, iconY, fitted.text, textColor);
     }
   }
 
   const textX = hasIcon ? (startUnitX + iconSpace) : (x + w / 2);
   const textY = centerY + (fs / 20) + 0.45;
   
-  doc.text(text, textX, textY, { align: hasIcon ? "left" : "center" });
+  doc.text(fitted.text, textX, textY, { align: hasIcon ? "left" : "center" });
 };
 
 const drawFoodIcon = (doc: any, x: number, y: number, color: number[] = [217, 119, 6]) => {
@@ -1852,8 +1849,15 @@ export const exportPremiumTravelPDF = async (
         // Badge 1: Best Time (Sky blue, wider & centered with calendar icon)
         drawCenteredBadge(doc, contentX, detailY, 63, 4.5, `Best Time: ${place.bestTimeToVisit}`, undefined, [240, 249, 255], [2, 132, 199], "calendar");
 
-        // Badge 2: Entry Fee (using dynamically-sized drawPriceBadge helper, wider for full visibility)
-        drawPriceBadge(doc, contentX + 67, detailY, 63, 4.5, `Entry: ${place.entryFee}`);
+        // Admission is either a clearly labelled planning estimate or an explicit
+        // official-price check. Never present a model allocation as a live ticket.
+        const rawEntry=String(place.entryFee||'Price to confirm');
+        const entryBadge=/\bfree\b/i.test(rawEntry)
+          ? 'Entry: Free - verify rules'
+          : /price to confirm/i.test(rawEntry)
+            ? 'Entry: confirm on official site'
+            : `Est. entry: ${rawEntry.replace(/group estimate/i,'group')} - verify official`;
+        drawPriceBadge(doc, contentX + 67, detailY, 63, 4.5, entryBadge);
 
         y += heightNeeded + 4;
       });
@@ -1961,9 +1965,9 @@ export const exportPremiumTravelPDF = async (
       doc.text(`DAY ${day.dayNumber}`, marginX + 4, y + 7.2);
       
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
       doc.setTextColor(15, 23, 42);
-      doc.text(day.theme, marginX + 22, y + 7.2);
+      const overviewTheme=fitSingleLineText(doc,day.theme,151,8.5,6.2);
+      doc.text(overviewTheme.text, marginX + 22, y + 7.2);
       y += 14;
     });
 
@@ -2004,21 +2008,22 @@ export const exportPremiumTravelPDF = async (
       // Day Header Banner
       drawPremiumCard(doc, marginX, y, 180, 10, 1.5, 1.5, [13, 148, 136], [240, 253, 250]);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(10.5);
       doc.setTextColor(13, 148, 136);
-      doc.text(`DAY ${day.dayNumber}: ${day.theme.toUpperCase()}`, marginX + 5, y + 6.8);
+      const dayHeading=fitSingleLineText(doc,`DAY ${day.dayNumber}: ${day.theme.toUpperCase()}`,170,10.5,7);
+      doc.text(dayHeading.text, marginX + 5, y + 6.8);
       y += 13;
 
       // Quick parameters stats
       const actCount = day.activities?.length || 0;
+      const unresolvedRoute = (day.activities || []).some((a:any)=>Boolean(a?.routeStatus));
       const routeDistance = (day.activities || []).reduce((sum: number, a: any) => sum + (Number(a.distanceFromPreviousKm) || 0), 0);
       const routeDistanceEstimated = (day.activities || []).some((a:any)=>Boolean(a?.distanceFromPreviousEstimated));
       const walkingDistance = (day.activities || []).reduce((sum: number, a: any) => /walk/i.test(String(a.transportFromPrevious || '')) ? sum + (Number(a.distanceFromPreviousKm) || 0) : sum, 0);
       const routeMinutes = (day.activities || []).reduce((sum: number, a: any) => {
         const txt=String(a.travelTimeFromPrevious||''); const h=Number((txt.match(/(\d+)h/)||[])[1]||0); const m=Number((txt.match(/(\d+)m/)||[])[1]||0); const min=Number((txt.match(/(\d+) min/)||[])[1]||0); return sum+h*60+m+min;
       }, 0);
-      const dist = routeDistance > 0 ? `${routeDistanceEstimated ? "~" : ""}${routeDistance.toFixed(1)}` : "Route pending";
-      const travTime = routeMinutes > 0 ? `${Math.floor(routeMinutes/60)}h ${routeMinutes%60}m` : "Route based";
+      const dist = unresolvedRoute ? "Confirm airport" : routeDistance > 0 ? `${routeDistanceEstimated ? "~" : ""}${routeDistance.toFixed(1)}` : "Route pending";
+      const travTime = unresolvedRoute ? "Confirm route" : routeMinutes > 0 ? `${Math.floor(routeMinutes/60)}h ${routeMinutes%60}m` : "Route based";
 
       let weatherLabel = "Season-aware planning";
       if (weatherWithinLiveHorizon && headerWeather && headerWeather[dIdx]) {
@@ -2030,7 +2035,7 @@ export const exportPremiumTravelPDF = async (
       const dStats = [
         { label: "EST. DAILY REQUIREMENT", value: displayBudget, bg: [236, 253, 245], border: [13, 148, 136], txt: [13, 148, 136], icon: "budget" },
         { label: weatherWithinLiveHorizon && headerWeather && headerWeather[dIdx] ? "WEATHER OUTLOOK" : "WEATHER GUIDANCE", value: weatherWithinLiveHorizon ? weatherLabel : "Check 7-10 days before", bg: [240, 249, 255], border: [2, 132, 199], txt: [2, 132, 199], icon: "weather" },
-        { label: routeDistanceEstimated ? "EST. ROUTE DISTANCE" : "ROUTE DISTANCE", value: dist === "Route pending" ? dist : `${dist} km`, bg: [255, 241, 242], border: [225, 29, 72], txt: [225, 29, 72], icon: "distance" },
+        { label: unresolvedRoute ? "ROUTE STATUS" : routeDistanceEstimated ? "EST. ROUTE DISTANCE" : "ROUTE DISTANCE", value: unresolvedRoute || dist === "Route pending" ? dist : `${dist} km`, bg: [255, 241, 242], border: [225, 29, 72], txt: [225, 29, 72], icon: "distance" },
         { label: "TRANSIT TIME", value: travTime, bg: [238, 242, 255], border: [79, 70, 229], txt: [79, 70, 229], icon: "time" }
       ];
 
@@ -2068,9 +2073,9 @@ export const exportPremiumTravelPDF = async (
             fs = 7.0;
           }
         }
-        doc.setFontSize(fs);
         doc.setTextColor(stat.txt[0], stat.txt[1], stat.txt[2]);
-        doc.text(stat.value, sx + (isBudget ? 12.5 : 11.5), y + 10.8);
+        const fittedStat=fitSingleLineText(doc,stat.value,sw-(isBudget?15:14),fs,4.5);
+        doc.text(fittedStat.text, sx + (isBudget ? 12.5 : 11.5), y + 10.8);
       });
       y += 19;
 
@@ -2141,11 +2146,10 @@ export const exportPremiumTravelPDF = async (
         drawPremiumCard(doc, cardX, currentTimelineY, cardW, actHeight, 1.5, 1.5, [13, 148, 136]);
 
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
         doc.setTextColor(15, 23, 42);
         const activityTitle = String(act.title || "Activity");
-        doc.setFontSize(doc.getTextWidth(activityTitle) > cardW - 8 ? 7.2 : 9);
-        doc.text(activityTitle, cardX + 4, currentTimelineY + 4.5, { maxWidth: cardW - 8 });
+        const fittedActivityTitle=fitSingleLineText(doc,activityTitle,cardW-8,9,6.2);
+        doc.text(fittedActivityTitle.text, cardX + 4, currentTimelineY + 4.5);
 
         doc.setFont("helvetica", "normal");
         doc.setFontSize(7.5);
@@ -2171,57 +2175,39 @@ export const exportPremiumTravelPDF = async (
         // Row 1 - Badge 2: Location (Highly Spacious, No Truncation!)
         drawMapPinIcon(doc, cardX + 50, badgeY1 - 0.8, [13, 148, 136]);
         const rawLoc = act.location || "Central";
-        doc.text(`Loc: ${rawLoc}`, cardX + 53, badgeY1);
+        const fittedLocation=fitSingleLineText(doc,`Loc: ${rawLoc}`,cardW-57,6.5,4.8);
+        doc.text(fittedLocation.text, cardX + 53, badgeY1);
 
-        // Row 2 - Badge 3: Duration. Use the validated itinerary duration rather than a simulated placeholder.
+        // Row 2 uses four non-overlapping fixed-width badges. Every helper has a
+        // hard text-width guard, so transport and ticket notes cannot spill into
+        // adjacent badges.
         const simulatedDuration = String((act as any).visitDuration || "1h").trim();
-        doc.setFillColor(238, 242, 255);
-        doc.roundedRect(cardX + 4, badgeY2 - 3, 15, 4.2, 0.8, 0.8, "F");
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(6);
-        doc.setTextColor(79, 70, 229);
-        doc.text(simulatedDuration, cardX + 11.5, badgeY2 - 0.1, { align: "center" });
+        drawCenteredBadge(doc,cardX+4,badgeY2-3,18,4.2,simulatedDuration,undefined,[238,242,255],[79,70,229]);
 
-        // Row 2 - Badge 4: Transport (Balanced Icon & Text Center Grouping)
         const simulatedTransit = String((act as any).transportFromPrevious || (act as any).transport || (actIdx === 0 ? "Start of day" : "Cab"))
-          .replace(/dayPremium/ig, "day • Premium")
-          .replace(/vehicleCheck/ig, "vehicle • Check")
-          .replace(/transitCheck/ig, "transit • Check")
-          .replace(/taxiFine/ig, "taxi • Fine")
+          .replace(/taxi\s*\/\s*verified public transit/ig,"Taxi / public transit")
+          .replace(/private transfer\s*\/\s*tour vehicle/ig,"Pre-booked transfer")
+          .replace(/private car\s*\/\s*pre-booked transfer/ig,"Pre-booked car")
+          .replace(/dayPremium/ig, "day - Premium")
+          .replace(/vehicleCheck/ig, "vehicle - Check")
+          .replace(/transitCheck/ig, "transit - Check")
+          .replace(/taxiFine/ig, "taxi - Fine")
           .trim();
-        const transitBoxX = cardX + 23;
-        const transitBoxW = 24;
-        const transitTextWidth = simulatedTransit.length * 0.85;
-        const transitUnitWidth = 3 + 1.2 + transitTextWidth;
-        const transitBoxCenterX = transitBoxX + transitBoxW / 2;
-        const transitUnitStartX = transitBoxCenterX - (transitUnitWidth / 2);
+        drawCenteredBadge(doc,cardX+24,badgeY2-3,46,4.2,simulatedTransit,undefined,[240,249,255],[2,132,199],"transport");
 
-        doc.setFillColor(240, 249, 255);
-        doc.roundedRect(transitBoxX, badgeY2 - 3, transitBoxW, 4.2, 0.8, 0.8, "F");
-        drawTransportIcon(doc, transitUnitStartX + 1.5, badgeY2 - 0.9, simulatedTransit, [2, 132, 199]);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(6);
-        doc.setTextColor(2, 132, 199);
-        doc.text(simulatedTransit, transitUnitStartX + 4.2, badgeY2 - 0.1, { align: "left" });
-
-        // Row 2 - Badge 5: Cost (Perfect Centering)
         let rawCostVal = String(act.cost || "Included")
-          .replace(/vehicleCheck/ig, "vehicle • Check")
-          .replace(/transitCheck/ig, "transit • Check")
-          .replace(/taxiFine/ig, "taxi • Fine")
+          .replace(/vehicleCheck/ig, "vehicle - Check")
+          .replace(/transitCheck/ig, "transit - Check")
+          .replace(/taxiFine/ig, "taxi - Fine")
           .trim();
+        rawCostVal = rawCostVal
+          .replace(/^Price to confirm; verify official ticket$/i, "Confirm official price")
+          .replace(/^(.+?) group planning estimate; verify official ticket$/i, "$1 group est. - verify");
         const transferLike = /transfer|chauffeur|pick[- ]?up|pickup|drop[- ]?off|departure/i.test(`${act.title || ""} ${act.description || ""}`);
         if (transferLike && /^(?:free|free\s*\/\s*included|included)$/i.test(rawCostVal)) {
           rawCostVal = "Included in transport budget";
         }
-        // Leading separator keeps adjacent metadata badges visually and textually distinct in exported PDFs.
-        const costVal = `\u00A0• ${rawCostVal}`;
-        doc.setFillColor(254, 243, 199);
-        doc.roundedRect(cardX + 51, badgeY2 - 3, 24, 4.2, 0.8, 0.8, "F");
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(6);
-        doc.setTextColor(217, 119, 6);
-        doc.text(costVal, cardX + 63, badgeY2 - 0.1, { align: "center" });
+        drawPriceBadge(doc,cardX+72,badgeY2-3,32,4.2,rawCostVal);
 
         // Row 2 - Badge 6: Weather (Proportional Center Grouping based on forecast length)
         let weatherVal = "Season-aware";
@@ -2231,21 +2217,7 @@ export const exportPremiumTravelPDF = async (
           const temp = headerWeather[dIdx].tempMax || "24";
           weatherVal = `${cond}, ${temp}°C`;
         }
-        const weatherBoxX = cardX + 79;
-        const weatherBoxW = 63;
-        const weatherCharWidth = 0.85;
-        const weatherTextWidth = weatherVal.length * weatherCharWidth;
-        const weatherUnitWidth = 3 + 1.5 + weatherTextWidth;
-        const weatherBoxCenterX = weatherBoxX + weatherBoxW / 2;
-        const weatherUnitStartX = weatherBoxCenterX - (weatherUnitWidth / 2);
-
-        doc.setFillColor(236, 253, 245);
-        doc.roundedRect(weatherBoxX, badgeY2 - 3, weatherBoxW, 4.2, 0.8, 0.8, "F");
-        drawWeatherIcon(doc, weatherUnitStartX + 1.5, badgeY2 - 0.9, [13, 148, 136]);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(6);
-        doc.setTextColor(13, 148, 136);
-        doc.text(weatherVal, weatherUnitStartX + 4.5, badgeY2 - 0.1, { align: "left" });
+        drawCenteredBadge(doc,cardX+106,badgeY2-3,36,4.2,weatherVal,undefined,[236,253,245],[13,148,136],"weather");
 
         doc.setFontSize(7.5); // Restore default font size
         currentTimelineY += actHeight + 4;
@@ -2394,7 +2366,7 @@ export const exportPremiumTravelPDF = async (
   doc.setFontSize(9.5);
   doc.setTextColor(51, 65, 85);
   const lodgingStyle = String(itinerary.travelStyle || '').toLowerCase().trim();
-  const preferredLodging = lodgingStyle === 'luxury' ? 'Luxury Retreats' : lodgingStyle === 'smart luxury' ? 'Mid-Range / Boutique Suites' : (lodgingStyle === 'budget' || lodgingStyle === 'backpacker') ? 'Budget Stays' : 'style-appropriate stays';
+  const preferredLodging = lodgingStyle === 'luxury' ? 'premium-priced stays (with property class verified at booking)' : lodgingStyle === 'smart luxury' ? 'Mid-Range / Boutique Suites' : (lodgingStyle === 'budget' || lodgingStyle === 'backpacker') ? 'Budget Stays' : 'style-appropriate stays';
   const hotelData = itinerary.hotelRecommendations || { budget: [], midRange: [], luxury: [] };
   const hasHotelCards = ['budget','midRange','luxury'].some((k) => Array.isArray((hotelData as any)[k]) && (hotelData as any)[k].length > 0);
   const sectionHasAgodaRates = [hotelData.budget, hotelData.midRange, hotelData.luxury].some((list: any) => Array.isArray(list) && list.some((h: any) => h?.source === "agoda"));
@@ -2411,7 +2383,7 @@ export const exportPremiumTravelPDF = async (
   const allHotelTiers = [
     { key: 'budget', name: "BUDGET STAYS", comfort: "Value Comfort", price: "Best rates", txt: [13, 148, 136] },
     { key: 'midRange', name: "MID-RANGE SUITES", comfort: "Premium Comfort", price: "Top quality suites", txt: [79, 70, 229] },
-    { key: 'luxury', name: "LUXURY RETREATS", comfort: "Ultra Luxury", price: "Five-star premium", txt: [217, 119, 6] }
+    { key: 'luxury', name: "PREMIUM STAYS", comfort: "Premium-priced stays", price: "Verify property class", txt: [217, 119, 6] }
   ].filter((tier) => Array.isArray((hotelData as any)[tier.key]) && (hotelData as any)[tier.key].length > 0);
   const preferredTierKey = lodgingStyle === 'luxury' ? 'luxury' : lodgingStyle === 'smart luxury' ? 'midRange' : (lodgingStyle === 'budget' || lodgingStyle === 'backpacker') ? 'budget' : 'midRange';
   const hotelTiers = [...allHotelTiers].sort((a,b)=>Number(b.key===preferredTierKey)-Number(a.key===preferredTierKey));
@@ -2477,18 +2449,19 @@ export const exportPremiumTravelPDF = async (
       doc.text(hotelName, contentX, y + 6.5, { maxWidth: 126 });
 
       const ratingValue = Number(hotel.rating);
-      if (Number.isFinite(ratingValue) && ratingValue > 0) {
-        const stars = Math.max(1, Math.min(5, Math.round(ratingValue)));
-        for (let s = 0; s < 5; s++) {
-          doc.setFillColor(s < stars ? 245 : 226, s < stars ? 158 : 232, s < stars ? 11 : 240);
-          drawStar(doc, contentX + (s * 4.5), y + 10.5, 1.6);
-        }
-      } else {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(6.8);
-        doc.setTextColor(100, 116, 139);
-        doc.text('RATING: CHECK LIVE', contentX, y + 11);
-      }
+      const reviewScore = Number(hotel.reviewScore);
+      const hasLiveSource = hotel?.source === "agoda";
+      const ratingLabel = hasLiveSource && Number.isFinite(reviewScore) && reviewScore > 0
+        ? `GUEST SCORE ${reviewScore.toFixed(1)}/10`
+        : hasLiveSource && Number.isFinite(ratingValue) && ratingValue > 5
+          ? `GUEST SCORE ${ratingValue.toFixed(1)}/10`
+          : hasLiveSource && Number.isFinite(ratingValue) && ratingValue > 0
+            ? `PROPERTY CLASS ${Math.min(5, ratingValue).toFixed(1)}/5`
+            : 'RATING: CHECK LIVE';
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.8);
+      doc.setTextColor(217, 119, 6);
+      doc.text(ratingLabel, contentX, y + 11);
 
       // Badges (spacious & mathematically centered layout using full 130mm available width)
       // Price badge (using auto-scaling font size, width 48)
@@ -2515,7 +2488,7 @@ export const exportPremiumTravelPDF = async (
   const tierRenderers: Record<string, () => void> = {
     budget: () => renderTier("Budget Stays", hotelData.budget || [], [13, 148, 136], preferredTierKey === 'budget' ? "Recommended for your style" : "Value Comfort"),
     midRange: () => renderTier("Mid-Range Suites", hotelData.midRange || [], [79, 70, 229], preferredTierKey === 'midRange' ? "Recommended for your style" : "Premium Comfort"),
-    luxury: () => renderTier("Luxury Retreats", hotelData.luxury || [], [217, 119, 6], preferredTierKey === 'luxury' ? "Recommended for your style" : "Ultra Luxury")
+    luxury: () => renderTier("Premium Stays", hotelData.luxury || [], [217, 119, 6], preferredTierKey === 'luxury' ? "Recommended for your style" : "Verify Property Class")
   };
   [preferredTierKey, ...['budget','midRange','luxury'].filter(k => k !== preferredTierKey)].forEach(k => tierRenderers[k]());
 
@@ -2654,8 +2627,9 @@ export const exportPremiumTravelPDF = async (
       y += 14;
     });
 
-    // Check if there is enough space for the dashboard, otherwise break page naturally
-    checkPageEnd(80);
+    // The seven allocation cards are 126 mm tall; reserve the complete dashboard
+    // before drawing so the final Flights card never enters the footer.
+    checkPageEnd(138);
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
