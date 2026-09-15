@@ -11,8 +11,9 @@
     "lint": "tsc --noEmit",
     "test:variants": "node scripts/test-trip-variants.mjs",
     "test:scenarios": "NODE_ENV=test node --import tsx scripts/test-trip-scenarios.mjs",
-    "test:quality": "npm run test:variants && npm run test:scenarios",
-    "prebuild": "tsx scripts/build-agoda-city-index.ts"
+    "test:seo": "node scripts/test-seo.mjs",
+    "test:quality": "npm run test:variants && npm run test:scenarios && npm run test:seo",
+    "prebuild": "tsx scripts/build-agoda-city-index.ts && node scripts/generate-seo-pages.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

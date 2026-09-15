@@ -1,0 +1,12 @@
+[
+  {"slug":"dubai","city":"Dubai","country":"United Arab Emirates","currency":"AED","highlights":["Burj Khalifa","Dubai Creek","Al Fahidi Historical Neighbourhood"],"bestFor":"city breaks, shopping, luxury, family trips"},
+  {"slug":"tokyo","city":"Tokyo","country":"Japan","currency":"JPY","highlights":["Senso-ji","Shibuya","Tokyo Skytree"],"bestFor":"food, culture, shopping, first-time Japan trips"},
+  {"slug":"rome","city":"Rome","country":"Italy","currency":"EUR","highlights":["Colosseum","Roman Forum","Vatican Museums"],"bestFor":"history, food, art, couples"},
+  {"slug":"paris","city":"Paris","country":"France","currency":"EUR","highlights":["Eiffel Tower","Louvre Museum","Montmartre"],"bestFor":"art, food, couples, city breaks"},
+  {"slug":"singapore","city":"Singapore","country":"Singapore","currency":"SGD","highlights":["Gardens by the Bay","Marina Bay Sands","Sentosa"],"bestFor":"families, food, short breaks, first-time Southeast Asia trips"},
+  {"slug":"bangkok","city":"Bangkok","country":"Thailand","currency":"THB","highlights":["Grand Palace","Wat Arun","Chatuchak Weekend Market"],"bestFor":"food, temples, shopping, budget travel"},
+  {"slug":"goa","city":"Goa","country":"India","currency":"INR","highlights":["Baga Beach","Fort Aguada","Old Goa"],"bestFor":"beaches, nightlife, couples, relaxed holidays"},
+  {"slug":"varanasi","city":"Varanasi","country":"India","currency":"INR","highlights":["Assi Ghat","Dashashwamedh Ghat","Sarnath"],"bestFor":"heritage, spirituality, culture, slow travel"},
+  {"slug":"jaipur","city":"Jaipur","country":"India","currency":"INR","highlights":["Amber Fort","City Palace","Hawa Mahal"],"bestFor":"heritage, architecture, food, weekend trips"},
+  {"slug":"mumbai","city":"Mumbai","country":"India","currency":"INR","highlights":["Gateway of India","Marine Drive","Elephanta Caves"],"bestFor":"food, culture, business trips, city breaks"}
+]
