@@ -3967,7 +3967,7 @@ function validateFinalUserFacingItinerary(itinerary:any): string[] {
         const pk=norm(p.name); const prev=seenPlaces.get(pk); if(prev!=null&&prev!==i) errors.push(`day ${i+1} repeats attraction ${p.name} from day ${prev+1}`); else seenPlaces.set(pk,i);
         const bt=String(p?.bestTimeToVisit||'').toLowerCase(); const t=parseTime(a?.time,ai);
         if(/early morning/.test(bt)&&t>12*60) errors.push(`day ${i+1} schedules ${p.name} too late for its recommended early-morning window`);
-        if(/late afternoon/.test(bt)&&(t<14*60||t>19*60)) errors.push(`day ${i+1} schedules ${p.name} outside its recommended late-afternoon window`);
+        if(/late afternoon/.test(bt)){ const hi=/evening/.test(bt)?21*60:19*60; if(t<14*60||t>hi) errors.push(`day ${i+1} schedules ${p.name} outside its recommended late-afternoon window`); }
         const r=bt.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
         if(r){ const cv=(h:string,m:string|undefined,ap:string)=>{let n=Number(h)%12;if(ap.toLowerCase()==='pm')n+=12;return n*60+Number(m||0)}; const lo=cv(r[1],r[2],r[3]),hi=cv(r[4],r[5],r[6]); if(t<lo||t>hi) errors.push(`day ${i+1} schedules ${p.name} outside the stated visit window`); }
       }
