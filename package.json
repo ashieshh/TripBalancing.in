@@ -20,6 +20,7 @@
     "@supabase/supabase-js": "^2.110.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/nodemailer": "^8.0.1",
+    "@vitejs/plugin-react": "^5.2.0",
     "compression": "^1.8.1",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
@@ -41,7 +42,7 @@
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
-    "tailwindcss": "^4.1.14",
+    "tailwindcss": "^4.1.21",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
