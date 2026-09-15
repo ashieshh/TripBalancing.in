@@ -4067,8 +4067,7 @@ function repairFinalScheduleCompleteness(itinerary:any) {
   // A substantial late brunch is the midday meal for schedule-coverage purposes.
   // Treating brunch and lunch as separate roles produced two heavy meals only
   // minutes apart on Nightlife itineraries.
-  const mealRole=(a:any)=>{const title=String(a?.title||'');if(/\bbrunch\b|\blunch\b|regional meal/i.test(title))return'lunch';if(/\bdinner\b|signature dining|evening meal/i.test(title))return'dinner';return'';};
-  const isMeal=(a:any,role:string)=>mealRole(a)===role;
+  const mealRole=(a:any)=>{const title=String(a?.title||'');if(/\bbrunch\b|\blunch\b|regional meal/i.test(title))return'lunch';if(/\bdinner\b|\bdining\b|signature dining|evening meal/i.test(title))return'dinner';return'';};  const isMeal=(a:any,role:string)=>mealRole(a)===role;
   const usedFoods=new Set<string>();
   for(const day of itinerary.days)for(const activity of Array.isArray(day?.activities)?day.activities:[]){for(const food of foods){const key=norm(food?.name);if(key&&norm(`${activity?.title||''} ${activity?.description||''}`).includes(key))usedFoods.add(key);}}
   let foodCursor=0;
