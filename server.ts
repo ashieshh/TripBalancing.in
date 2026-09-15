@@ -4067,7 +4067,7 @@ function repairFinalScheduleCompleteness(itinerary:any) {
   // A substantial late brunch is the midday meal for schedule-coverage purposes.
   // Treating brunch and lunch as separate roles produced two heavy meals only
   // minutes apart on Nightlife itineraries.
-  if(/\bdinner\b|signature dining|evening meal/i.test(title))return'dinner'; to if(/\bdinner\b|\bdining\b|signature dining|evening meal/i.test(title))return'dinner';
+  change if(/\bdinner\b|signature dining|evening meal/i.test(title))return'dinner'; to if(/\bdinner\b|\bdining\b|signature dining|evening meal/i.test(title))return'dinner';
   const usedFoods=new Set<string>();
   for(const day of itinerary.days)for(const activity of Array.isArray(day?.activities)?day.activities:[]){for(const food of foods){const key=norm(food?.name);if(key&&norm(`${activity?.title||''} ${activity?.description||''}`).includes(key))usedFoods.add(key);}}
   let foodCursor=0;
