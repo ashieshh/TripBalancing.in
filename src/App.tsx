@@ -99,7 +99,7 @@ export default function App() {
   }, []);
 
   // Premium Subscription state
-  const [plan, setPlan] = useState<"free" | "pay_per_trip" | "yearly" | "lifetime">("free");
+  const [plan, setPlan] = useState<"free" | "pay_per_trip" | "monthly" | "yearly" | "lifetime">("free");
   const [freeTripsUsed, setFreeTripsUsed] = useState<number>(0);
   const [paidTripsBalance, setPaidTripsBalance] = useState<number>(0);
   const [showPremiumModal, setShowPremiumModal] = useState<boolean>(false);
@@ -113,9 +113,9 @@ export default function App() {
     setShowLegalModal(true);
   };
 
-  const isPremium = plan === "yearly" || plan === "lifetime";
+  const isPremium = plan === "monthly" || plan === "yearly" || plan === "lifetime";
 
-  const handleUpgradeSuccess = async (chosenPlan: "pay_per_trip" | "yearly" | "lifetime", tripsAddedCount = 0) => {
+  const handleUpgradeSuccess = async (chosenPlan: "monthly" | "yearly" | "lifetime" | "pay_per_trip", tripsAddedCount = 0) => {
     if (!user) return;
     // Payment entitlements are written by the server only after Razorpay verification.
     // Refresh the authoritative profile instead of allowing the browser to grant itself a plan.
@@ -520,7 +520,7 @@ export default function App() {
 
   // Generate Itinerary via Backend Express API proxying Gemini
   const handleGenerateItinerary = async (input: TripInput) => {
-    const remainingFree = Math.max(0, 2 - freeTripsUsed);
+    const remainingFree = Math.max(0, 5 - freeTripsUsed);
     
     // Premium plan limitation check (Free users max 2 plans, unless they have paid-per-trip balance or upgraded)
     if (!isPremium) {
@@ -1090,12 +1090,12 @@ export default function App() {
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Your plan</span>
                       <span className={`rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${isPremium ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-teal-500/10 text-teal-600 dark:text-teal-400"}`}>
-                        {plan === "lifetime" ? "Lifetime" : plan === "yearly" ? "Yearly" : plan === "pay_per_trip" ? "Pay per trip" : "Free"}
+                        {plan === "lifetime" ? "Lifetime" : plan === "yearly" ? "Yearly" : plan === "monthly" ? "Monthly" : plan === "pay_per_trip" ? "Pay per trip" : "Free"}
                       </span>
                     </div>
                     <div className="mt-2 flex items-end justify-between gap-3">
                       <div>
-                        <div className="text-xl font-black text-slate-900 dark:text-white">{isPremium ? "Unlimited" : `${Math.max(0, 2 - freeTripsUsed) + paidTripsBalance}`}</div>
+                        <div className="text-xl font-black text-slate-900 dark:text-white">{isPremium ? "Unlimited" : `${Math.max(0, 5 - freeTripsUsed) + paidTripsBalance}`}</div>
                         <div className="text-[10px] font-bold text-slate-400">{isPremium ? "Trip plans active" : "Plans available"}</div>
                       </div>
                       {!isPremium && (
@@ -1107,7 +1107,7 @@ export default function App() {
               </div>
 
               <div className="p-5 sm:p-8">
-                {freeTripsUsed >= 2 && paidTripsBalance <= 0 && !isPremium && (
+                {freeTripsUsed >= 5 && paidTripsBalance <= 0 && !isPremium && (
                   <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-2 text-xs font-bold text-amber-800 dark:text-amber-300"><AlertCircle className="h-4 w-4" />Your free trip limit is reached.</div>
                     <button onClick={() => setShowPremiumModal(true)} className="rounded-xl bg-amber-500 px-3 py-2 text-[10px] font-black text-slate-950">View plans</button>
