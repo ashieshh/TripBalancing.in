@@ -164,7 +164,7 @@ export interface TransportSuggestion {
 export interface UserProfile {
   id: string;
   email?: string;
-  plan: 'free' | 'pay_per_trip' | 'yearly' | 'lifetime';
+  plan: 'free' | 'pay_per_trip' | 'monthly' | 'yearly' | 'lifetime';
   is_premium?: boolean;
   free_trips_used: number;
   paid_trips_balance: number;

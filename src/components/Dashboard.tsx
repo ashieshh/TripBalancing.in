@@ -46,7 +46,7 @@ interface DashboardProps {
     category?: string,
     reviewText?: string
   ) => void;
-  plan?: "free" | "pay_per_trip" | "yearly" | "lifetime";
+  plan?: "free" | "pay_per_trip" | "monthly" | "yearly" | "lifetime";
   freeTripsUsed?: number;
   paidTripsBalance?: number;
   onUpgradeClick?: () => void;

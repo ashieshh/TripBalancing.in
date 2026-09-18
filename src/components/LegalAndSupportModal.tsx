@@ -250,10 +250,10 @@ export default function LegalAndSupportModal({
 
               <section className="space-y-2">
                 <h3 className="text-base font-black text-slate-900 dark:text-slate-100">
-                  3. Subscriptions & Pay-Per-Trip Tokens
+                  3. Subscriptions & Premium Plans
                 </h3>
                 <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  TripBalancing offers free trial trip credits (2 itineraries), Pay-Per-Trip passes (USD $2 / INR ₹99), Yearly Premium (USD $7 / INR ₹499), and Lifetime Premium (USD $19 / INR ₹1,499). All payments are processed through Razorpay PCI-DSS compliant checkout.
+                  TripBalancing offers 5 free trip plans, Monthly Premium (USD $2 / INR ₹99 for 30 days of unlimited trip planning), Yearly Premium (USD $18 / INR ₹999 for one year), and Lifetime Premium (USD $36 / INR ₹2,999). Lifetime Premium is available only to the first 10,000 customers. All payments are processed through Razorpay PCI-DSS compliant checkout.
                 </p>
               </section>
 
@@ -293,7 +293,7 @@ export default function LegalAndSupportModal({
                   <p className="text-xs font-bold text-slate-700 dark:text-slate-300">This includes:</p>
                   <ul className="list-disc list-inside text-xs text-slate-600 dark:text-slate-400 space-y-1 pl-2">
                     <li>Pay-Per-Trip Passes</li>
-                    <li>Monthly Memberships (if offered)</li>
+                    <li>Monthly Premium Memberships</li>
                     <li>Yearly Memberships</li>
                     <li>Lifetime Memberships</li>
                   </ul>
