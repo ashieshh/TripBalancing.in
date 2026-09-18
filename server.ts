@@ -831,7 +831,6 @@ async function loadAuthoritativeEntitlement(userId: string, email?: string): Pro
     return { plan: "free", freeTripsUsed: 0, paidTripsBalance: 0, isPremium: false };
   }
   let plan = (["pay_per_trip", "monthly", "yearly", "lifetime"].includes(String(data.plan)) ? data.plan : "free") as AuthoritativeEntitlement["plan"];
-  let premiumExpiry: string | null = null;
   if (plan === "monthly" || plan === "yearly") {
     try {
       const { data: subscription } = await supabaseAdmin
@@ -840,8 +839,7 @@ async function loadAuthoritativeEntitlement(userId: string, email?: string): Pro
         .eq("user_id", userId)
         .maybeSingle();
       if (subscription?.current_plan === plan && subscription?.expiry_date) {
-        premiumExpiry = String(subscription.expiry_date);
-        if (new Date(premiumExpiry).getTime() <= Date.now()) {
+        if (new Date(String(subscription.expiry_date)).getTime() <= Date.now()) {
           plan = "free";
         }
       }
@@ -1188,7 +1186,7 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
       }
       const planType = String((order.notes as any)?.planType || "");
       const orderUserId = String((order.notes as any)?.userId || "");
-      if (!PLAN_PRICES.INR[planType] && !PLAN_PRICES.USD[planType] || orderUserId !== paymentUser.id) {
+      if ((!PLAN_PRICES.INR[planType] && !PLAN_PRICES.USD[planType]) || orderUserId !== paymentUser.id) {
         return res.status(403).json({ status: "failure", verified: false, error: "Payment order ownership or plan is invalid." });
       }
       const orderCurrency = String(order.currency || "INR").toUpperCase();
