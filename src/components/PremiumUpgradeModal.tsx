@@ -323,7 +323,7 @@ export default function PremiumUpgradeModal({
                     <div className="pt-6 mt-auto space-y-4">
                       <div className="text-left">
                         <span className="text-2xl font-black text-slate-800 dark:text-slate-100">{currency === "USD" ? "$0" : "₹0"}</span>
-                        <span className="text-[10px] text-slate-400 font-bold block mt-0.5">free forever</span>
+                        <span className="text-[10px] text-slate-400 font-bold block mt-0.5"></span>
                       </div>
                       <button
                         type="button"
@@ -364,7 +364,7 @@ export default function PremiumUpgradeModal({
                           <Crown className="w-5 h-5 fill-emerald-500/10" />
                         </div>
                         <span className="text-[8px] font-bold bg-emerald-550 text-white dark:bg-emerald-500/20 dark:text-emerald-400 px-2 py-0.5 rounded-full">
-                          Save 80%+
+                          
                         </span>
                       </div>
                       <div className="space-y-1">
@@ -425,7 +425,7 @@ export default function PremiumUpgradeModal({
                       <div className="space-y-1">
                         <h4 className="text-sm font-black text-slate-800 dark:text-slate-100">Lifetime Premium</h4>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
-                          Enjoy unlimited AI generation forever. One-time payment. Limited to the first 10,000 lifetime customers.
+                          Enjoy unlimited AI generation forever. One-time payment. 
                         </p>
                       </div>
                     </div>
