@@ -1242,7 +1242,7 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
           user_email: user_email,
           current_plan: planType || "pay_per_trip",
           purchase_date: new Date().toISOString(),
-          expiry_date: planType === "yearly" ? new Date(Date.now() + 365*24*3600*1000).toISOString() : null,
+          expiry_date: planType === "monthly" ? new Date(Date.now() + 30*24*3600*1000).toISOString() : planType === "yearly" ? new Date(Date.now() + 365*24*3600*1000).toISOString() : null,
           remaining_trip_credits: planType === "pay_per_trip" ? 2 : 999,
           status: "active"
         };
