@@ -9,9 +9,9 @@ import {
 interface PremiumUpgradeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUpgradeSuccess: (chosenPlan: "pay_per_trip" | "yearly" | "lifetime", tripsAddedCount?: number) => void;
+  onUpgradeSuccess: (chosenPlan: "monthly" | "yearly" | "lifetime" | "pay_per_trip", tripsAddedCount?: number) => void;
   userEmail: string;
-  currentPlan?: "free" | "pay_per_trip" | "yearly" | "lifetime";
+  currentPlan?: "free" | "pay_per_trip" | "monthly" | "yearly" | "lifetime";
   remainingFreeTrips?: number;
   paidTripsBalance?: number;
   onOpenLegalPage?: (tab: "privacy" | "terms" | "refund" | "contact") => void;
@@ -23,11 +23,11 @@ export default function PremiumUpgradeModal({
   onUpgradeSuccess, 
   userEmail,
   currentPlan = "free",
-  remainingFreeTrips = 2,
+  remainingFreeTrips = 5,
   onOpenLegalPage
 }: PremiumUpgradeModalProps) {
   const [step, setStep] = useState<"pricing" | "success">("pricing");
-  const [selectedPlan, setSelectedPlan] = useState<"pay_per_trip" | "yearly" | "lifetime">("yearly");
+  const [selectedPlan, setSelectedPlan] = useState<"monthly" | "yearly" | "lifetime">("monthly");
   const [currency, setCurrency] = useState<"USD" | "INR">("USD");
   const [pricingRegion, setPricingRegion] = useState<"IN" | "INTL" | null>(null);
   const [regionLoading, setRegionLoading] = useState(false);
@@ -78,27 +78,11 @@ export default function PremiumUpgradeModal({
 
   if (!isOpen) return null;
 
-  const getPlanDetails = (plan: "pay_per_trip" | "yearly" | "lifetime", curr: "USD" | "INR") => {
+  const getPlanDetails = (plan: "monthly" | "yearly" | "lifetime", curr: "USD" | "INR") => {
     const isUsd = curr === "USD";
-    if (plan === "pay_per_trip") {
-      return {
-        name: isUsd ? "2 Trips Pass ($2)" : "Pay Per Trip (₹99)",
-        description: isUsd ? "2 AI Trip Plans Pass" : "1 AI Trip Plan Pass",
-        priceLabel: isUsd ? "$2" : "₹99"
-      };
-    }
-    if (plan === "yearly") {
-      return {
-        name: isUsd ? "Yearly Premium ($7)" : "Yearly Premium (₹499)",
-        description: "Yearly Unlimited AI Trip Planning Subscription",
-        priceLabel: isUsd ? "$7/yr" : "₹499/yr"
-      };
-    }
-    return {
-      name: isUsd ? "Lifetime Premium ($19)" : "Lifetime Premium (₹1,499)",
-      description: "Lifetime Unlimited AI Trip Planning Pass",
-      priceLabel: isUsd ? "$19" : "₹1,499"
-    };
+    if (plan === "monthly") return { name: isUsd ? "Monthly Premium ($2)" : "Monthly Premium (₹99)", description: "Monthly Unlimited AI Trip Planning Subscription", priceLabel: isUsd ? "$2/mo" : "₹99/mo" };
+    if (plan === "yearly") return { name: isUsd ? "Yearly Premium ($18)" : "Yearly Premium (₹999)", description: "Yearly Unlimited AI Trip Planning Subscription", priceLabel: isUsd ? "$18/yr" : "₹999/yr" };
+    return { name: isUsd ? "Lifetime Premium ($36)" : "Lifetime Premium (₹2,999)", description: "Lifetime Unlimited AI Trip Planning Pass", priceLabel: isUsd ? "$36" : "₹2,999" };
   };
 
   const handleProceedWithRazorpay = async () => {
@@ -183,7 +167,7 @@ export default function PremiumUpgradeModal({
             // 4. Activate plan ONLY after successful server-side signature verification
             setIsSubmitting(false);
             setStep("success");
-            const verifiedPlan = verifyData.planType as "pay_per_trip" | "yearly" | "lifetime";
+            const verifiedPlan = verifyData.planType as "monthly" | "yearly" | "lifetime" | "pay_per_trip";
             onUpgradeSuccess(verifiedPlan, Number(verifyData.tripsAdded || 0));
           } catch (err: any) {
             console.error("Verification error:", err?.message || "Payment verification error");
@@ -332,7 +316,7 @@ export default function PremiumUpgradeModal({
                       <div className="space-y-1">
                         <h4 className="text-sm font-black text-slate-800 dark:text-slate-100">Free Tier</h4>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
-                          Get started with 2 free AI-generated trip guides. Remaining: {remainingFreeTrips}
+                          Get started with 5 free AI-generated trip guides. Remaining: {remainingFreeTrips}
                         </p>
                       </div>
                     </div>
@@ -351,57 +335,13 @@ export default function PremiumUpgradeModal({
                     </div>
                   </div>
 
-                  {/* Pay Per Trip Plan */}
-                  <div 
-                    onClick={() => setSelectedPlan("pay_per_trip")}
-                    className={`flex flex-col justify-between h-full p-5 rounded-3xl border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg cursor-pointer relative ${
-                      selectedPlan === "pay_per_trip"
-                        ? "border-teal-500 bg-teal-500/5 dark:bg-teal-950/20 ring-2 ring-teal-500/25"
-                        : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 hover:border-slate-300 dark:hover:border-slate-700"
-                    }`}
-                  >
+                  {/* Monthly Premium Plan */}
+                  <div onClick={() => setSelectedPlan("monthly")} className={`flex flex-col justify-between h-full p-5 rounded-3xl border transition-all duration-300 hover:-translate-y-1 hover:shadow-lg cursor-pointer relative ${selectedPlan === "monthly" ? "border-teal-500 bg-teal-500/5 dark:bg-teal-950/20 ring-2 ring-teal-500/25" : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 hover:border-slate-300 dark:hover:border-slate-700"}`}>
                     <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="p-2.5 bg-teal-50 dark:bg-teal-950 rounded-xl text-teal-600 dark:text-teal-400">
-                          <Zap className="w-5 h-5" />
-                        </div>
-                        {selectedPlan === "pay_per_trip" && (
-                          <span className="text-[9px] font-bold bg-teal-500/10 text-teal-600 dark:text-teal-400 px-2.5 py-1 rounded-full">
-                            Selected
-                          </span>
-                        )}
-                      </div>
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-black text-slate-800 dark:text-slate-100">
-                          {currency === "USD" ? "2 Trips Pass ($2)" : "Pay Per Trip"}
-                        </h4>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
-                          {currency === "USD" 
-                            ? "2 trips fee: $2 ($1 per trip). Pay only $2 to get 2 additional trip plans." 
-                            : "No recurring fees. Pay only when you generate an additional trip itinerary."}
-                        </p>
-                      </div>
+                      <div className="flex items-center justify-between"><div className="p-2.5 bg-teal-50 dark:bg-teal-950 rounded-xl text-teal-600 dark:text-teal-400"><Zap className="w-5 h-5" /></div>{selectedPlan === "monthly" && <span className="text-[9px] font-bold bg-teal-500/10 text-teal-600 dark:text-teal-400 px-2.5 py-1 rounded-full">Selected</span>}</div>
+                      <div className="space-y-1"><h4 className="text-sm font-black text-slate-800 dark:text-slate-100">Monthly Premium</h4><p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">Unlimited AI trip planning for one month. No per-trip limit.</p></div>
                     </div>
-                    <div className="pt-6 mt-auto space-y-4">
-                      <div className="text-left">
-                        <span className="text-2xl font-black text-slate-800 dark:text-slate-100">
-                          {currency === "USD" ? "$2" : "₹99"}
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-bold block mt-0.5">
-                          {currency === "USD" ? "for 2 AI trips ($1/trip)" : "per AI trip"}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        className={`w-full h-11 flex items-center justify-center text-xs font-bold rounded-xl transition-all duration-200 ${
-                          selectedPlan === "pay_per_trip"
-                            ? "bg-teal-600 text-white shadow-sm"
-                            : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-850 text-slate-700 dark:text-slate-300"
-                        }`}
-                      >
-                        Select Plan
-                      </button>
-                    </div>
+                    <div className="pt-6 mt-auto space-y-4"><div className="text-left"><span className="text-2xl font-black text-slate-800 dark:text-slate-100">{currency === "USD" ? "$2" : "₹99"}</span><span className="text-[10px] text-slate-400 font-bold block mt-0.5">per month • unlimited trips</span></div><button type="button" className={`w-full h-11 flex items-center justify-center text-xs font-bold rounded-xl transition-all duration-200 ${selectedPlan === "monthly" ? "bg-teal-600 text-white shadow-sm" : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-850 text-slate-700 dark:text-slate-300"}`}>Select Plan</button></div>
                   </div>
 
                   {/* Yearly Premium Plan - MOST POPULAR */}
@@ -437,11 +377,11 @@ export default function PremiumUpgradeModal({
                     <div className="pt-6 mt-auto space-y-4">
                       <div className="text-left">
                         <span className="text-2xl font-black text-slate-800 dark:text-slate-100">
-                          {currency === "USD" ? "$7" : "₹499"}
+                          {currency === "USD" ? "$18" : "₹999"}
                         </span>
                         <span className="text-[10px] text-slate-400 font-bold block mt-0.5">per year</span>
                         <span className="inline-block mt-1 px-2 py-0.5 text-[9px] font-extrabold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/50 dark:text-emerald-400 rounded-md">
-                          {currency === "USD" ? "Best international rate ($7/yr)" : "Save over 85% compared to Pay Per Trip"}
+                          {currency === "USD" ? "International rate ($18/yr)" : "Save with annual billing"}
                         </span>
                       </div>
                       <button
@@ -485,14 +425,14 @@ export default function PremiumUpgradeModal({
                       <div className="space-y-1">
                         <h4 className="text-sm font-black text-slate-800 dark:text-slate-100">Lifetime Premium</h4>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
-                          Enjoy unlimited AI generation forever. One-time payment, zero recurring bills.
+                          Enjoy unlimited AI generation forever. One-time payment. Limited to the first 10,000 lifetime customers.
                         </p>
                       </div>
                     </div>
                     <div className="pt-6 mt-auto space-y-4">
                       <div className="text-left">
                         <span className="text-2xl font-black text-slate-800 dark:text-slate-100">
-                          {currency === "USD" ? "$19" : "₹1,499"}
+                          {currency === "USD" ? "$36" : "₹2,999"}
                         </span>
                         <span className="text-[10px] text-slate-400 font-bold block mt-0.5">one-time payment</span>
                       </div>
@@ -542,8 +482,8 @@ export default function PremiumUpgradeModal({
                     <Lock className="w-4 h-4" />
                     <span>
                       Proceed with {currency === "USD" 
-                        ? (selectedPlan === "pay_per_trip" ? "2 Trips Pass ($2)" : selectedPlan === "yearly" ? "Yearly Premium ($7)" : "Lifetime Premium ($19)") 
-                        : (selectedPlan === "pay_per_trip" ? "Pay Per Trip (₹99)" : selectedPlan === "yearly" ? "Yearly Premium (₹499)" : "Lifetime Premium (₹1,499)")}
+                        ? (selectedPlan === "monthly" ? "Monthly Premium ($2)" : selectedPlan === "yearly" ? "Yearly Premium ($18)" : "Lifetime Premium ($36)") 
+                        : (selectedPlan === "monthly" ? "Monthly Premium (₹99)" : selectedPlan === "yearly" ? "Yearly Premium (₹999)" : "Lifetime Premium (₹2,999)")}
                     </span>
                     <ArrowRight className="w-4 h-4" />
                   </>
@@ -594,16 +534,14 @@ export default function PremiumUpgradeModal({
               <div className="space-y-2">
                 <h3 className="text-2xl font-black text-slate-800 dark:text-slate-100">Congratulations!</h3>
                 <p className="text-sm text-teal-600 dark:text-teal-400 font-bold">
-                  {selectedPlan === "pay_per_trip" 
-                    ? (currency === "USD" ? "Your 2-Trips Token Pass is Credited!" : "Your Single-Trip Token is Credited!") 
+                  {selectedPlan === "monthly" 
+                    ? "Your Monthly Premium Subscription is Active!" 
                     : selectedPlan === "yearly" 
                       ? "Your Yearly Premium Subscription is Active!" 
                       : "Your Lifetime Premium Membership is Active!"}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
-                  {selectedPlan === "pay_per_trip" 
-                    ? (currency === "USD" ? "Thank you! You have successfully purchased 2 extra AI trip plans ($2 fee). You can generate your new itineraries now." : "Thank you! You have successfully purchased 1 extra AI trip plan. You can generate your new itinerary now.") 
-                    : "Thank you! Your account has been upgraded to Premium. You now have unlimited trip planning, companion collaboration, and export perks."}
+                  {"Thank you! Your account has been upgraded to Premium. You now have unlimited trip planning, companion collaboration, and export perks."}
                 </p>
               </div>
 
