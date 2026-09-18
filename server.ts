@@ -807,7 +807,7 @@ const getRazorpayKeys = () => {
 };
 
 type AuthoritativeEntitlement = {
-  plan: "free" | "pay_per_trip" | "yearly" | "lifetime";
+  plan: "free" | "pay_per_trip" | "monthly" | "yearly" | "lifetime";
   freeTripsUsed: number;
   paidTripsBalance: number;
   isPremium: boolean;
@@ -830,12 +830,30 @@ async function loadAuthoritativeEntitlement(userId: string, email?: string): Pro
     if (insertError) throw insertError;
     return { plan: "free", freeTripsUsed: 0, paidTripsBalance: 0, isPremium: false };
   }
-  const plan = (["pay_per_trip", "yearly", "lifetime"].includes(String(data.plan)) ? data.plan : "free") as AuthoritativeEntitlement["plan"];
+  let plan = (["pay_per_trip", "monthly", "yearly", "lifetime"].includes(String(data.plan)) ? data.plan : "free") as AuthoritativeEntitlement["plan"];
+  let premiumExpiry: string | null = null;
+  if (plan === "monthly" || plan === "yearly") {
+    try {
+      const { data: subscription } = await supabaseAdmin
+        .from("subscriptions")
+        .select("current_plan, expiry_date")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (subscription?.current_plan === plan && subscription?.expiry_date) {
+        premiumExpiry = String(subscription.expiry_date);
+        if (new Date(premiumExpiry).getTime() <= Date.now()) {
+          plan = "free";
+        }
+      }
+    } catch (subscriptionError) {
+      console.warn("[Entitlement] Subscription expiry lookup warning:", subscriptionError);
+    }
+  }
   return {
     plan,
     freeTripsUsed: Math.max(0, Number(data.free_trips_used || 0)),
     paidTripsBalance: Math.max(0, Number(data.paid_trips_balance || 0)),
-    isPremium: plan === "yearly" || plan === "lifetime"
+    isPremium: plan === "monthly" || plan === "yearly" || plan === "lifetime"
   };
 }
 
@@ -843,13 +861,13 @@ function entitlementDeniedMessage(e: AuthoritativeEntitlement) {
   if (e.plan === "pay_per_trip") {
     return "Insufficient Balance: Please purchase an additional Pay-Per-Trip token (₹99) or upgrade to Premium to continue generating itineraries.";
   }
-  return "Limit Reached: You have used all your free AI-generated trip plans. Please purchase an additional trip plan token (₹99) or upgrade to Premium to continue generating itineraries.";
+  return "Limit Reached: You have used all your 5 free AI-generated trip plans. Please purchase Monthly Premium or another available Premium plan to continue generating itineraries.";
 }
 
 function canGenerateFromEntitlement(e: AuthoritativeEntitlement) {
   if (e.isPremium) return true;
   if (e.plan === "pay_per_trip") return e.paidTripsBalance > 0;
-  return e.freeTripsUsed < 2 || e.paidTripsBalance > 0;
+  return e.freeTripsUsed < 5 || e.paidTripsBalance > 0;
 }
 
 async function consumeTripEntitlement(userId: string, email?: string): Promise<{ ok: boolean; status: number; error?: string; entitlement?: AuthoritativeEntitlement }> {
@@ -874,7 +892,7 @@ async function consumeTripEntitlement(userId: string, email?: string): Promise<{
       continue;
     }
 
-    if (current.freeTripsUsed < 2) {
+    if (current.freeTripsUsed < 5) {
       const nextUsed = current.freeTripsUsed + 1;
       const { data, error } = await supabaseAdmin
         .from("user_profiles")
@@ -930,8 +948,8 @@ async function verifyPaymentUser(req: express.Request, res: express.Response, ne
 }
 
 const PLAN_PRICES: Record<string, Record<string, number>> = {
-  INR: { pay_per_trip: 9900, yearly: 49900, lifetime: 149900 },
-  USD: { pay_per_trip: 200, yearly: 700, lifetime: 1900 }
+  INR: { pay_per_trip: 9900, monthly: 9900, yearly: 99900, lifetime: 299900 },
+  USD: { pay_per_trip: 200, monthly: 200, yearly: 1800, lifetime: 3600 }
 };
 
 const getServerPlanAmount = (planType: string, currency: string) =>
@@ -1035,12 +1053,25 @@ const handleCreateOrder = async (req: express.Request, res: express.Response) =>
       return res.status(409).json({ error: "Please complete your account country/region before purchasing a plan.", needsRegionSetup: true });
     }
     const targetCurrency = pricingRegion === 'IN' ? 'INR' : 'USD';
-    if (!["pay_per_trip", "yearly", "lifetime"].includes(planType)) {
+    if (!["monthly", "yearly", "lifetime", "pay_per_trip"].includes(planType)) {
       return res.status(400).json({ error: "Invalid TripBalancing plan." });
     }
     if (!["INR", "USD"].includes(targetCurrency)) {
       return res.status(400).json({ error: "Unsupported payment currency." });
     }
+    // Lifetime Premium is permanently limited to the first 10,000 unique customers.
+    if (planType === "lifetime" && supabaseAdmin) {
+      const { data: lifetimePayments, error: lifetimeError } = await supabaseAdmin
+        .from("payments")
+        .select("user_id")
+        .eq("plan_purchased", "lifetime");
+      if (lifetimeError) throw lifetimeError;
+      const uniqueLifetimeUsers = new Set((lifetimePayments || []).map((p: any) => String(p.user_id || "")).filter(Boolean));
+      if (!uniqueLifetimeUsers.has(paymentUser.id) && uniqueLifetimeUsers.size >= 10000) {
+        return res.status(409).json({ error: "Lifetime Premium is limited to the first 10,000 customers and all available lifetime places have been claimed.", lifetimeSoldOut: true });
+      }
+    }
+
     // Price is always determined on the server. Never trust a browser-supplied amount.
     const amount = getServerPlanAmount(planType, targetCurrency);
     if (!amount) {
@@ -1157,7 +1188,7 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
       }
       const planType = String((order.notes as any)?.planType || "");
       const orderUserId = String((order.notes as any)?.userId || "");
-      if (!PLAN_PRICES.INR[planType] || orderUserId !== paymentUser.id) {
+      if (!PLAN_PRICES.INR[planType] && !PLAN_PRICES.USD[planType] || orderUserId !== paymentUser.id) {
         return res.status(403).json({ status: "failure", verified: false, error: "Payment order ownership or plan is invalid." });
       }
       const orderCurrency = String(order.currency || "INR").toUpperCase();
@@ -1245,7 +1276,7 @@ const handleVerifyPayment = async (req: express.Request, res: express.Response) 
             // Entitlement is granted server-side only after verified payment.
             const profileUpdate: any = {
               plan: planType,
-              is_premium: planType === "yearly" || planType === "lifetime"
+              is_premium: planType === "monthly" || planType === "yearly" || planType === "lifetime"
             };
             if (planType === "pay_per_trip") {
               const { data: existingProfile } = await supabaseAdmin
