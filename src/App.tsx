@@ -1241,7 +1241,7 @@ export default function App() {
           onUpgradeSuccess={handleUpgradeSuccess}
           userEmail={user?.email || "guest@tripbalancing.com"}
           currentPlan={plan}
-          remainingFreeTrips={Math.max(0, 2 - freeTripsUsed)}
+          remainingFreeTrips={Math.max(0, 5 - freeTripsUsed)}
           paidTripsBalance={paidTripsBalance}
           onOpenLegalPage={handleOpenLegalModal}
         />
