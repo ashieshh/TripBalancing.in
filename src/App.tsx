@@ -971,10 +971,6 @@ export default function App() {
                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">remaining</span>
                 </div>
               </div>
-              <div className="hidden shrink-0 rounded-xl bg-amber-500/10 px-3 py-2 text-right sm:block">
-                <div className="text-[9px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">Lifetime</div>
-                <div className="text-xs font-black text-slate-700 dark:text-slate-200">₹2,999 / $36</div>
-              </div>
             </button>
           </div>
 
