@@ -953,6 +953,68 @@ const PLAN_PRICES: Record<string, Record<string, number>> = {
 const getServerPlanAmount = (planType: string, currency: string) =>
   PLAN_PRICES[currency]?.[planType] ?? null;
 
+// Lifetime Premium promotion: the displayed availability is a server-authoritative
+// combination of scheduled promotional decay and real, unique lifetime purchasers.
+// The start date can be overridden with LIFETIME_PROMO_START_ISO if the campaign
+// needs to be restarted without changing the application code.
+const LIFETIME_PROMO_CAP = 10000;
+const LIFETIME_PROMO_START_ISO = process.env.LIFETIME_PROMO_START_ISO || '2026-09-21T00:00:00.000Z';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function getLifetimePromotionTimeDecay(now = new Date()): number {
+  const start = new Date(LIFETIME_PROMO_START_ISO);
+  if (Number.isNaN(start.getTime()) || now.getTime() <= start.getTime()) return 0;
+
+  const elapsedDays = Math.floor((now.getTime() - start.getTime()) / DAY_MS);
+  let daysLeft = elapsedDays;
+  let week = 0;
+  let decay = 0;
+
+  // Week 1 removes 1/day, week 2 removes 2/day, week 3 removes 3/day, etc.
+  while (daysLeft > 0) {
+    const daysThisWeek = Math.min(7, daysLeft);
+    decay += daysThisWeek * (week + 1);
+    daysLeft -= daysThisWeek;
+    week += 1;
+  }
+  return decay;
+}
+
+async function getLifetimePromotionStatus() {
+  let claimed = 0;
+  if (supabaseAdmin) {
+    const { data, error } = await supabaseAdmin
+      .from('payments')
+      .select('user_id')
+      .eq('plan_purchased', 'lifetime');
+    if (error) throw error;
+    claimed = new Set(
+      (data || [])
+        .map((row: any) => String(row.user_id || ''))
+        .filter(Boolean)
+    ).size;
+  }
+
+  const timeDecay = getLifetimePromotionTimeDecay();
+  const remaining = Math.max(0, LIFETIME_PROMO_CAP - timeDecay - claimed);
+  return {
+    cap: LIFETIME_PROMO_CAP,
+    claimed,
+    timeDecay,
+    remaining,
+    campaignStart: LIFETIME_PROMO_START_ISO,
+  };
+}
+
+app.get('/api/lifetime-promotion', async (_req, res) => {
+  try {
+    return res.json(await getLifetimePromotionStatus());
+  } catch (error: any) {
+    console.error('[Lifetime Promotion] Read failed:', error);
+    return res.status(500).json({ error: 'Unable to read Lifetime Premium promotion status.' });
+  }
+});
+
 
 type PricingRegion = 'IN' | 'INTL';
 
@@ -1057,16 +1119,19 @@ const handleCreateOrder = async (req: express.Request, res: express.Response) =>
     if (!["INR", "USD"].includes(targetCurrency)) {
       return res.status(400).json({ error: "Unsupported payment currency." });
     }
-    // Lifetime Premium is permanently limited to the first 10,000 unique customers.
+    // Lifetime Premium checkout uses the same promotional availability shown on the homepage.
+    // Existing lifetime owners can still complete a retry without consuming another spot.
     if (planType === "lifetime" && supabaseAdmin) {
-      const { data: lifetimePayments, error: lifetimeError } = await supabaseAdmin
+      const status = await getLifetimePromotionStatus();
+      const { data: existingLifetimePayment } = await supabaseAdmin
         .from("payments")
-        .select("user_id")
-        .eq("plan_purchased", "lifetime");
-      if (lifetimeError) throw lifetimeError;
-      const uniqueLifetimeUsers = new Set((lifetimePayments || []).map((p: any) => String(p.user_id || "")).filter(Boolean));
-      if (!uniqueLifetimeUsers.has(paymentUser.id) && uniqueLifetimeUsers.size >= 10000) {
-        return res.status(409).json({ error: "Lifetime Premium is limited to the first 10,000 customers and all available lifetime places have been claimed.", lifetimeSoldOut: true });
+        .select("id")
+        .eq("plan_purchased", "lifetime")
+        .eq("user_id", paymentUser.id)
+        .limit(1)
+        .maybeSingle();
+      if (!existingLifetimePayment && status.remaining <= 0) {
+        return res.status(409).json({ error: "All available Lifetime Premium places have been claimed.", lifetimeSoldOut: true });
       }
     }
 

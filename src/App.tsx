@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { 
   Globe, LogOut, ArrowLeft, Sparkles, Database, WifiOff, MapPin, 
-  ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users, ShieldCheck, Star
+  ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users, ShieldCheck, Star, Gift
 } from "lucide-react";
 import { TripBalancingLogo } from "./components/TripBalancingLogo";
 import { Itinerary, TripInput, TripRecord } from "./types";
@@ -129,6 +129,35 @@ export default function App() {
       if (chosenPlan === "pay_per_trip") setPaidTripsBalance(v => v + tripsAddedCount);
     }
   };
+
+  // Lifetime Premium promotional counter. The server is authoritative so the
+  // displayed number also reflects real lifetime purchases and the scheduled decay.
+  const [lifetimePromo, setLifetimePromo] = useState({ remaining: 10000, claimed: 0 });
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadLifetimePromo = async () => {
+      try {
+        const response = await fetch("/api/lifetime-promotion");
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!cancelled && Number.isFinite(Number(data?.remaining))) {
+          setLifetimePromo({
+            remaining: Math.max(0, Number(data.remaining)),
+            claimed: Math.max(0, Number(data.claimed || 0)),
+          });
+        }
+      } catch {
+        // Keep the safe initial value if the promotion endpoint is temporarily unavailable.
+      }
+    };
+    loadLifetimePromo();
+    const refresh = window.setInterval(loadLifetimePromo, 60 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(refresh);
+    };
+  }, []);
 
   // App UI state
   const [trips, setTrips] = useState<TripRecord[]>([]);
@@ -921,8 +950,36 @@ export default function App() {
             </div>
           </div>
 
+          {/* Lifetime Premium promotion */}
+          <div className="flex min-w-0 flex-1 items-center justify-center px-3 sm:px-6">
+            <button
+              type="button"
+              onClick={() => setShowPremiumModal(true)}
+              className="group flex w-full max-w-[620px] items-center justify-center gap-3 rounded-2xl border border-teal-500/30 bg-gradient-to-r from-teal-500/10 via-cyan-500/10 to-indigo-500/10 px-3 py-2.5 text-left shadow-sm transition-all hover:border-teal-400/50 hover:shadow-md dark:border-teal-500/25 dark:from-teal-500/10 dark:via-cyan-500/5 dark:to-indigo-500/10"
+              aria-label="View Lifetime Premium offer"
+            >
+              <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-500/15 text-teal-500 sm:flex">
+                <Gift className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span className="text-[10px] font-black uppercase tracking-[0.12em] text-teal-600 dark:text-teal-400">First 10,000 Lifetime Premium Spots</span>
+                  <span className="text-[9px] font-bold text-slate-400">Limited offer</span>
+                </div>
+                <div className="mt-0.5 flex items-baseline gap-2">
+                  <span className="font-mono text-lg font-black tracking-[0.12em] text-slate-900 dark:text-white sm:text-xl">{lifetimePromo.remaining.toLocaleString("en-IN")}</span>
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">remaining</span>
+                </div>
+              </div>
+              <div className="hidden shrink-0 rounded-xl bg-amber-500/10 px-3 py-2 text-right sm:block">
+                <div className="text-[9px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">Lifetime</div>
+                <div className="text-xs font-black text-slate-700 dark:text-slate-200">₹2,999 / $36</div>
+              </div>
+            </button>
+          </div>
+
           {/* Controls */}
-          <div className="flex items-center gap-4">
+          <div className="flex shrink-0 items-center gap-4">
             <ThemeToggle />
 
             {/* Admin Portal Header Button for Verified Admins */}
