@@ -961,6 +961,7 @@ export default function App() {
               <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-500/15 text-teal-500 sm:flex">
                 <Gift className="h-5 w-5" />
               </div>
+              {/* Lifetime price is intentionally omitted from this homepage banner. */}
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   <span className="text-[10px] font-black uppercase tracking-[0.12em] text-teal-600 dark:text-teal-400">First 10,000 Lifetime Premium Spots</span>
