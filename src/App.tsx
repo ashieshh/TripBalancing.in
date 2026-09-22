@@ -955,33 +955,31 @@ export default function App() {
             <button
               type="button"
               onClick={() => setShowPremiumModal(true)}
-              className="group flex w-full max-w-[620px] items-center justify-center gap-3 rounded-2xl border border-teal-500/30 bg-gradient-to-r from-teal-500/10 via-cyan-500/10 to-indigo-500/10 px-3 py-2.5 text-left shadow-sm transition-all hover:border-teal-400/50 hover:shadow-md dark:border-teal-500/25 dark:from-teal-500/10 dark:via-cyan-500/5 dark:to-indigo-500/10"
+              className="group relative flex w-full max-w-[700px] items-center justify-between gap-3 overflow-hidden rounded-2xl border border-amber-400/30 bg-gradient-to-r from-amber-50 via-white to-teal-50 px-3.5 py-2.5 text-left shadow-[0_8px_30px_rgba(245,158,11,0.10)] transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-400/60 hover:shadow-[0_12px_34px_rgba(20,184,166,0.14)] dark:border-amber-500/25 dark:from-amber-950/25 dark:via-slate-950 dark:to-teal-950/20"
               aria-label="View Lifetime Premium offer"
             >
-              <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-500/15 text-teal-500 sm:flex">
-                <Gift className="h-5 w-5" />
-              </div>
-              {/* Lifetime price is intentionally omitted from this homepage banner. */}
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-col items-center gap-1.5 sm:flex-row sm:gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-300 to-orange-500 text-slate-950 shadow-[0_4px_14px_rgba(245,158,11,0.28)]">
-                      <Crown className="h-3.5 w-3.5 fill-current" />
-                      <span className="absolute inset-0 rounded-lg ring-1 ring-white/50" />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <span className="text-[10px] font-black uppercase tracking-[0.14em] text-teal-600 dark:text-teal-400">Lifetime Premium</span>
-                        <span className="rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">Limited offer</span>
-                      </div>
-                      <p className="mt-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">Join the first 10,000 lifetime members</p>
-                    </div>
+              <span className="pointer-events-none absolute -right-10 -top-12 h-28 w-28 rounded-full bg-amber-300/20 blur-2xl transition-all group-hover:bg-amber-300/30" />
+              <div className="relative flex min-w-0 items-center gap-2.5">
+                <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-orange-500 text-slate-950 shadow-[0_5px_16px_rgba(245,158,11,0.30)]">
+                  <Crown className="h-4.5 w-4.5 fill-current" />
+                  <span className="absolute inset-0 rounded-xl ring-1 ring-white/60" />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-black uppercase tracking-[0.13em] text-slate-900 dark:text-white">Lifetime Premium</span>
+                    <span className="rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">Limited offer</span>
                   </div>
-                  <div className="flex items-center gap-1.5 rounded-xl border border-teal-500/15 bg-white/70 px-2.5 py-1.5 shadow-sm dark:border-teal-500/20 dark:bg-slate-950/50">
-                    <span className="font-mono text-base font-black tracking-[0.1em] text-slate-900 dark:text-white sm:text-lg">{lifetimePromo.remaining.toLocaleString("en-IN")}</span>
-                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">spots left</span>
-                  </div>
+                  <p className="mt-0.5 truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400">Join the first 10,000 lifetime members</p>
                 </div>
+              </div>
+              <div className="relative flex shrink-0 items-center gap-2">
+                <div className="rounded-xl border border-amber-400/25 bg-white/80 px-2.5 py-1.5 text-center shadow-sm dark:border-amber-400/20 dark:bg-slate-900/80">
+                  <div className="font-mono text-base font-black leading-none tracking-[0.08em] text-slate-900 dark:text-white sm:text-lg">{lifetimePromo.remaining.toLocaleString("en-IN")}</div>
+                  <div className="mt-0.5 text-[8px] font-black uppercase tracking-[0.12em] text-slate-400">spots left</div>
+                </div>
+                <span className="hidden h-8 w-8 items-center justify-center rounded-xl bg-teal-500 text-white shadow-sm transition-transform group-hover:translate-x-0.5 sm:flex">
+                  <ChevronRight className="h-4 w-4" />
+                </span>
               </div>
             </button>
           </div>
