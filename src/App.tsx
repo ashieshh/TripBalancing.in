@@ -963,13 +963,24 @@ export default function App() {
               </div>
               {/* Lifetime price is intentionally omitted from this homepage banner. */}
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                  <span className="text-[10px] font-black uppercase tracking-[0.12em] text-teal-600 dark:text-teal-400">First 10,000 Lifetime Premium Spots</span>
-                  <span className="text-[9px] font-bold text-slate-400">Limited offer</span>
-                </div>
-                <div className="mt-0.5 flex items-baseline gap-2">
-                  <span className="font-mono text-lg font-black tracking-[0.12em] text-slate-900 dark:text-white sm:text-xl">{lifetimePromo.remaining.toLocaleString("en-IN")}</span>
-                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">remaining</span>
+                <div className="flex flex-col items-center gap-1.5 sm:flex-row sm:gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="relative inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-300 to-orange-500 text-slate-950 shadow-[0_4px_14px_rgba(245,158,11,0.28)]">
+                      <Crown className="h-3.5 w-3.5 fill-current" />
+                      <span className="absolute inset-0 rounded-lg ring-1 ring-white/50" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="text-[10px] font-black uppercase tracking-[0.14em] text-teal-600 dark:text-teal-400">Lifetime Premium</span>
+                        <span className="rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">Limited offer</span>
+                      </div>
+                      <p className="mt-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">Join the first 10,000 lifetime members</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 rounded-xl border border-teal-500/15 bg-white/70 px-2.5 py-1.5 shadow-sm dark:border-teal-500/20 dark:bg-slate-950/50">
+                    <span className="font-mono text-base font-black tracking-[0.1em] text-slate-900 dark:text-white sm:text-lg">{lifetimePromo.remaining.toLocaleString("en-IN")}</span>
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">spots left</span>
+                  </div>
                 </div>
               </div>
             </button>
