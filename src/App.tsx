@@ -961,6 +961,7 @@ export default function App() {
               <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-500/15 text-teal-500 sm:flex">
                 <Gift className="h-5 w-5" />
               </div>
+              {/* Lifetime price is intentionally omitted from this homepage banner. */}
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   <span className="text-[10px] font-black uppercase tracking-[0.12em] text-teal-600 dark:text-teal-400">First 10,000 Lifetime Premium Spots</span>
@@ -970,10 +971,6 @@ export default function App() {
                   <span className="font-mono text-lg font-black tracking-[0.12em] text-slate-900 dark:text-white sm:text-xl">{lifetimePromo.remaining.toLocaleString("en-IN")}</span>
                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">remaining</span>
                 </div>
-              </div>
-              <div className="hidden shrink-0 rounded-xl bg-amber-500/10 px-3 py-2 text-right sm:block">
-                <div className="text-[9px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">Lifetime</div>
-                <div className="text-xs font-black text-slate-700 dark:text-slate-200">₹2,999 / $36</div>
               </div>
             </button>
           </div>
