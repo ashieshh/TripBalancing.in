@@ -247,8 +247,7 @@ export default function App() {
   const [publicReviews, setPublicReviews] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch("/api/reviews/public")
-      .then((response) => response.ok ? response.json() : Promise.reject())
+    fetch("/api/reviews/public")      .then((response) => response.ok ? response.json() : Promise.reject())
       .then((data) => setPublicReviews(Array.isArray(data?.reviews) ? data.reviews : []))
       .catch(() => setPublicReviews([]));
   }, []);
@@ -497,8 +496,7 @@ export default function App() {
   };
 
   // Fetch trips, profile, and companion invites once user is logged in
-  useEffect(() => {
-    if (user) {
+  useEffect(() => {    if (user) {
       loadUserData(user);
     } else {
       setPlan("free");
@@ -747,7 +745,6 @@ export default function App() {
       setDeletingId(null);
     }
   };
-
   // Check if active itinerary is already saved in loaded trips
   const isCurrentlySaved = trips.some(t => t.id === activeTripId) || (activeItinerary && trips.some(t => t.destination === activeItinerary.destination && t.startDate === activeItinerary.startDate && t.endDate === activeItinerary.endDate));
 
@@ -951,27 +948,34 @@ export default function App() {
           </div>
 
           {/* Lifetime Premium promotion */}
-          <div className="flex min-w-0 flex-1 items-center justify-center px-3 sm:px-6">
+          <div className="px-2 sm:px-4 py-2">
             <button
               type="button"
               onClick={() => setShowPremiumModal(true)}
-              className="group flex w-full max-w-[620px] items-center justify-center gap-3 rounded-2xl border border-teal-500/30 bg-gradient-to-r from-teal-500/10 via-cyan-500/10 to-indigo-500/10 px-3 py-2.5 text-left shadow-sm transition-all hover:border-teal-400/50 hover:shadow-md dark:border-teal-500/25 dark:from-teal-500/10 dark:via-cyan-500/5 dark:to-indigo-500/10"
+              className="group relative mx-auto flex w-full max-w-[860px] items-center gap-3 overflow-hidden rounded-[22px] border border-amber-300/40 bg-white/95 px-3 py-2.5 text-left shadow-[0_10px_35px_rgba(15,23,42,0.08)] backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-400/70 hover:shadow-[0_16px_45px_rgba(15,23,42,0.12)] dark:border-amber-500/25 dark:bg-slate-950/95 dark:shadow-none"
               aria-label="View Lifetime Premium offer"
             >
-              <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-500/15 text-teal-500 sm:flex">
-                <Gift className="h-5 w-5" />
-              </div>
-              {/* Lifetime price is intentionally omitted from this homepage banner. */}
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                  <span className="text-[10px] font-black uppercase tracking-[0.12em] text-teal-600 dark:text-teal-400">First 10,000 Lifetime Premium Spots</span>
-                  <span className="text-[9px] font-bold text-slate-400">Limited offer</span>
-                </div>
-                <div className="mt-0.5 flex items-baseline gap-2">
-                  <span className="font-mono text-lg font-black tracking-[0.12em] text-slate-900 dark:text-white sm:text-xl">{lifetimePromo.remaining.toLocaleString("en-IN")}</span>
-                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">remaining</span>
-                </div>
-              </div>
+              <span className="pointer-events-none absolute -left-10 -top-14 h-28 w-28 rounded-full bg-amber-300/20 blur-3xl" />
+              <span className="pointer-events-none absolute -right-12 -bottom-16 h-32 w-32 rounded-full bg-teal-300/15 blur-3xl" />
+              <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 via-amber-400 to-orange-500 text-slate-950 shadow-[0_6px_18px_rgba(245,158,11,0.28)]">
+                <Crown className="h-5 w-5 fill-current" />
+              </span>
+              <span className="relative min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-900 dark:text-white">Lifetime Premium</span>
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-800 dark:bg-amber-400/15 dark:text-amber-300">Limited offer</span>
+                </span>
+                <span className="mt-0.5 block truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400">Join the first 10,000 lifetime members</span>
+              </span>
+              <span className="relative flex shrink-0 items-center gap-2">
+                <span className="rounded-2xl border border-amber-300/40 bg-amber-50/80 px-3 py-1.5 text-center dark:border-amber-400/20 dark:bg-amber-400/10">
+                  <span className="block font-mono text-lg font-black leading-none tracking-[0.06em] text-slate-900 dark:text-white sm:text-xl">{lifetimePromo.remaining.toLocaleString("en-IN")}</span>
+                  <span className="mt-0.5 block text-[8px] font-black uppercase tracking-[0.12em] text-amber-700/70 dark:text-amber-300/70">spots left</span>
+                </span>
+                <span className="hidden h-9 w-9 items-center justify-center rounded-2xl bg-teal-500 text-white shadow-sm transition-transform group-hover:translate-x-0.5 sm:flex">
+                  <ChevronRight className="h-4 w-4" />
+                </span>
+              </span>
             </button>
           </div>
 
@@ -988,8 +992,7 @@ export default function App() {
                   setCurrentView("admin");
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/30 text-teal-600 dark:text-teal-400 font-extrabold rounded-xl text-xs cursor-pointer transition-all shadow-sm"
-                title="Open Admin Dashboard"
-              >
+                title="Open Admin Dashboard"              >
                 <ShieldCheck className="w-3.5 h-3.5" />
                 <span className="hidden min-[580px]:inline">Admin Panel</span>
               </button>
@@ -1238,7 +1241,6 @@ export default function App() {
         )}
 
       </main>
-
       {/* Footer */}
       <footer className="print:hidden border-t border-slate-150 dark:border-slate-900 bg-white dark:bg-slate-950 py-10 transition-colors mt-12 text-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col lg:flex-row items-center justify-between gap-6 text-slate-400 font-medium">
