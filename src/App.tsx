@@ -948,31 +948,32 @@ export default function App() {
           </div>
 
           {/* Lifetime Premium promotion */}
-          <div className="px-2 sm:px-4 py-2">
+          <div className="flex min-w-0 flex-1 items-center justify-center px-2 sm:px-5">
             <button
               type="button"
               onClick={() => setShowPremiumModal(true)}
-              className="group relative mx-auto flex w-full max-w-[860px] items-center gap-3 overflow-hidden rounded-[22px] border border-amber-300/40 bg-white/95 px-3 py-2.5 text-left shadow-[0_10px_35px_rgba(15,23,42,0.08)] backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-400/70 hover:shadow-[0_16px_45px_rgba(15,23,42,0.12)] dark:border-amber-500/25 dark:bg-slate-950/95 dark:shadow-none"
+              className="group relative flex h-10 w-full max-w-[700px] min-w-0 items-center justify-between gap-2 overflow-hidden rounded-xl border border-amber-300/40 bg-white/95 px-2.5 py-1.5 text-left shadow-[0_6px_22px_rgba(15,23,42,0.07)] transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-400/70 hover:shadow-[0_10px_30px_rgba(15,23,42,0.10)] sm:h-auto sm:gap-3 sm:rounded-2xl sm:px-3.5 sm:py-2.5 dark:border-amber-500/25 dark:bg-slate-950/95 dark:shadow-none"
               aria-label="View Lifetime Premium offer"
             >
-              <span className="pointer-events-none absolute -left-10 -top-14 h-28 w-28 rounded-full bg-amber-300/20 blur-3xl" />
-              <span className="pointer-events-none absolute -right-12 -bottom-16 h-32 w-32 rounded-full bg-teal-300/15 blur-3xl" />
-              <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 via-amber-400 to-orange-500 text-slate-950 shadow-[0_6px_18px_rgba(245,158,11,0.28)]">
-                <Crown className="h-5 w-5 fill-current" />
-              </span>
-              <span className="relative min-w-0 flex-1">
-                <span className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-900 dark:text-white">Lifetime Premium</span>
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-800 dark:bg-amber-400/15 dark:text-amber-300">Limited offer</span>
+              <span className="pointer-events-none absolute -right-8 -top-10 h-20 w-20 rounded-full bg-amber-300/15 blur-2xl sm:h-28 sm:w-28" />
+              <span className="relative flex min-w-0 items-center gap-2 sm:gap-2.5">
+                <span className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-300 to-orange-500 text-slate-950 shadow-[0_4px_12px_rgba(245,158,11,0.22)] sm:h-9 sm:w-9 sm:rounded-xl sm:shadow-[0_5px_16px_rgba(245,158,11,0.25)]">
+                  <Crown className="h-3.5 w-3.5 fill-current sm:h-4.5 sm:w-4.5" />
                 </span>
-                <span className="mt-0.5 block truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400">Join the first 10,000 lifetime members</span>
-              </span>
-              <span className="relative flex shrink-0 items-center gap-2">
-                <span className="rounded-2xl border border-amber-300/40 bg-amber-50/80 px-3 py-1.5 text-center dark:border-amber-400/20 dark:bg-amber-400/10">
-                  <span className="block font-mono text-lg font-black leading-none tracking-[0.06em] text-slate-900 dark:text-white sm:text-xl">{lifetimePromo.remaining.toLocaleString("en-IN")}</span>
-                  <span className="mt-0.5 block text-[8px] font-black uppercase tracking-[0.12em] text-amber-700/70 dark:text-amber-300/70">spots left</span>
+                <span className="min-w-0">
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate text-[9px] font-black uppercase tracking-[0.08em] text-slate-900 dark:text-white sm:text-[10px] sm:tracking-[0.13em]">Lifetime Premium</span>
+                    <span className="hidden rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-800 sm:inline dark:bg-amber-400/15 dark:text-amber-300">Limited offer</span>
+                  </span>
+                  <span className="hidden text-[10px] font-semibold text-slate-500 dark:text-slate-400 sm:block">Join the first 10,000 lifetime members</span>
                 </span>
-                <span className="hidden h-9 w-9 items-center justify-center rounded-2xl bg-teal-500 text-white shadow-sm transition-transform group-hover:translate-x-0.5 sm:flex">
+              </span>
+              <span className="relative flex shrink-0 items-center gap-1.5 sm:gap-2">
+                <span className="rounded-lg border border-amber-300/40 bg-amber-50/80 px-2 py-1 text-center sm:rounded-xl sm:px-2.5 sm:py-1.5 dark:border-amber-400/20 dark:bg-amber-400/10">
+                  <span className="block font-mono text-sm font-black leading-none tracking-[0.04em] text-slate-900 dark:text-white sm:text-lg sm:tracking-[0.06em]">{lifetimePromo.remaining.toLocaleString("en-IN")}</span>
+                  <span className="mt-0.5 block text-[7px] font-black uppercase tracking-[0.08em] text-amber-700/70 dark:text-amber-300/70 sm:text-[8px] sm:tracking-[0.12em]">spots left</span>
+                </span>
+                <span className="hidden h-8 w-8 items-center justify-center rounded-xl bg-teal-500 text-white shadow-sm transition-transform group-hover:translate-x-0.5 sm:flex">
                   <ChevronRight className="h-4 w-4" />
                 </span>
               </span>
