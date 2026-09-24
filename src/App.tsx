@@ -810,42 +810,6 @@ export default function App() {
           </div>
         </header>
 
-      {/* Lifetime Premium promotion — placed below the header so it remains readable on every screen size. */}
-      <section className="print:hidden w-full border-b border-amber-200/60 bg-gradient-to-r from-amber-50 via-white to-orange-50 px-3 py-2.5 dark:border-amber-900/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 sm:px-6 sm:py-3">
-        <div className="mx-auto w-full max-w-5xl">
-          <button
-            type="button"
-            onClick={() => setShowPremiumModal(true)}
-            className="group relative flex min-h-14 w-full items-center justify-between gap-3 overflow-hidden rounded-2xl border border-amber-300/50 bg-white/95 px-3 py-2.5 text-left shadow-[0_8px_26px_rgba(15,23,42,0.07)] transition-all hover:-translate-y-0.5 hover:border-amber-400/80 hover:shadow-[0_12px_32px_rgba(15,23,42,0.10)] active:translate-y-0 dark:border-amber-500/25 dark:bg-slate-950/95 dark:shadow-none sm:min-h-[68px] sm:gap-4 sm:px-4 sm:py-3"
-            aria-label="View Lifetime Premium offer"
-          >
-            <span className="pointer-events-none absolute -right-10 -top-12 h-28 w-28 rounded-full bg-amber-300/15 blur-2xl sm:h-36 sm:w-36" />
-            <span className="relative flex min-w-0 items-center gap-2.5 sm:gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-orange-500 text-slate-950 shadow-[0_5px_16px_rgba(245,158,11,0.25)] sm:h-11 sm:w-11">
-                <Crown className="h-4.5 w-4.5 fill-current sm:h-5 sm:w-5" />
-              </span>
-              <span className="min-w-0">
-                <span className="flex items-center gap-1.5">
-                  <span className="truncate text-[10px] font-black uppercase tracking-[0.10em] text-slate-900 dark:text-white sm:text-xs sm:tracking-[0.13em]">Lifetime Premium</span>
-                  <span className="hidden rounded-full bg-amber-100 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-800 sm:inline dark:bg-amber-400/15 dark:text-amber-300">Limited offer</span>
-                </span>
-                <span className="mt-0.5 block truncate text-[9px] font-semibold text-slate-500 dark:text-slate-400 sm:text-[10px]">First 10,000 Lifetime Premium Spots</span>
-              </span>
-            </span>
-            <span className="relative flex shrink-0 items-center gap-2">
-              <span className="rounded-xl border border-amber-300/50 bg-amber-50/90 px-2.5 py-1.5 text-center dark:border-amber-400/20 dark:bg-amber-400/10 sm:px-3 sm:py-2">
-                <span className="block font-mono text-base font-black leading-none tracking-[0.04em] text-slate-900 dark:text-white sm:text-xl">{lifetimePromo.remaining.toLocaleString("en-IN")}</span>
-                <span className="mt-0.5 block text-[7px] font-black uppercase tracking-[0.08em] text-amber-700/75 dark:text-amber-300/75 sm:text-[8px]">spots left</span>
-              </span>
-              <span className="hidden h-10 w-10 items-center justify-center rounded-xl bg-teal-500 text-white shadow-sm transition-transform group-hover:translate-x-0.5 sm:flex">
-                <ChevronRight className="h-4 w-4" />
-              </span>
-            </span>
-          </button>
-        </div>
-      </section>
-
-
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
           {sharedItinerary && (
             <ItineraryView 
@@ -1039,6 +1003,42 @@ export default function App() {
 
         </div>
       </header>
+
+      {/* Lifetime Premium promotion — placed below the header so it remains readable on every screen size. */}
+      <section className="print:hidden w-full border-b border-amber-200/60 bg-gradient-to-r from-amber-50 via-white to-orange-50 px-3 py-2.5 dark:border-amber-900/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 sm:px-6 sm:py-3">
+        <div className="mx-auto w-full max-w-5xl">
+          <button
+            type="button"
+            onClick={() => setShowPremiumModal(true)}
+            className="group relative flex min-h-14 w-full items-center justify-between gap-3 overflow-hidden rounded-2xl border border-amber-300/50 bg-white/95 px-3 py-2.5 text-left shadow-[0_8px_26px_rgba(15,23,42,0.07)] transition-all hover:-translate-y-0.5 hover:border-amber-400/80 hover:shadow-[0_12px_32px_rgba(15,23,42,0.10)] active:translate-y-0 dark:border-amber-500/25 dark:bg-slate-950/95 dark:shadow-none sm:min-h-[68px] sm:gap-4 sm:px-4 sm:py-3"
+            aria-label="View Lifetime Premium offer"
+          >
+            <span className="pointer-events-none absolute -right-10 -top-12 h-28 w-28 rounded-full bg-amber-300/15 blur-2xl sm:h-36 sm:w-36" />
+            <span className="relative flex min-w-0 items-center gap-2.5 sm:gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-orange-500 text-slate-950 shadow-[0_5px_16px_rgba(245,158,11,0.25)] sm:h-11 sm:w-11">
+                <Crown className="h-4.5 w-4.5 fill-current sm:h-5 sm:w-5" />
+              </span>
+              <span className="min-w-0">
+                <span className="flex items-center gap-1.5">
+                  <span className="truncate text-[10px] font-black uppercase tracking-[0.10em] text-slate-900 dark:text-white sm:text-xs sm:tracking-[0.13em]">Lifetime Premium</span>
+                  <span className="hidden rounded-full bg-amber-100 px-2 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-800 sm:inline dark:bg-amber-400/15 dark:text-amber-300">Limited offer</span>
+                </span>
+                <span className="mt-0.5 block truncate text-[9px] font-semibold text-slate-500 dark:text-slate-400 sm:text-[10px]">First 10,000 Lifetime Premium Spots</span>
+              </span>
+            </span>
+            <span className="relative flex shrink-0 items-center gap-2">
+              <span className="rounded-xl border border-amber-300/50 bg-amber-50/90 px-2.5 py-1.5 text-center dark:border-amber-400/20 dark:bg-amber-400/10 sm:px-3 sm:py-2">
+                <span className="block font-mono text-base font-black leading-none tracking-[0.04em] text-slate-900 dark:text-white sm:text-xl">{lifetimePromo.remaining.toLocaleString("en-IN")}</span>
+                <span className="mt-0.5 block text-[7px] font-black uppercase tracking-[0.08em] text-amber-700/75 dark:text-amber-300/75 sm:text-[8px]">spots left</span>
+              </span>
+              <span className="hidden h-10 w-10 items-center justify-center rounded-xl bg-teal-500 text-white shadow-sm transition-transform group-hover:translate-x-0.5 sm:flex">
+                <ChevronRight className="h-4 w-4" />
+              </span>
+            </span>
+          </button>
+        </div>
+      </section>
+
 
       {/* Content Body */}
       <main className="max-w-7xl min-[1920px]:max-w-[1800px] min-[2560px]:max-w-[2400px] mx-auto px-4 sm:px-6 py-8">
