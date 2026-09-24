@@ -965,7 +965,7 @@ export default function App() {
                     <span className="truncate text-[9px] font-black uppercase tracking-[0.08em] text-slate-900 dark:text-white sm:text-[10px] sm:tracking-[0.13em]">Lifetime Premium</span>
                     <span className="hidden rounded-full bg-amber-100 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider text-amber-800 sm:inline dark:bg-amber-400/15 dark:text-amber-300">Limited offer</span>
                   </span>
-                  <span className="hidden text-[10px] font-semibold text-slate-500 dark:text-slate-400 sm:block">Join the first 10,000 lifetime members</span>
+                  <span className="hidden text-[10px] font-semibold text-slate-500 dark:text-slate-400 sm:block">First 10,000 Lifetime Premium Spots</span>
                 </span>
               </span>
               <span className="relative flex shrink-0 items-center gap-1.5 sm:gap-2">
