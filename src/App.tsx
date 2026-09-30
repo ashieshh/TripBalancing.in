@@ -912,6 +912,11 @@ export default function App() {
             </Suspense>
           </div>
         </div>
+
+        <UserGuideModal
+          isOpen={showUserGuide}
+          onClose={() => setShowUserGuide(false)}
+        />
       </div>
     );
   }
