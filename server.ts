@@ -5679,7 +5679,11 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
       return res.status(503).json({ error: "Unable to load your account plan securely." });
     }
     if (!canGenerateFromEntitlement(authoritativeEntitlement)) {
-      return res.status(403).json({ error: entitlementDeniedMessage(authoritativeEntitlement) });
+      return res.status(403).json({
+        error: entitlementDeniedMessage(authoritativeEntitlement),
+        code: "TRIP_LIMIT_REACHED",
+        entitlement: authoritativeEntitlement
+      });
     }
     const plan = authoritativeEntitlement.plan;
     const freeTripsUsed = authoritativeEntitlement.freeTripsUsed;
@@ -7036,6 +7040,15 @@ Return the response in strict JSON format.`;
     });
 
     reconciledFallback.generationSource = "curated-fallback";
+
+    // A successfully returned fallback itinerary is still a generated trip plan.
+    // Count it against the same free-trip allowance so users cannot bypass the
+    // 5-plan limit whenever the primary AI provider is temporarily unavailable.
+    const fallbackConsumed = await consumeTripEntitlement(authUser.id, authUser.email);
+    if (!fallbackConsumed.ok) {
+      return res.status(fallbackConsumed.status).json({ error: fallbackConsumed.error, code: "TRIP_LIMIT_REACHED", entitlement: fallbackConsumed.entitlement });
+    }
+
     return res.json({
       itinerary: reconciledFallback,
       generation: {
@@ -7044,14 +7057,15 @@ Return the response in strict JSON format.`;
         reason: geminiFailure.body.code,
         dataQuality: fallbackDataQuality
       },
-      billableGeneration: false,
+      billableGeneration: true,
+      entitlement: fallbackConsumed.entitlement,
       notice: fallbackDataQuality==='recovered-destination-profile'
-        ? "The full AI itinerary needed recovery, so TripBalancing rebuilt it from a validated destination-specific profile. Your trip allowance was not used."
+        ? "The full AI itinerary needed recovery, so TripBalancing rebuilt it from a validated destination-specific profile. This generated trip plan used 1 free trip."
         : fallbackDataQuality==='map-backed-destination-profile'
-          ? "AI generation was temporarily unavailable, so TripBalancing used current named map records and clearly marked details that need official confirmation. Your trip allowance was not used."
+          ? "AI generation was temporarily unavailable, so TripBalancing used current named map records and clearly marked details that need official confirmation. This generated trip plan used 1 free trip."
           : fallbackDataQuality==='safe-planning-profile'
-            ? "AI and current named map recommendations were temporarily unavailable. TripBalancing still created a confirmation-based planning guide without inventing places or prices, and your trip allowance was not used."
-            : "AI generation is temporarily unavailable, so TripBalancing used a verified destination profile. Your trip allowance was not used."
+            ? "AI and current named map recommendations were temporarily unavailable. TripBalancing created a confirmation-based planning guide without inventing places or prices. This generated trip plan used 1 free trip."
+            : "AI generation is temporarily unavailable, so TripBalancing used a verified destination profile. This generated trip plan used 1 free trip."
     });
   }
 });
