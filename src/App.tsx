@@ -867,8 +867,17 @@ export default function App() {
   if (!user || isPasswordRecoveryRoute) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-center p-4 relative">
-        {/* Floating Theme Toggle */}
-        <div className="absolute top-6 right-6 z-50">
+        {/* Public help controls */}
+        <div className="absolute top-6 right-6 z-50 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowUserGuide(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-teal-500/20 bg-white/80 px-3 py-2 text-xs font-extrabold text-teal-600 shadow-sm backdrop-blur transition-colors hover:bg-teal-50 dark:border-teal-400/20 dark:bg-slate-950/80 dark:text-teal-400 dark:hover:bg-teal-950/30"
+            title="How to use TripBalancing"
+          >
+            <CircleHelp className="h-3.5 w-3.5" />
+            Guide
+          </button>
           <ThemeToggle />
         </div>
         
