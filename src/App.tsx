@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { 
   Globe, LogOut, ArrowLeft, Sparkles, Database, WifiOff, MapPin, 
-  ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users, ShieldCheck, Star, Gift
+  ChevronRight, Calendar, Landmark, Info, ExternalLink, Moon, Sun, AlertCircle, Crown, Zap, Users, ShieldCheck, Star, Gift, CircleHelp
 } from "lucide-react";
 import { TripBalancingLogo } from "./components/TripBalancingLogo";
 import { Itinerary, TripInput, TripRecord } from "./types";
@@ -15,6 +15,7 @@ import ItineraryView from "./components/ItineraryView";
 import Dashboard from "./components/Dashboard";
 import AuthModal from "./components/AuthModal";
 import PremiumUpgradeModal from "./components/PremiumUpgradeModal";
+import UserGuideModal from "./components/UserGuideModal";
 import BuddyInviteModal from "./components/BuddyInviteModal";
 import GoogleContactsModal from "./components/GoogleContactsModal";
 import LegalAndSupportModal from "./components/LegalAndSupportModal";
@@ -103,6 +104,7 @@ export default function App() {
   const [freeTripsUsed, setFreeTripsUsed] = useState<number>(0);
   const [paidTripsBalance, setPaidTripsBalance] = useState<number>(0);
   const [showPremiumModal, setShowPremiumModal] = useState<boolean>(false);
+  const [showUserGuide, setShowUserGuide] = useState<boolean>(false);
 
   // Legal & Support Modal state
   const [showLegalModal, setShowLegalModal] = useState<boolean>(false);
@@ -962,6 +964,17 @@ export default function App() {
 
           {/* Controls */}
           <div className="flex shrink-0 items-center gap-4">
+            <button
+              id="header-user-guide-btn"
+              type="button"
+              onClick={() => setShowUserGuide(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-teal-500/20 bg-teal-500/5 px-3 py-1.5 text-xs font-extrabold text-teal-600 transition-all hover:bg-teal-500/10 dark:text-teal-400"
+              title="How to use TripBalancing"
+            >
+              <CircleHelp className="h-3.5 w-3.5" />
+              <span className="hidden min-[500px]:inline">Guide</span>
+            </button>
+
             <ThemeToggle />
 
             {/* Admin Portal Header Button for Verified Admins */}
@@ -1296,7 +1309,15 @@ export default function App() {
               Refund Policy
             </button>
             <span>•</span>
-            <button 
+            <button
+              type="button"
+              onClick={() => setShowUserGuide(true)}
+              className="font-bold text-teal-600 transition-colors hover:text-teal-700 hover:underline dark:text-teal-400 dark:hover:text-teal-300"
+            >
+              How to Use TripBalancing
+            </button>
+            <span>•</span>
+            <button
               type="button"
               onClick={() => handleOpenLegalModal("contact")}
               className="hover:text-teal-600 dark:hover:text-teal-400 transition-colors cursor-pointer font-bold text-slate-600 dark:text-slate-300 hover:underline"
@@ -1308,6 +1329,11 @@ export default function App() {
       </footer>
 
       <Suspense fallback={null}>
+        <UserGuideModal
+          isOpen={showUserGuide}
+          onClose={() => setShowUserGuide(false)}
+        />
+
         <PremiumUpgradeModal 
           isOpen={showPremiumModal}
           onClose={() => setShowPremiumModal(false)}
