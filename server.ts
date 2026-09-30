@@ -425,9 +425,10 @@ async function generateContentWithRetry(
     config?: any;
   },
   maxRetries = 2,
-  delayMs = 1000
+  delayMs = 1000,
+  bypassCooldownForSingleFallbackAttempt = false
 ): Promise<any> {
-  if (Date.now() < GEMINI_COOLDOWN_UNTIL) {
+  if (!bypassCooldownForSingleFallbackAttempt && Date.now() < GEMINI_COOLDOWN_UNTIL) {
     const retryAfter = Math.max(1, Math.ceil((GEMINI_COOLDOWN_UNTIL - Date.now()) / 1000));
     throw new GeminiServiceError(
       "The AI service is temporarily cooling down after a quota or overload response.",
@@ -481,14 +482,16 @@ const ITINERARY_AI_TIMEOUT_MS = 90_000;
 
 async function generateItineraryContentWithDeadline(
   ai: GoogleGenAI,
-  options: Parameters<typeof generateContentWithRetry>[1]
+  options: Parameters<typeof generateContentWithRetry>[1],
+  timeoutMs = ITINERARY_AI_TIMEOUT_MS,
+  bypassCooldownForSingleFallbackAttempt = false
 ): Promise<any> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const controller=new AbortController();
   const boundedOptions={...options,config:{...(options.config||{}),abortSignal:controller.signal}};
   try {
     return await Promise.race([
-      generateContentWithRetry(ai, boundedOptions, 0, 2_000),
+      generateContentWithRetry(ai, boundedOptions, 0, 2_000, bypassCooldownForSingleFallbackAttempt),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           controller.abort();
@@ -497,11 +500,46 @@ async function generateItineraryContentWithDeadline(
             "overloaded",
             true
           ));
-        }, ITINERARY_AI_TIMEOUT_MS);
+        }, timeoutMs);
       })
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+// If the configured primary Gemini model is temporarily overloaded, make one
+// bounded attempt with a lighter, independently configurable model. This fallback
+// bypasses the just-set in-process cooldown only for this single request; all new
+// incoming requests still respect the cooldown and cannot create a retry storm.
+async function generateItineraryWithModelFallback(
+  ai: GoogleGenAI,
+  options: Parameters<typeof generateContentWithRetry>[1]
+): Promise<any> {
+  try {
+    return await generateItineraryContentWithDeadline(ai, options);
+  } catch (primaryError: any) {
+    const primaryFailure = classifyGeminiError(primaryError);
+    if (primaryFailure.kind !== "overloaded" && primaryFailure.kind !== "quota") {
+      throw primaryFailure;
+    }
+
+    const configuredFallback = String(process.env.GEMINI_ITINERARY_FALLBACK_MODEL || "gemini-2.5-flash-lite").trim();
+    const alternateFallback = "gemini-2.5-flash";
+    const fallbackModel = configuredFallback && configuredFallback !== options.model
+      ? configuredFallback
+      : alternateFallback;
+
+    console.warn(
+      `[Gemini itinerary fallback] Primary model "${options.model}" failed (${primaryFailure.kind}); trying one bounded request with "${fallbackModel}".`
+    );
+
+    return await generateItineraryContentWithDeadline(
+      ai,
+      { ...options, model: fallbackModel },
+      45_000,
+      true
+    );
   }
 }
 
@@ -5917,7 +5955,7 @@ Return the response in strict JSON format.`;
 
     // Keep enough time for the verified local fallback to finish before Render's
     // request deadline. A slow AI response must never become a host-level 502/504.
-    const response = await generateItineraryContentWithDeadline(ai, {
+    const response = await generateItineraryWithModelFallback(ai, {
       model: process.env.GEMINI_ITINERARY_MODEL || process.env.GEMINI_MODEL || "gemini-3.6-flash",
       contents: prompt,
       config: {
