@@ -31,7 +31,7 @@ const serverSource=fs.readFileSync(new URL('../server.ts',import.meta.url),'utf8
 assert.match(serverSource,/DESTINATION_OPEN_DATA_SUCCESS/,'unfamiliar destinations need a provider-independent named-place recovery path');
 assert.match(serverSource,/DESTINATION_SAFE_FALLBACK/,'valid destinations need an availability-guaranteeing final fallback');
 assert.doesNotMatch(serverSource,/GLOBAL_FALLBACK_REJECTED|DESTINATION_CONTENT_UNAVAILABLE/,'an unfamiliar valid destination must not be rejected only because Gemini is unavailable');
-assert.match(serverSource,/your trip allowance was not used/,'degraded generation must protect the customer trip allowance');
+assert.match(serverSource,/const fallbackConsumed = await consumeTripEntitlement\(authUser\.id, authUser\.email\)/,'degraded generation must consume the customer trip allowance');
 assert.match(serverSource,/recoverDestinationSpecificDetails/,'failed full itineraries must attempt a compact destination-specific recovery before rejection');
 assert.match(serverSource,/DESTINATION_RECOVERY_SUCCESS/,'validated destination recovery must be observable in production logs');
 assert.match(serverSource,/generateContentWithRetry\(ai, boundedOptions, 0, 2_000\)/,'the main itinerary request must fail over immediately after a provider error');
