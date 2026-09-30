@@ -590,6 +590,19 @@ export default function App() {
 
       const data = await response.json();
       if (!response.ok) {
+        if (response.status === 403 && data?.code === "TRIP_LIMIT_REACHED") {
+          const deniedEntitlement = data?.entitlement;
+          if (deniedEntitlement) {
+            setPlan(deniedEntitlement.plan || "free");
+            setFreeTripsUsed(Number(deniedEntitlement.freeTripsUsed ?? 5));
+            setPaidTripsBalance(Number(deniedEntitlement.paidTripsBalance || 0));
+          } else {
+            setFreeTripsUsed(5);
+          }
+          setApiError(null);
+          setShowPremiumModal(true);
+          return;
+        }
         throw new Error(data?.error || "Failed to generate your itinerary. Please try again.");
       }
       if (data.itinerary) {
