@@ -7,7 +7,6 @@ import {
   CircleHelp,
   DollarSign,
   Download,
-  Hotel,
   MapPin,
   Plane,
   Save,
