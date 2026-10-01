@@ -164,7 +164,7 @@ export default function LegalAndSupportModal({
                 <div className="text-xs space-y-1">
                   <p className="font-bold text-slate-800 dark:text-slate-100">Your Privacy Matters</p>
                   <p className="text-slate-600 dark:text-slate-400">
-                    Last updated: July 2026. TripBalancing is committed to safeguarding your personal information and trip preferences with bank-level encryption.
+                    Last updated: October 1, 2026. TripBalancing is committed to safeguarding your personal information using appropriate technical and organizational security measures.
                   </p>
                 </div>
               </div>
@@ -202,16 +202,34 @@ export default function LegalAndSupportModal({
                 <ul className="list-disc list-inside text-xs text-slate-600 dark:text-slate-400 space-y-1 pl-2">
                   <li><strong>Google GenAI API:</strong> For itinerary AI generation.</li>
                   <li><strong>Razorpay Payments:</strong> For secure checkout processing and transaction verification.</li>
-                  <li><strong>Supabase Cloud & Firebase:</strong> For encrypted user profile and trip data storage.</li>
+                  <li><strong>Supabase:</strong> For authentication and storage of account and trip-related data.</li>
                 </ul>
               </section>
 
               <section className="space-y-2">
                 <h3 className="text-base font-black text-slate-900 dark:text-slate-100">
-                  4. Security & Your Rights
+                  5. Data Retention & Account Deletion
                 </h3>
                 <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  All network traffic is encrypted using SSL/TLS protocols. You retain full ownership of your data and can request complete account deletion or data export anytime by submitting a request through the <strong>Contact Us</strong> tab in this window.
+                  We retain account and trip information for as long as reasonably necessary to provide the service, meet legal or accounting obligations, resolve disputes, and prevent fraud or abuse. When you request account deletion, we will process the request subject to information we are required or permitted to retain by law or for legitimate security purposes.
+                </p>
+              </section>
+
+              <section className="space-y-2">
+                <h3 className="text-base font-black text-slate-900 dark:text-slate-100">
+                  6. Cookies & Technical Data
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  The website may use essential cookies, local storage, session data, and similar technologies to keep you signed in, remember preferences, maintain security, and operate the service. Where non-essential analytics or similar technologies are used, they are subject to applicable requirements.
+                </p>
+              </section>
+
+              <section className="space-y-2">
+                <h3 className="text-base font-black text-slate-900 dark:text-slate-100">
+                  7. Security & Your Rights
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Data is protected with appropriate security controls, including encryption in transit where supported by the service infrastructure. You retain rights over the personal information you provide, subject to applicable law and the operation of the service. You may request account deletion or ask what personal data we hold by submitting a request through the <strong>Contact Us</strong> tab in this window.
                 </p>
               </section>
             </div>
@@ -225,7 +243,7 @@ export default function LegalAndSupportModal({
                 <div className="text-xs space-y-1">
                   <p className="font-bold text-slate-800 dark:text-slate-100">Terms of Service</p>
                   <p className="text-slate-600 dark:text-slate-400">
-                    By accessing or using TripBalancing, you agree to comply with these Terms & Conditions. Effective Date: July 2026.
+                    By accessing or using TripBalancing, you agree to these Terms & Conditions. Effective Date: October 1, 2026.
                   </p>
                 </div>
               </div>
@@ -235,7 +253,7 @@ export default function LegalAndSupportModal({
                   1. Use of AI Travel Recommendations
                 </h3>
                 <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  TripBalancing generates travel itineraries, weather insights, and budget estimations using advanced AI algorithms. While we strive for extreme accuracy, travel details (such as venue opening hours, ticket pricing, and seasonal closure) may change dynamically. Users are advised to independently confirm critical reservations before travel.
+                  TripBalancing generates travel itineraries, travel suggestions, weather insights, and budget estimates using AI and third-party data sources. AI-generated information can contain errors or become outdated. Travel details such as opening hours, availability, ticket prices, schedules, weather, and local conditions may change. Users should independently verify important information and reservations before relying on it.
                 </p>
               </section>
 
@@ -244,7 +262,7 @@ export default function LegalAndSupportModal({
                   2. User Accounts & Buddy Invitations
                 </h3>
                 <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  You are responsible for maintaining the confidentiality of your account sign-in session. Companion buddy invitations allow shared view or edit access as designated by the trip owner.
+                  You are responsible for maintaining the security of your account and for activity performed through your account. Companion invitations may provide the access described by the trip owner. Do not share access with people you do not trust.
                 </p>
               </section>
 
@@ -259,10 +277,37 @@ export default function LegalAndSupportModal({
 
               <section className="space-y-2">
                 <h3 className="text-base font-black text-slate-900 dark:text-slate-100">
-                  4. Limitation of Liability
+                  4. Third-Party Services & Booking Links
                 </h3>
                 <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  TripBalancing shall not be liable for indirect, incidental, or consequential damages arising from reliance on generated itineraries, third-party transit delays, or external booking vendors.
+                  TripBalancing may display links, offers, prices, or booking options from third-party providers. Those providers have their own terms, cancellation rules, prices, and privacy practices. A link or offer shown in TripBalancing does not mean that TripBalancing controls or guarantees the third-party service.
+                </p>
+              </section>
+
+              <section className="space-y-2">
+                <h3 className="text-base font-black text-slate-900 dark:text-slate-100">
+                  5. Changes, Suspension & Termination
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  We may update, suspend, or discontinue features when reasonably necessary for maintenance, security, legal compliance, or service changes. We may suspend or terminate accounts involved in fraud, abuse, unlawful activity, or material violations of these Terms, subject to applicable law.
+                </p>
+              </section>
+
+              <section className="space-y-2">
+                <h3 className="text-base font-black text-slate-900 dark:text-slate-100">
+                  6. Intellectual Property
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  TripBalancing and its software, branding, design, and original content are protected by applicable intellectual-property laws. You may use the service for personal or permitted purposes, but may not copy, resell, reverse engineer, or misuse the service except where applicable law permits.
+                </p>
+              </section>
+
+              <section className="space-y-2">
+                <h3 className="text-base font-black text-slate-900 dark:text-slate-100">
+                  7. Limitation of Liability
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  TripBalancing provides planning and information services and does not control third-party airlines, hotels, transport operators, attractions, payment providers, or other external services. To the extent permitted by applicable law, TripBalancing is not responsible for losses caused by inaccurate or changed third-party information, cancellations, delays, availability changes, or actions of external providers. Nothing in these Terms limits rights or remedies that cannot lawfully be excluded.
                 </p>
               </section>
             </div>
@@ -276,7 +321,7 @@ export default function LegalAndSupportModal({
                 <div className="text-xs space-y-1">
                   <p className="font-bold text-slate-800 dark:text-slate-100">7-Day Money-Back Guarantee</p>
                   <p className="text-slate-600 dark:text-slate-400">
-                    <strong>Effective Date:</strong> July 29, 2026. At TripBalancing, we want every customer to purchase with confidence. If you are not satisfied with your purchase, you may request a refund according to the policy below.
+                    <strong>Effective Date:</strong> October 1, 2026. At TripBalancing, we want every customer to purchase with confidence. If you are not satisfied with your purchase, you may request a refund according to the policy below.
                   </p>
                 </div>
               </div>
