@@ -24,7 +24,198 @@ interface UserGuideModalProps {
 type GuideStep = {
   title: string;
   description: string;
-  bullets: string[];
+  useFor: string;
+  whatToDo: string[];
+  nextAction: string;
+  icon: typeof MapPin;
+};
+
+const GUIDE_STEPS: GuideStep[] = [
+  {
+    title: "Start Your Trip",
+    description: "This is where you tell TripBalancing the basic details of the trip you want to plan.",
+    useFor: "Use this step to tell the planner where you are traveling from, where you are going, and when you are traveling.",
+    whatToDo: [
+      "Enter your starting city in the Starting City field.",
+      "Enter your destination and select the correct location from the suggestions.",
+      "Choose your trip dates or trip duration.",
+      "Select the number and type of travelers when requested.",
+    ],
+    nextAction: "After checking these details, click Next or continue to the next section of the trip form.",
+    icon: MapPin,
+  },
+  {
+    title: "Choose Your Trip Preferences",
+    description: "These options help TripBalancing understand what kind of trip you want.",
+    useFor: "Use this section to personalize the itinerary instead of receiving a generic trip plan.",
+    whatToDo: [
+      "Choose your Trip Purpose, such as Vacation, Honeymoon, Food Tour, Adventure, or Pilgrimage.",
+      "Choose your preferred weather if you have a preference.",
+      "Choose the Visited-place Rule: New places only, New + visited places, or Revisit favourites.",
+      "Select the interests and activities you enjoy.",
+    ],
+    nextAction: "Review your selections, then continue to the next section.",
+    icon: Sparkles,
+  },
+  {
+    title: "Set Your Budget",
+    description: "Your budget tells TripBalancing how much you want the planned trip to cost.",
+    useFor: "Use the budget to help the itinerary stay aligned with your spending target and to understand estimated trip costs.",
+    whatToDo: [
+      "Enter the amount you are comfortable spending.",
+      "Check the selected currency.",
+      "If the app shows a recommended budget, review it before continuing.",
+      "Use a realistic budget because travel prices can change.",
+    ],
+    nextAction: "When your budget looks correct, continue to generate your trip.",
+    icon: DollarSign,
+  },
+  {
+    title: "Generate Your Trip Plan",
+    description: "This is the main action that creates your personalized itinerary.",
+    useFor: "Use Generate Trip Plan after completing the trip details, preferences, and budget.",
+    whatToDo: [
+      "Review your form once more before generating.",
+      "Click Generate Trip Plan.",
+      "Wait while TripBalancing prepares your itinerary.",
+      "If a location cannot be verified, follow the app's location prompt rather than guessing a different city.",
+    ],
+    nextAction: "When the itinerary appears, click Next in this guide to learn how to review it.",
+    icon: Sparkles,
+  },
+  {
+    title: "Review Your Itinerary",
+    description: "The itinerary shows what TripBalancing planned for each day of your trip.",
+    useFor: "Use this section to check whether the suggested places, activities, timing, accommodation, and travel flow work for you.",
+    whatToDo: [
+      "Read each day from start to finish.",
+      "Check the activities and places suggested for that day.",
+      "Review travel timing and accommodation information.",
+      "Look at the estimated expenses before making bookings.",
+    ],
+    nextAction: "If the plan works for you, continue to the budget and trip tools below.",
+    icon: CalendarDays,
+  },
+  {
+    title: "Check Your Trip Budget",
+    description: "The budget information helps you understand the estimated cost of the itinerary.",
+    useFor: "Use it to compare your planned budget with the estimated cost and see where the money is expected to go.",
+    whatToDo: [
+      "Compare your total budget with the estimated trip cost.",
+      "Review the available expense categories and daily estimates.",
+      "Look for areas you may want to adjust before booking.",
+      "Remember that live prices, availability, taxes, and exchange rates can change.",
+    ],
+    nextAction: "Once you understand the estimated cost, continue to the travel and hotel options.",
+    icon: DollarSign,
+  },
+  {
+    title: "Explore Flights, Hotels & Activities",
+    description: "TripBalancing can provide travel and booking research options around your itinerary.",
+    useFor: "Use these options to research flights, transport, accommodation, and activities before you book.",
+    whatToDo: [
+      "Open the available flight or transport options.",
+      "Review hotel and accommodation options for your destination.",
+      "Check activity or booking links provided by the app.",
+      "Compare the option with your itinerary and budget before booking.",
+    ],
+    nextAction: "After researching your options, return to your itinerary and continue with Save Trip.",
+    icon: Plane,
+  },
+  {
+    title: "Save Your Trip",
+    description: "Save Trip keeps your itinerary available in your TripBalancing account.",
+    useFor: "Use Save Trip when you want to return to the same itinerary later instead of generating it again.",
+    whatToDo: [
+      "Open the generated itinerary.",
+      "Click Save Trip.",
+      "Wait for the save confirmation.",
+      "Open your saved trips later from your trip dashboard.",
+    ],
+    nextAction: "After saving, continue to the PDF and sharing tools.",
+    icon: Save,
+  },
+  {
+    title: "Download Your Trip PDF",
+    description: "The PDF turns your itinerary into a travel document that you can keep or share.",
+    useFor: "Use the PDF export when you want an offline copy of your trip plan.",
+    whatToDo: [
+      "Open the itinerary you want to export.",
+      "Click the PDF or Export PDF option when available.",
+      "Wait for the document to be created.",
+      "Save it to your device or share it with your travel companions.",
+    ],
+    nextAction: "After downloading the PDF, continue to Split Trip Cost if you are traveling with others.",
+    icon: Download,
+  },
+  {
+    title: "Split Trip Cost",
+    description: "Split Trip Cost helps groups track who paid for shared trip expenses.",
+    useFor: "Use it when friends or family share expenses and you want to see how the costs are divided.",
+    whatToDo: [
+      "Open Split Trip Costs in your itinerary.",
+      "Add the people sharing the trip expense.",
+      "Record the relevant expenses and who paid them.",
+      "Review the balances shown by the app.",
+    ],
+    nextAction: "When the expenses are recorded, continue to sharing and travel companion tools.",
+    icon: Split,
+  },
+  {
+    title: "Share With Your Travel Companions",
+    description: "Sharing tools help you keep the people traveling with you informed.",
+    useFor: "Use sharing and travel companion features when more than one person is involved in the trip.",
+    whatToDo: [
+      "Use the available invite or share option.",
+      "Add the travel companions you want to involve.",
+      "Share the itinerary or invitation.",
+      "Recipients can use the access provided by the app to view the shared trip.",
+    ],
+    nextAction: "After sharing, continue to the final step to understand your trip allowance.",
+    icon: Share2,
+  },
+  {
+    title: "Understand Your Free & Premium Plans",
+    description: "TripBalancing keeps track of your trip-plan allowance so you know when Premium is needed.",
+    useFor: "Use the plan information to see how many trip plans remain on your account and what Premium options are available.",
+    whatToDo: [
+      "Free users start with 5 trip plans.",
+      "Your available count changes as trips are successfully generated.",
+      "When the free allowance is used, the app shows the Premium upgrade options.",
+      "Review the Premium screen for the current Monthly, Yearly, and Lifetime options.",
+    ],
+    nextAction: "You now know the complete TripBalancing workflow. Click Start Planning to begin your trip.",
+    icon: CircleHelp,
+  },
+];port { useEffect, useState } from "react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CalendarDays,
+  Check,
+  CircleHelp,
+  DollarSign,
+  Download,
+  MapPin,
+  Plane,
+  Save,
+  Share2,
+  Sparkles,
+  Split,
+  X,
+} from "lucide-react";
+
+interface UserGuideModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+type GuideStep = {
+  title: string;
+  description: string;
+  useFor: string;
+  whatToDo: string[];
+  nextAction: string;
   icon: typeof MapPin;
 };
 
@@ -254,8 +445,21 @@ export default function UserGuideModal({ isOpen, onClose }: UserGuideModalProps)
                 {current.description}
               </p>
 
-              <div className="mt-6 space-y-3">
-                {current.bullets.map((bullet) => (
+              <div className="mt-5 rounded-2xl border border-teal-100 bg-teal-50/70 px-4 py-4 dark:border-teal-900/50 dark:bg-teal-950/20">
+                <div className="text-[10px] font-black uppercase tracking-wider text-teal-700 dark:text-teal-400">
+                  What is this for?
+                </div>
+                <p className="mt-1.5 text-xs font-semibold leading-5 text-slate-700 dark:text-slate-300">
+                  {current.useFor}
+                </p>
+              </div>
+
+              <div className="mt-5">
+                <div className="mb-2 text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  What to do
+                </div>
+                <div className="space-y-3">
+                  {current.whatToDo.map((bullet) => (
                   <div
                     key={bullet}
                     className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/60"
@@ -266,6 +470,16 @@ export default function UserGuideModal({ isOpen, onClose }: UserGuideModalProps)
                     <span className="text-xs font-semibold leading-5 text-slate-600 dark:text-slate-300">{bullet}</span>
                   </div>
                 ))}
+                </div>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-900/60">
+                <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Then what?
+                </div>
+                <p className="mt-1.5 text-xs font-bold leading-5 text-slate-700 dark:text-slate-300">
+                  {current.nextAction}
+                </p>
               </div>
 
               {step === GUIDE_STEPS.length - 1 && (
