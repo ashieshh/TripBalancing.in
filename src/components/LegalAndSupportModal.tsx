@@ -480,17 +480,17 @@ export default function LegalAndSupportModal({
                       <h4 className="font-black text-sm">Customer Support</h4>
                     </div>
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      Need help with your itinerary, payment query, or refund request? Our team is available 24/7.
+                      Need help with your itinerary, payment query, or refund request? Contact our support team using the form below.
                     </p>
 
                     <div className="space-y-2 pt-2 border-t border-slate-800 text-xs text-slate-300">
                       <div className="flex items-center gap-2">
                         <Clock className="w-4 h-4 text-teal-400" />
-                        <span>Response Time: &lt; 24 Hours</span>
+                        <span>Support: Contact Us form &amp; email</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Building className="w-4 h-4 text-teal-400" />
-                        <span>Location: Bengaluru, India / Global</span>
+                        <span>Service: Online / Global</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Heart className="w-4 h-4 text-rose-400" />
@@ -655,7 +655,7 @@ export default function LegalAndSupportModal({
         <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-850 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400 flex-shrink-0">
           <div className="flex items-center gap-2 text-[11px]">
             <ShieldCheck className="w-4 h-4 text-teal-500" />
-            <span>TripBalancing Trust & Safety • 256-bit SSL Encrypted</span>
+            <span>TripBalancing Trust & Safety • Secure encrypted connection</span>
           </div>
           <div className="flex items-center gap-3">
             <button 
