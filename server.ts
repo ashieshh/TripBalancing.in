@@ -5657,6 +5657,7 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
   let geoCoords: { latitude: number; longitude: number } | null = null;
   let originCoords: { latitude: number; longitude: number } | null = null;
   let diffDays = 3;
+  const authUser = (req as any).authenticatedUser as { id: string; email: string };
   try {
     // Currency selection must only convert the same economic trip cost.
     // IMPORTANT: itinerary generation must NEVER make a live FX network request.
@@ -5670,7 +5671,6 @@ app.post("/api/generate-itinerary", verifyUserAuth, async (req, res) => {
       return res.status(400).json({ error: "Missing required trip fields." });
     }
 
-    const authUser = (req as any).authenticatedUser as { id: string; email: string };
     if (!supabaseAdmin) {
       return res.status(503).json({ error: "Secure account entitlement service is not configured." });
     }
