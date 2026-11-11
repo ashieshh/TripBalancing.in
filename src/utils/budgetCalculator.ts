@@ -881,7 +881,33 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
     for(let index=0;activityRemainder>0;index=(index+1)%finalActivityByDay.length,activityRemainder--)finalActivityByDay[index]++;
     itinerary.days.forEach((day:any,index:number)=>{
       const breakdown=day?.dailyCostBreakdown||{};
-      breakdown.activities=fmtMoney(finalActivityByDay[index]||0);
+      const dayActivityAllowance=Math.max(0,Math.round(finalActivityByDay[index]||0));
+      breakdown.activities=fmtMoney(dayActivityAllowance);
+
+      // Numeric activity prices must reconcile to the visible daily activity
+      // allowance. Previously a landmark could retain a $50 badge while the
+      // same day's Activities category displayed $0. Reallocate the day's
+      // allowance across its priced non-meal/non-transfer activities.
+      const pricedActivities=(Array.isArray(day?.activities)?day.activities:[]).filter((activity:any)=>{
+        const label=`${activity?.title||''} ${activity?.description||''}`;
+        return !/breakfast|brunch|lunch|dinner|dining|regional meal|restaurant|cafe tasting|transfer|chauffeur|drive|travel to|pickup|drop[- ]?off/i.test(label)
+          && firstMoneyNumber(activity?.cost)>0;
+      });
+      if(pricedActivities.length){
+        const weights=pricedActivities.map((activity:any)=>Math.max(0.01,firstMoneyNumber(activity.cost)));
+        const weightTotal=weights.reduce((sum:number,value:number)=>sum+value,0)||pricedActivities.length;
+        const rawShares=weights.map((weight:number)=>dayActivityAllowance*weight/weightTotal);
+        const shares=rawShares.map((value:number)=>Math.floor(value));
+        let remainder=dayActivityAllowance-shares.reduce((sum:number,value:number)=>sum+value,0);
+        const order=rawShares.map((value:number,shareIndex:number)=>({shareIndex,fraction:value-Math.floor(value)}))
+          .sort((a:any,b:any)=>b.fraction-a.fraction||a.shareIndex-b.shareIndex);
+        for(let shareIndex=0;shareIndex<remainder;shareIndex++)shares[order[shareIndex%order.length].shareIndex]++;
+        pricedActivities.forEach((activity:any,activityIndex:number)=>{
+          const share=shares[activityIndex]||0;
+          activity.cost=share>0?fmtMoney(share):"Not separately budgeted";
+        });
+      }
+      day.activitySubtotal=fmtMoney(dayActivityAllowance);
       const total=['accommodation','food','localTransport','activities','miscellaneous'].reduce((sum,keyName)=>sum+firstMoneyNumber(breakdown[keyName]),0);
       day.dailyCostBreakdown=breakdown;
       day.dailyBudget=fmtMoney(total);
