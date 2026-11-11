@@ -34,7 +34,8 @@ assert.doesNotMatch(serverSource,/GLOBAL_FALLBACK_REJECTED|DESTINATION_CONTENT_U
 assert.match(serverSource,/const fallbackConsumed = await consumeTripEntitlement\(authUser\.id, authUser\.email\)/,'degraded generation must consume the customer trip allowance');
 assert.match(serverSource,/recoverDestinationSpecificDetails/,'failed full itineraries must attempt a compact destination-specific recovery before rejection');
 assert.match(serverSource,/DESTINATION_RECOVERY_SUCCESS/,'validated destination recovery must be observable in production logs');
-assert.match(serverSource,/generateContentWithRetry\(ai, boundedOptions, 0, 2_000\)/,'the main itinerary request must fail over immediately after a provider error');
+assert.match(serverSource,/generateItineraryWithModelFallback\(ai, boundedOptions\)/,'the main itinerary request must use the bounded primary-and-fallback model strategy');
+assert.match(serverSource,/GEMINI_ITINERARY_FALLBACK_MODEL/,'the itinerary fallback model must remain configurable');
 assert.match(serverSource,/GEMINI_RECOVERY_MODEL\|\|'gemini-3\.5-flash-lite'/,'recovery must default to the independent lower-latency model');
 assert.match(serverSource,/GEMINI_RECOVERY_FALLBACK_MODEL\|\|'gemini-3\.6-flash'/,'recovery must have a second supported model when its primary model is unavailable');
 assert.match(serverSource,/for\(const model of models\)/,'destination recovery must attempt its bounded model chain globally');
