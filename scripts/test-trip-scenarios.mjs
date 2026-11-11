@@ -464,7 +464,7 @@ assert.match(pdf,/checkPageEnd\(138\)/,'PDF must reserve the complete seven-card
 assert.match(pdf,/Confirm airport/,'PDF must label unresolved airport routes instead of printing a fake distance');
 assert.match(pdf,/Est\. entry:/,'PDF must label attraction amounts as estimates');
 assert.doesNotMatch(pdf,/Five-star premium|Ultra Luxury/,'PDF must not claim an unverified hotel star class');
-assert.match(pdf,/GUEST SCORE[\\s\\S]*PROPERTY CLASS[\\s\\S]*RATING: CHECK LIVE/,'PDF must distinguish live guest scores, property class and unverified ratings');
+assert.ok(pdf.indexOf("GUEST SCORE")>=0&&pdf.indexOf("PROPERTY CLASS")>pdf.indexOf("GUEST SCORE")&&pdf.indexOf("RATING: CHECK LIVE")>pdf.indexOf("PROPERTY CLASS"),"PDF must distinguish live guest scores, property class and unverified ratings");
 assert.ok(pdf.includes("companionUrl"),"PDF export must accept the active trip companion URL");
 assert.ok(pdf.includes("const companionQr = await loadImgUrlBase64"),"companion QR must be generated independently from daily routes");
 assert.ok(!pdf.includes("qrCodes[1]"),"companion QR must never reuse Day 1 navigation");
