@@ -1930,7 +1930,7 @@ export const exportPremiumTravelPDF = async (
     const stops = (Array.isArray(day.activities) ? day.activities : [])
       .map((activity) => String(activity.location || activity.title || "").replace(/\\s+/g, " ").trim())
       .filter((stop) => stop && !/^(free time|leisure time|hotel rest|return to hotel)$/i.test(stop))
-      .map((stop) => /\\b(?:rome|italy)\\b/i.test(stop) ? stop : `${stop}, ${destinationContext}`);
+      .map((stop) => stop.toLowerCase().includes(destinationContext.toLowerCase()) ? stop : `${stop}, ${destinationContext}`);
     const uniqueStops = stops.filter((stop, index) => stops.indexOf(stop) === index);
     if (!uniqueStops.length) return null;
     const params = new URLSearchParams({ api: "1", destination: uniqueStops[uniqueStops.length - 1] });
