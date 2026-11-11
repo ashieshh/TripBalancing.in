@@ -3140,12 +3140,12 @@ export const exportPremiumTravelPDF = async (
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.setTextColor(20, 184, 166);
-  doc.text("OPEN YOUR LIVE AI TRAVEL COMPANION", marginX + 90, y + 15, { align: "center" });
+  doc.text("OPEN YOUR SHARED TRIP ITINERARY", marginX + 90, y + 15, { align: "center" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(148, 163, 184);
-  doc.text("Scan to access your live TripBalancing travel companion.", marginX + 90, y + 21, { align: "center" });
+  doc.text("Scan to view this trip’s read-only TripBalancing itinerary.", marginX + 90, y + 21, { align: "center" });
 
   // QR Code (Enlarged to 64)
   const qrSize = 64;
@@ -3187,15 +3187,15 @@ export const exportPremiumTravelPDF = async (
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(255, 255, 255);
-  doc.text("INCLUDED SMART FEATURES", marginX + 90, y + 106, { align: "center" });
+  doc.text("AVAILABLE IN SHARED VIEW", marginX + 90, y + 106, { align: "center" });
 
   const features = [
-    { title: "LIVE MAPS", desc: "Interactive path navigation and geolocated pins.", type: "maps" },
-    { title: "OFFLINE ACCESS", desc: "No internet required to browse your full itinerary.", type: "offline" },
-    { title: "SPLIT EXPENSES", desc: "Share bill ledger tallies instantly with travel buddies.", type: "expenses" },
-    { title: "WEATHER FORECAST", desc: "Live dynamic meteorological forecasts per city stop.", type: "weather" },
-    { title: "CURRENCY CONVERTER", desc: "Automated standard currency exchange conversion tables.", type: "currency" },
-    { title: "PACKING CHECKLIST", desc: "Active checklist parameters synchronizing with buddies.", type: "packing" }
+    { title: "DAILY ROUTE LINKS", desc: "Open the day’s Google Maps directions on your device.", type: "maps" },
+    { title: "DAY-BY-DAY PLAN", desc: "Review scheduled activities and trip details.", type: "offline" },
+    { title: "TRIP BUDGET", desc: "View estimated category and daily costs.", type: "expenses" },
+    { title: "ATTRACTIONS", desc: "Review destination places and visit notes.", type: "weather" },
+    { title: "TRAVEL TIPS", desc: "Read trip preparation and local guidance.", type: "currency" },
+    { title: "PHONE ACCESS", desc: "Open the shared itinerary from a mobile browser.", type: "packing" }
   ];
 
   features.forEach((feat, idx) => {
