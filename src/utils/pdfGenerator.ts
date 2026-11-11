@@ -1038,7 +1038,8 @@ const optimizeItineraryForPDF = (rawItinerary: Itinerary, currencySym: string): 
 export const exportPremiumTravelPDF = async (
   rawItinerary: Itinerary,
   packingChecks: Record<string, boolean>,
-  headerWeather: any[]
+  headerWeather: any[],
+  companionUrl: string = "https://tripbalancing.in"
 ) => {
   const currencySym = (() => {
     // Planned budget is the authoritative display currency. Fall back to budgetAmount
@@ -1918,20 +1919,36 @@ export const exportPremiumTravelPDF = async (
     }
   }
 
-  // Pre-load Directions QR Codes
+  // Pre-load real, destination-specific navigation QR codes. The companion
+  // QR is generated separately and must never reuse a day's navigation code.
   const qrCodes: Record<number, string | null> = {};
+  const qrUrls: Record<number, string | null> = {};
+  const buildQrImageUrl = (targetUrl: string) =>
+    `https://api.qrserver.com/v1/create-qr-code/?size=240x240&ecc=H&margin=2&data=${encodeURIComponent(targetUrl)}`;
+  const buildDailyDirectionsUrl = (day: Itinerary["days"][number]): string | null => {
+    const destinationContext = String(itinerary.destination || "").trim();
+    const stops = (Array.isArray(day.activities) ? day.activities : [])
+      .map((activity) => String(activity.location || activity.title || "").replace(/\\s+/g, " ").trim())
+      .filter((stop) => stop && !/^(free time|leisure time|hotel rest|return to hotel)$/i.test(stop))
+      .map((stop) => /\\b(?:rome|italy)\\b/i.test(stop) ? stop : `${stop}, ${destinationContext}`);
+    const uniqueStops = stops.filter((stop, index) => stops.indexOf(stop) === index);
+    if (!uniqueStops.length) return null;
+    const params = new URLSearchParams({ api: "1", destination: uniqueStops[uniqueStops.length - 1] });
+    if (uniqueStops.length > 1) params.set("origin", uniqueStops[0]);
+    if (uniqueStops.length > 2) params.set("waypoints", uniqueStops.slice(1, -1).slice(0, 8).join("|"));
+    return `https://www.google.com/maps/dir/?${params.toString()}`;
+  };
   if (itinerary.days && itinerary.days.length > 0) {
-    await Promise.all(
-      itinerary.days.map(async (day) => {
-        const lastAct = day.activities[day.activities.length - 1];
-        const destParam = lastAct ? lastAct.location || lastAct.title : itinerary.destination;
-        const dirUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destParam)}`;
-        const apiQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(dirUrl)}`;
-        const base64 = await loadImgUrlBase64(apiQrUrl);
-        qrCodes[day.dayNumber] = base64;
-      })
-    );
+    await Promise.all(itinerary.days.map(async (day) => {
+      const dirUrl = buildDailyDirectionsUrl(day);
+      qrUrls[day.dayNumber] = dirUrl;
+      qrCodes[day.dayNumber] = dirUrl ? await loadImgUrlBase64(buildQrImageUrl(dirUrl)) : null;
+    }));
   }
+  const safeCompanionUrl = /^https?:\\/\\//i.test(String(companionUrl || ""))
+    ? String(companionUrl)
+    : "https://tripbalancing.in";
+  const companionQr = await loadImgUrlBase64(buildQrImageUrl(safeCompanionUrl));
 
   // ==========================================
   // PAGE 4+: CHRONOLOGICAL ITINERARY (Vertical Timeline)
@@ -2243,16 +2260,27 @@ export const exportPremiumTravelPDF = async (
       doc.text("MOBILE NAVIGATION", marginX + 4, panelY + 5.5);
 
       const qrB64 = qrCodes[day.dayNumber];
+      const dailyQrX = marginX + 87/2 - 10;
+      const dailyQrY = panelY + 8;
       if (qrB64) {
         try {
           doc.setFillColor(255, 255, 255);
-          doc.roundedRect(marginX + 87/2 - 11, panelY + 7, 22, 22, 1, 1, "F");
-          doc.addImage(qrB64, "PNG", marginX + 87/2 - 10, panelY + 8, 20, 20);
+          doc.roundedRect(dailyQrX - 1, dailyQrY - 1, 22, 22, 1, 1, "F");
+          doc.addImage(qrB64, "PNG", dailyQrX, dailyQrY, 20, 20);
         } catch (e) {
-          drawFallbackQRCode(doc, marginX + 87/2 - 10, panelY + 7, 20);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(5.5);
+          doc.setTextColor(180, 83, 9);
+          doc.text("QR unavailable", marginX + 87/2, panelY + 19, { align: "center" });
         }
       } else {
-        drawFallbackQRCode(doc, marginX + 87/2 - 10, panelY + 7, 20);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(5.5);
+        doc.setTextColor(180, 83, 9);
+        doc.text(qrUrls[day.dayNumber] ? "QR unavailable" : "Route details unavailable", marginX + 87/2, panelY + 19, { align: "center" });
+      }
+      if (qrUrls[day.dayNumber]) {
+        doc.link(dailyQrX - 1, dailyQrY - 1, 22, 22, { url: qrUrls[day.dayNumber] });
       }
 
       // Draw ROUTE TIMELINE Card on the Right (width 87)
@@ -3111,23 +3139,30 @@ export const exportPremiumTravelPDF = async (
   doc.setFillColor(255, 255, 255);
   doc.roundedRect(qrx - 3, qry - 3, qrSize + 6, qrSize + 6, 2.5, 2.5, "F");
 
-  const finalCompQr = qrCodes[1] || null;
-  if (finalCompQr) {
+  if (companionQr) {
     try {
-      doc.addImage(finalCompQr, "PNG", qrx, qry, qrSize, qrSize);
+      doc.addImage(companionQr, "PNG", qrx, qry, qrSize, qrSize);
+      doc.link(qrx, qry, qrSize, qrSize, { url: safeCompanionUrl });
     } catch (e) {
-      drawFallbackQRCode(doc, qrx, qry, qrSize);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(180, 83, 9);
+      doc.text("QR unavailable", marginX + 90, qry + qrSize / 2, { align: "center" });
     }
   } else {
-    drawFallbackQRCode(doc, qrx, qry, qrSize);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(180, 83, 9);
+    doc.text("QR unavailable — use the link below", marginX + 90, qry + qrSize / 2, { align: "center" });
   }
-
-  // Draw official TripBalancing logo in the exact center of the QR code
-  const qrcx = qrx + qrSize / 2;
-  const qrcy = qry + qrSize / 2;
-  doc.setFillColor(255, 255, 255);
-  doc.circle(qrcx, qrcy, 5.5, "F");
-  drawTripBalancingLogo(doc, qrcx - 1.1, qrcy + 0.6, false, 0.16);
+  // Keep a clickable companion link even if the external QR image service is
+  // unavailable. Never draw a decorative, non-scannable QR substitute.
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(6.5);
+  doc.setTextColor(20, 184, 166);
+  const companionLabel = safeCompanionUrl.length > 64 ? `${safeCompanionUrl.slice(0, 61)}...` : safeCompanionUrl;
+  doc.text(companionLabel, marginX + 90, qry + qrSize + 5, { align: "center" });
+  doc.link(marginX + 12, qry + qrSize + 1, 156, 7, { url: safeCompanionUrl });
 
   doc.setDrawColor(30, 41, 59);
   doc.setLineWidth(0.4);
