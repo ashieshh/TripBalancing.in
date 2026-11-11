@@ -1928,7 +1928,7 @@ export const exportPremiumTravelPDF = async (
   const buildDailyDirectionsUrl = (day: Itinerary["days"][number]): string | null => {
     const destinationContext = String(itinerary.destination || "").trim();
     const stops = (Array.isArray(day.activities) ? day.activities : [])
-      .map((activity) => String(activity.location || activity.title || "").replace(/\\s+/g, " ").trim())
+      .map((activity) => String(activity.location || activity.title || "").replace(/\s+/g, " ").trim())
       .filter((stop) => stop && !/^(free time|leisure time|hotel rest|return to hotel)$/i.test(stop))
       .map((stop) => stop.toLowerCase().includes(destinationContext.toLowerCase()) ? stop : `${stop}, ${destinationContext}`);
     const uniqueStops = stops.filter((stop, index) => stops.indexOf(stop) === index);
@@ -1945,7 +1945,7 @@ export const exportPremiumTravelPDF = async (
       qrCodes[day.dayNumber] = dirUrl ? await loadImgUrlBase64(buildQrImageUrl(dirUrl)) : null;
     }));
   }
-  const safeCompanionUrl = /^https?:\\/\\//i.test(String(companionUrl || ""))
+  const safeCompanionUrl = /^https?:\/\//i.test(String(companionUrl || ""))
     ? String(companionUrl)
     : "https://tripbalancing.in";
   const companionQr = await loadImgUrlBase64(buildQrImageUrl(safeCompanionUrl));
@@ -3166,12 +3166,12 @@ export const exportPremiumTravelPDF = async (
 
   doc.setDrawColor(30, 41, 59);
   doc.setLineWidth(0.4);
-  doc.line(marginX + 15, y + 96, marginX + 165, y + 96);
+  doc.line(marginX + 15, y + 101, marginX + 165, y + 101);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(255, 255, 255);
-  doc.text("INCLUDED SMART FEATURES", marginX + 90, y + 101, { align: "center" });
+  doc.text("INCLUDED SMART FEATURES", marginX + 90, y + 106, { align: "center" });
 
   const features = [
     { title: "LIVE MAPS", desc: "Interactive path navigation and geolocated pins.", type: "maps" },
@@ -3186,7 +3186,7 @@ export const exportPremiumTravelPDF = async (
     const colIdx = idx % 2;
     const rowIdx = Math.floor(idx / 2);
     const fx = colIdx === 0 ? marginX + 6 : marginX + 92;
-    const fy = y + 106 + (rowIdx * 15);
+    const fy = y + 111 + (rowIdx * 15);
 
     // Feature card block
     doc.setFillColor(30, 41, 59);
