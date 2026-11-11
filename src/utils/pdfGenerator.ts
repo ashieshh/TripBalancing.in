@@ -1974,21 +1974,34 @@ export const exportPremiumTravelPDF = async (
     doc.text(doc.splitTextToSize(timelineIntro, 180), marginX, y);
     y += 24;
 
-    // Beautiful visual showcase list of days
-    daysData.slice(0, 5).forEach((day, idx) => {
+    // The master overview is derived from every day in the actual itinerary.
+    // Show the day's theme plus its first two meaningful stops so the overview
+    // cannot omit an attraction that appears in the detailed timeline.
+    daysData.forEach((day, idx) => {
       doc.setFillColor(248, 250, 252);
-      doc.roundedRect(marginX, y, 180, 11, 1, 1, "F");
-      
+      doc.roundedRect(marginX, y, 180, 17, 1, 1, "F");
+
       doc.setFont("helvetica", "bold");
       doc.setFontSize(8.5);
       doc.setTextColor(13, 148, 136);
-      doc.text(`DAY ${day.dayNumber}`, marginX + 4, y + 7.2);
-      
+      doc.text(`DAY ${day.dayNumber}`, marginX + 4, y + 6.8);
+
       doc.setFont("helvetica", "normal");
       doc.setTextColor(15, 23, 42);
-      const overviewTheme=fitSingleLineText(doc,day.theme,151,8.5,6.2);
-      doc.text(overviewTheme.text, marginX + 22, y + 7.2);
-      y += 14;
+      const overviewTheme=fitSingleLineText(doc,day.theme,151,8.2,6.0);
+      doc.text(overviewTheme.text, marginX + 22, y + 6.8);
+
+      const overviewStops=(Array.isArray(day.activities)?day.activities:[])
+        .filter((activity:any)=>!/(breakfast|brunch|lunch|dinner|regional meal|restaurant|cafe tasting|arrival|departure|transfer|check[- ]?in|check[- ]?out)/i.test(`${activity?.title||''} ${activity?.description||''}`))
+        .slice(0,2)
+        .map((activity:any)=>String(activity?.title||activity?.location||'').replace(/^(?:Guided Visit:|Explore|Excursion to|Private)\\s*/i,'').trim())
+        .filter(Boolean);
+      const stopSummary=overviewStops.length?overviewStops.join(' • '):'Flexible time / local exploration';
+      doc.setFontSize(6.2);
+      doc.setTextColor(71, 85, 105);
+      const overviewDetail=fitSingleLineText(doc,stopSummary,151,6.2,5.0);
+      doc.text(overviewDetail.text,marginX+22,y+12.8);
+      y += 20;
     });
 
     daysData.forEach((day, dIdx) => {
