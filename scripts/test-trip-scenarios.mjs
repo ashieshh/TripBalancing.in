@@ -477,5 +477,6 @@ assert.ok(itineraryView.includes("getShareLink()"),"PDF export must pass the act
 assert.ok(pdf.includes("SHARED ITINERARY & NAVIGATION")&&pdf.includes("AVAILABLE IN SHARED VIEW"),"PDF companion page must describe the actual shared-view experience");
 assert.doesNotMatch(pdf,/OFFLINE ACCESS|SPLIT EXPENSES|WEATHER FORECAST/,"read-only companion page must not promise unsupported live features");
 assert.ok(itineraryView.includes("read-only shared itinerary"),"in-app QR copy must accurately describe read-only shared access");
+assert.ok(itineraryView.includes("shareData=${encodeURIComponent(b64)}"),"unsaved share links must URL-encode base64 plus signs and padding");
 
 console.log(`Destination scenario regression passed: ${scenarios} behavioral scenarios across ${destinations.length} representative destinations.`);
