@@ -735,7 +735,7 @@ export default function ItineraryView({
     try {
       setIsExportingPDF(true);
       const { exportPremiumTravelPDF } = await import("../utils/pdfGenerator");
-      await exportPremiumTravelPDF(itinerary, packingChecks, headerWeather);
+      await exportPremiumTravelPDF(itinerary, packingChecks, headerWeather, window.location.href);
     } catch (err) {
       console.error("Failed to export premium travel PDF:", err);
     } finally {
