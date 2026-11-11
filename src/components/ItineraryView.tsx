@@ -2717,14 +2717,20 @@ export default function ItineraryView({
 
             {/* Live QR Code Companion Box */}
             <div className="border-2 border-teal-600 rounded-2xl p-5 bg-teal-50/10 flex items-center gap-6 mt-6 print-no-break">
-              <img 
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(getShareLink())}`} 
-                alt="QR Code" 
-                className="w-24 h-24 border border-slate-200 rounded-xl bg-white p-1 flex-shrink-0"
-                referrerPolicy="no-referrer"
-                loading="eager"
-                decoding="sync"
-              />
+              {getShareLink().length <= 1600 ? (
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&ecc=H&margin=2&data=${encodeURIComponent(getShareLink())}`} 
+                  alt="Trip companion QR code" 
+                  className="w-24 h-24 border border-slate-200 rounded-xl bg-white p-1 flex-shrink-0"
+                  referrerPolicy="no-referrer"
+                  loading="eager"
+                  decoding="sync"
+                />
+              ) : (
+                <div className="w-24 h-24 border border-dashed border-teal-500 rounded-xl bg-white flex items-center justify-center p-2 text-center text-[10px] font-bold text-teal-800 flex-shrink-0">
+                  Save this trip to create a compact QR code
+                </div>
+              )}
               <div className="space-y-2">
                 <h4 className="text-xs font-black uppercase tracking-wider text-teal-900">
                   ⚡ ACCESS MOBILE COMPANION APP
@@ -2733,7 +2739,7 @@ export default function ItineraryView({
                   Scan this QR code with your smartphone to unlock this itinerary's live companion interface. Access turn-by-turn navigation pins, check dynamic local weather updates, and instantly record actual expenses on-the-go while you travel!
                 </p>
                 <div className="text-[9.5px] font-bold text-teal-800">
-                  🌐 Live Link: {window.location.href.substring(0, 75)}...
+                  🌐 Live Link: {getShareLink().substring(0, 75)}...
                 </div>
               </div>
             </div>
