@@ -735,7 +735,7 @@ export default function ItineraryView({
     try {
       setIsExportingPDF(true);
       const { exportPremiumTravelPDF } = await import("../utils/pdfGenerator");
-      await exportPremiumTravelPDF(itinerary, packingChecks, headerWeather, window.location.href);
+      await exportPremiumTravelPDF(itinerary, packingChecks, headerWeather, getShareLink());
     } catch (err) {
       console.error("Failed to export premium travel PDF:", err);
     } finally {
@@ -2718,7 +2718,7 @@ export default function ItineraryView({
             {/* Live QR Code Companion Box */}
             <div className="border-2 border-teal-600 rounded-2xl p-5 bg-teal-50/10 flex items-center gap-6 mt-6 print-no-break">
               <img 
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(window.location.href)}`} 
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(getShareLink())}`} 
                 alt="QR Code" 
                 className="w-24 h-24 border border-slate-200 rounded-xl bg-white p-1 flex-shrink-0"
                 referrerPolicy="no-referrer"
