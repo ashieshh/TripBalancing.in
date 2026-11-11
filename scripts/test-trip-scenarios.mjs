@@ -458,6 +458,8 @@ for(const destination of ['Reykjavik, Iceland','Cusco, Peru','Madagascar']){
 assert.doesNotMatch(pdf,/const simulatedRating\s*=/,'PDF must not fabricate food ratings');
 assert.doesNotMatch(pdf,/const rating\s*=\s*4\.5/,'PDF must not fabricate attraction ratings');
 assert.match(pdf,/finalBlockReserve/,'PDF must keep the last activity with its route/summary panels');
+assert.ok(pdf.includes("const overviewStops=")&&pdf.includes("daysData.forEach((day, idx) =>"),"master schedule must include activity previews for every itinerary day");
+assert.ok(!pdf.includes("daysData.slice(0, 5)"),"master schedule must not silently omit trips longer than five days");
 assert.match(pdf,/dailyCostBreakdown/,'PDF must render reconciled daily cost components');
 assert.match(pdf,/fitSingleLineText/,'PDF must hard-limit single-line headings and badges to their cards');
 assert.match(pdf,/checkPageEnd\(138\)/,'PDF must reserve the complete seven-card financial dashboard');
