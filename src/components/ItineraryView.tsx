@@ -2733,10 +2733,10 @@ export default function ItineraryView({
               )}
               <div className="space-y-2">
                 <h4 className="text-xs font-black uppercase tracking-wider text-teal-900">
-                  ⚡ ACCESS MOBILE COMPANION APP
+                  ⚡ OPEN SHARED ITINERARY
                 </h4>
                 <p className="text-[11px] text-slate-650 leading-relaxed font-medium">
-                  Scan this QR code with your smartphone to unlock this itinerary's live companion interface. Access turn-by-turn navigation pins, check dynamic local weather updates, and instantly record actual expenses on-the-go while you travel!
+                  Scan this QR code with your smartphone to open this trip’s read-only shared itinerary. Review the day-by-day plan, estimated budget, attraction notes and daily Google Maps route links.
                 </p>
                 <div className="text-[9.5px] font-bold text-teal-800">
                   🌐 Live Link: {getShareLink().substring(0, 75)}...
