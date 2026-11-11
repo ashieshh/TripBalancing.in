@@ -3127,7 +3127,7 @@ export const exportPremiumTravelPDF = async (
   // ==========================================
   // PAGE: DIGITAL COMPANION TICKET PASS (Dedicated QR Page)
   // ==========================================
-  startSectionPage("08", "DIGITAL COMPANION & OFFLINE PORTAL", "Live interactive tools, dynamic mapping guides, and offline companion features.");
+  startSectionPage("08", "SHARED ITINERARY & NAVIGATION", "Open the trip plan, estimated budget and daily map routes from a phone browser.");
 
   // Dark luxurious background block (Enlarged)
   drawPremiumCard(doc, marginX, y, 180, 162, 3, 3, [20, 184, 166], [15, 23, 42]);
