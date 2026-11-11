@@ -904,7 +904,8 @@ export const reconcileItineraryBudget = (itinerary: any): any => {
         for(let shareIndex=0;shareIndex<remainder;shareIndex++)shares[order[shareIndex%order.length].shareIndex]++;
         pricedActivities.forEach((activity:any,activityIndex:number)=>{
           const share=shares[activityIndex]||0;
-          activity.cost=share>0?fmtMoney(share):"Not separately budgeted";
+          const retainsEstimateLabel=/group planning estimate/i.test(String(activity.cost||""));
+          activity.cost=share>0?`${fmtMoney(share)}${retainsEstimateLabel?" group planning estimate; verify official ticket":""}`:"Not separately budgeted";
         });
       }
       day.activitySubtotal=fmtMoney(dayActivityAllowance);
