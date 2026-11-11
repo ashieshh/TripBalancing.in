@@ -471,6 +471,6 @@ assert.ok(!pdf.includes("qrCodes[1]"),"companion QR must never reuse Day 1 navig
 assert.ok(!pdf.includes("drawFallbackQRCode(doc"),"PDF must never render a decorative QR substitute");
 assert.ok(pdf.includes("doc.link(qrx, qry, qrSize, qrSize"),"companion QR must have a clickable URL");
 const itineraryView=fs.readFileSync(new URL("../src/components/ItineraryView.tsx",import.meta.url),"utf8");
-assert.ok(itineraryView.includes("window.location.href"),"PDF export must pass the active itinerary URL");
+assert.ok(itineraryView.includes("getShareLink()"),"PDF export must pass the active itinerary URL");
 
 console.log(`Destination scenario regression passed: ${scenarios} behavioral scenarios across ${destinations.length} representative destinations.`);
