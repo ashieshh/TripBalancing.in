@@ -474,5 +474,8 @@ assert.ok(!pdf.includes("drawFallbackQRCode(doc"),"PDF must never render a decor
 assert.ok(pdf.includes("doc.link(qrx, qry, qrSize, qrSize"),"companion QR must have a clickable URL");
 const itineraryView=fs.readFileSync(new URL("../src/components/ItineraryView.tsx",import.meta.url),"utf8");
 assert.ok(itineraryView.includes("getShareLink()"),"PDF export must pass the active itinerary URL");
+assert.ok(pdf.includes("SHARED ITINERARY & NAVIGATION")&&pdf.includes("AVAILABLE IN SHARED VIEW"),"PDF companion page must describe the actual shared-view experience");
+assert.doesNotMatch(pdf,/OFFLINE ACCESS|SPLIT EXPENSES|WEATHER FORECAST/,"read-only companion page must not promise unsupported live features");
+assert.ok(itineraryView.includes("read-only shared itinerary"),"in-app QR copy must accurately describe read-only shared access");
 
 console.log(`Destination scenario regression passed: ${scenarios} behavioral scenarios across ${destinations.length} representative destinations.`);
