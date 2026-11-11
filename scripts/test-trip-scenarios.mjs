@@ -330,6 +330,11 @@ for(const [destination,origin,placeNames] of destinations){
       const breakdown=day.dailyCostBreakdown;
       const parts=['accommodation','food','localTransport','activities','miscellaneous'].reduce((sum,key)=>sum+money(breakdown[key]),0);
       assert.equal(parts,money(day.dailyBudget),`${destination} day ${index+1}: daily cost does not reconcile`);
+      const pricedActivitySpend=day.activities.filter(activity=>{
+        const label=`${activity.title||''} ${activity.description||''}`;
+        return !/breakfast|brunch|lunch|dinner|dining|regional meal|restaurant|cafe tasting|transfer|chauffeur|drive|travel to|pickup|drop[- ]?off/i.test(label);
+      }).reduce((sum,activity)=>sum+money(activity.cost),0);
+      assert.equal(pricedActivitySpend,money(breakdown.activities),`${destination} day ${index+1}: visible paid activity prices must equal the Activities category`);
     });
     const destinationSpend=trip.days.reduce((sum,day)=>sum+money(day.dailyBudget),0);
     const expectedDestination=money(trip.realisticEstimatedCost)-money(trip.estimatedBudgetBreakdown.originToDestinationTravel)-money(trip.estimatedBudgetBreakdown.visaAndInsurance);
@@ -459,6 +464,13 @@ assert.match(pdf,/checkPageEnd\(138\)/,'PDF must reserve the complete seven-card
 assert.match(pdf,/Confirm airport/,'PDF must label unresolved airport routes instead of printing a fake distance');
 assert.match(pdf,/Est\. entry:/,'PDF must label attraction amounts as estimates');
 assert.doesNotMatch(pdf,/Five-star premium|Ultra Luxury/,'PDF must not claim an unverified hotel star class');
-assert.match(pdf,/GUEST SCORE[\s\S]*PROPERTY CLASS[\s\S]*RATING: CHECK LIVE/,'PDF must distinguish live guest scores, property class and unverified ratings');
+assert.match(pdf,/GUEST SCORE[\\s\\S]*PROPERTY CLASS[\\s\\S]*RATING: CHECK LIVE/,'PDF must distinguish live guest scores, property class and unverified ratings');
+assert.match(pdf,/companionUrl: string = "https:\\/\\/tripbalancing\\.in"/,'PDF export must accept the active trip companion URL');
+assert.match(pdf,/const companionQr = await loadImgUrlBase64\\(buildQrImageUrl\\(safeCompanionUrl\\)\\)/,'the companion QR must be generated from the active trip URL, not a daily route');
+assert.doesNotMatch(pdf,/qrCodes\\[1\\]/,'the companion QR must never reuse Day 1 navigation');
+assert.doesNotMatch(pdf,/drawFallbackQRCode\\(doc/,'PDF must never render a decorative, non-scannable QR substitute');
+assert.match(pdf,/doc\\.link\\(qrx, qry, qrSize, qrSize, \\{ url: safeCompanionUrl \\}\\)/,'the companion QR area must remain clickable');
+const itineraryView=fs.readFileSync(new URL('../src/components/ItineraryView.tsx',import.meta.url),'utf8');
+assert.match(itineraryView,/exportPremiumTravelPDF\\(itinerary, packingChecks, headerWeather, window\\.location\\.href\\)/,'PDF export must pass the active itinerary URL');
 
 console.log(`Destination scenario regression passed: ${scenarios} behavioral scenarios across ${destinations.length} representative destinations.`);
