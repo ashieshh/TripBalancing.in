@@ -465,12 +465,12 @@ assert.match(pdf,/Confirm airport/,'PDF must label unresolved airport routes ins
 assert.match(pdf,/Est\. entry:/,'PDF must label attraction amounts as estimates');
 assert.doesNotMatch(pdf,/Five-star premium|Ultra Luxury/,'PDF must not claim an unverified hotel star class');
 assert.match(pdf,/GUEST SCORE[\\s\\S]*PROPERTY CLASS[\\s\\S]*RATING: CHECK LIVE/,'PDF must distinguish live guest scores, property class and unverified ratings');
-assert.match(pdf,/companionUrl: string = "https:\\/\\/tripbalancing\\.in"/,'PDF export must accept the active trip companion URL');
-assert.match(pdf,/const companionQr = await loadImgUrlBase64\\(buildQrImageUrl\\(safeCompanionUrl\\)\\)/,'the companion QR must be generated from the active trip URL, not a daily route');
-assert.doesNotMatch(pdf,/qrCodes\\[1\\]/,'the companion QR must never reuse Day 1 navigation');
-assert.doesNotMatch(pdf,/drawFallbackQRCode\\(doc/,'PDF must never render a decorative, non-scannable QR substitute');
-assert.match(pdf,/doc\\.link\\(qrx, qry, qrSize, qrSize, \\{ url: safeCompanionUrl \\}\\)/,'the companion QR area must remain clickable');
+assert.ok(pdf.includes('companionUrl: string = "https://tripbalancing.in"'),'PDF export must accept the active trip companion URL');
+assert.ok(pdf.includes('const companionQr = await loadImgUrlBase64(buildQrImageUrl(safeCompanionUrl))'),'the companion QR must be generated from the active trip URL, not a daily route');
+assert.ok(!pdf.includes('qrCodes[1]'),'the companion QR must never reuse Day 1 navigation');
+assert.ok(!pdf.includes('drawFallbackQRCode(doc'),'PDF must never render a decorative, non-scannable QR substitute');
+assert.ok(pdf.includes('doc.link(qrx, qry, qrSize, qrSize, { url: safeCompanionUrl })'),'the companion QR area must remain clickable');
 const itineraryView=fs.readFileSync(new URL('../src/components/ItineraryView.tsx',import.meta.url),'utf8');
-assert.match(itineraryView,/exportPremiumTravelPDF\\(itinerary, packingChecks, headerWeather, window\\.location\\.href\\)/,'PDF export must pass the active itinerary URL');
+assert.ok(itineraryView.includes('exportPremiumTravelPDF(itinerary, packingChecks, headerWeather, window.location.href)'),'PDF export must pass the active itinerary URL');
 
 console.log(`Destination scenario regression passed: ${scenarios} behavioral scenarios across ${destinations.length} representative destinations.`);
