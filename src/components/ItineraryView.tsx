@@ -2739,7 +2739,7 @@ export default function ItineraryView({
                   Scan this QR code with your smartphone to open this trip’s read-only shared itinerary. Review the day-by-day plan, estimated budget, attraction notes and daily Google Maps route links.
                 </p>
                 <div className="text-[9.5px] font-bold text-teal-800">
-                  🌐 Live Link: {getShareLink().substring(0, 75)}...
+                  🌐 Share Link: {getShareLink().substring(0, 75)}...
                 </div>
               </div>
             </div>
