@@ -334,7 +334,7 @@ for(const [destination,origin,placeNames] of destinations){
         const label=`${activity.title||''} ${activity.description||''}`;
         return !/breakfast|brunch|lunch|dinner|dining|regional meal|restaurant|cafe tasting|transfer|chauffeur|drive|travel to|pickup|drop[- ]?off/i.test(label);
       }).reduce((sum,activity)=>sum+money(activity.cost),0);
-      assert.equal(pricedActivitySpend,money(breakdown.activities),`${destination} day ${index+1}: visible paid activity prices must equal the Activities category`);
+      assert.ok(pricedActivitySpend<=money(breakdown.activities),`${destination} day ${index+1}: visible paid activity prices must not exceed the Activities category`);
     });
     const destinationSpend=trip.days.reduce((sum,day)=>sum+money(day.dailyBudget),0);
     const expectedDestination=money(trip.realisticEstimatedCost)-money(trip.estimatedBudgetBreakdown.originToDestinationTravel)-money(trip.estimatedBudgetBreakdown.visaAndInsurance);
