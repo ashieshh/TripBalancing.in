@@ -1948,7 +1948,10 @@ export const exportPremiumTravelPDF = async (
   const safeCompanionUrl = /^https?:\/\//i.test(String(companionUrl || ""))
     ? String(companionUrl)
     : "https://tripbalancing.in";
-  const companionQr = await loadImgUrlBase64(buildQrImageUrl(safeCompanionUrl));
+  // Unsaved shareData URLs can contain the full itinerary and exceed practical
+  // QR capacity. Keep the hyperlink, but ask the customer to save the trip first.
+  const companionQrTooLong = safeCompanionUrl.length > 1600;
+  const companionQr = companionQrTooLong ? null : await loadImgUrlBase64(buildQrImageUrl(safeCompanionUrl));
 
   // ==========================================
   // PAGE 4+: CHRONOLOGICAL ITINERARY (Vertical Timeline)
@@ -3153,7 +3156,7 @@ export const exportPremiumTravelPDF = async (
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(180, 83, 9);
-    doc.text("QR unavailable — use the link below", marginX + 90, qry + qrSize / 2, { align: "center" });
+    doc.text(companionQrTooLong ? "Save this trip for a compact QR" : "QR unavailable — use the link below", marginX + 90, qry + qrSize / 2, { align: "center" });
   }
   // Keep a clickable companion link even if the external QR image service is
   // unavailable. Never draw a decorative, non-scannable QR substitute.
