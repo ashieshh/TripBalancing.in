@@ -466,7 +466,7 @@ export default function ItineraryView({
       try {
         const json = JSON.stringify(itinerary);
         const b64 = btoa(unescape(encodeURIComponent(json)));
-        return `${origin}${path}?shareData=${b64}`;
+        return `${origin}${path}?shareData=${encodeURIComponent(b64)}`;
       } catch (e) {
         console.error("Failed to generate offline share link", e);
         return `${origin}${path}`;
