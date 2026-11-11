@@ -1994,7 +1994,7 @@ export const exportPremiumTravelPDF = async (
       const overviewStops=(Array.isArray(day.activities)?day.activities:[])
         .filter((activity:any)=>!/(breakfast|brunch|lunch|dinner|regional meal|restaurant|cafe tasting|arrival|departure|transfer|check[- ]?in|check[- ]?out)/i.test(`${activity?.title||''} ${activity?.description||''}`))
         .slice(0,2)
-        .map((activity:any)=>String(activity?.title||activity?.location||'').replace(/^(?:Guided Visit:|Explore|Excursion to|Private)\\s*/i,'').trim())
+        .map((activity:any)=>String(activity?.title||activity?.location||'').replace(/^(?:Guided Visit:|Explore|Excursion to|Private)\s*/i,'').trim())
         .filter(Boolean);
       const stopSummary=overviewStops.length?overviewStops.join(' • '):'Flexible time / local exploration';
       doc.setFontSize(6.2);
