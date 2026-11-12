@@ -5,25 +5,28 @@ import { reconcileItineraryBudget } from "./budgetCalculator";
 const loadImgUrlBase64 = (url: string): Promise<string | null> => {
   return new Promise((resolve) => {
     const img = new Image();
-    img.crossOrigin = "Anonymous";
+    let settled = false;
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(value);
+    };
+    const timeout = setTimeout(() => finish(null), 8000);
     img.onload = () => {
       try {
         const canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
         const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(img, 0, 0);
-          resolve(canvas.toDataURL("image/png"));
-        } else {
-          resolve(null);
-        }
-      } catch (e) {
-        resolve(null);
+        if (!ctx || !canvas.width || !canvas.height) return finish(null);
+        ctx.drawImage(img, 0, 0);
+        finish(canvas.toDataURL("image/png"));
+      } catch {
+        finish(null);
       }
     };
-    img.onerror = () => resolve(null);
-    setTimeout(() => resolve(null), 1500); // safety timeout
+    img.onerror = () => finish(null);
     img.src = url;
   });
 };
@@ -1923,19 +1926,42 @@ export const exportPremiumTravelPDF = async (
   // QR is generated separately and must never reuse a day's navigation code.
   const qrCodes: Record<number, string | null> = {};
   const qrUrls: Record<number, string | null> = {};
+  // Same-origin proxy avoids browser CORS failures when embedding QR images in jsPDF.
   const buildQrImageUrl = (targetUrl: string) =>
-    `https://api.qrserver.com/v1/create-qr-code/?size=240x240&ecc=H&margin=2&data=${encodeURIComponent(targetUrl)}`;
+    `/api/qr-code?data=${encodeURIComponent(targetUrl)}`;
+  const isNonSpecificStop = (value: string): boolean =>
+    !value ||
+    /^(free time|leisure time|hotel rest|return to hotel|flexible time)$/i.test(value) ||
+    /^(a |an |the )?(well[- ]reviewed|established|traditional|reputable|local) (roman )?(trattoria|restaurant|osteria|pizzeria|cafe|eatery)/i.test(value) ||
+    /^(confirm|check|verify) (the )?(airport|station|booking|route)/i.test(value) ||
+    /^(a |an )?(traditional|established|well[- ]reviewed) (testaccio )?(restaurant|trattoria|osteria|pizzeria)/i.test(value);
   const buildDailyDirectionsUrl = (day: Itinerary["days"][number]): string | null => {
     const destinationContext = String(itinerary.destination || "").trim();
-    const stops = (Array.isArray(day.activities) ? day.activities : [])
-      .map((activity) => String(activity.location || activity.title || "").replace(/\s+/g, " ").trim())
-      .filter((stop) => stop && !/^(free time|leisure time|hotel rest|return to hotel)$/i.test(stop))
-      .map((stop) => stop.toLowerCase().includes(destinationContext.toLowerCase()) ? stop : `${stop}, ${destinationContext}`);
-    const uniqueStops = stops.filter((stop, index) => stops.indexOf(stop) === index);
+    const activities = Array.isArray(day.activities) ? day.activities : [];
+    // Use explicit activity locations only. Titles and descriptive prose are not
+    // reliable map destinations and previously produced generic restaurant routes.
+    const stops = activities
+      .filter((activity: any) => !/(breakfast|brunch|lunch|dinner|meal|restaurant|cafe tasting|rest|leisure|free time|departure|airport transfer)/i.test(String(activity?.title || "")))
+      .map((activity: any) => String(activity?.location || "").replace(/\s+/g, " ").trim())
+      .filter((stop: string) => !isNonSpecificStop(stop))
+      .map((stop: string) => {
+        if (!destinationContext) return stop;
+        const normalized = stop.toLowerCase();
+        return normalized.includes(destinationContext.toLowerCase()) ? stop : `${stop}, ${destinationContext}`;
+      });
+    const uniqueStops = stops.filter((stop: string, index: number) => stops.indexOf(stop) === index).slice(0, 10);
     if (!uniqueStops.length) return null;
-    const params = new URLSearchParams({ api: "1", destination: uniqueStops[uniqueStops.length - 1] });
-    if (uniqueStops.length > 1) params.set("origin", uniqueStops[0]);
-    if (uniqueStops.length > 2) params.set("waypoints", uniqueStops.slice(1, -1).slice(0, 8).join("|"));
+    if (uniqueStops.length === 1) {
+      const params = new URLSearchParams({ api: "1", query: uniqueStops[0] });
+      return `https://www.google.com/maps/search/?${params.toString()}`;
+    }
+    const params = new URLSearchParams({
+      api: "1",
+      origin: uniqueStops[0],
+      destination: uniqueStops[uniqueStops.length - 1],
+      travelmode: "walking"
+    });
+    if (uniqueStops.length > 2) params.set("waypoints", uniqueStops.slice(1, -1).join("|"));
     return `https://www.google.com/maps/dir/?${params.toString()}`;
   };
   if (itinerary.days && itinerary.days.length > 0) {
@@ -1945,13 +1971,13 @@ export const exportPremiumTravelPDF = async (
       qrCodes[day.dayNumber] = dirUrl ? await loadImgUrlBase64(buildQrImageUrl(dirUrl)) : null;
     }));
   }
-  const safeCompanionUrl = /^https?:\/\//i.test(String(companionUrl || ""))
+  const safeCompanionUrl = /^https:\/\//i.test(String(companionUrl || "")) && String(companionUrl).length <= 2048
     ? String(companionUrl)
-    : "https://tripbalancing.in";
-  // Unsaved shareData URLs can contain the full itinerary and exceed practical
-  // QR capacity. Keep the hyperlink, but ask the customer to save the trip first.
-  const companionQrTooLong = safeCompanionUrl.length > 1600;
-  const companionQr = companionQrTooLong ? null : await loadImgUrlBase64(buildQrImageUrl(safeCompanionUrl));
+    : "";
+  // A public, saved-trip URL is short enough for a robust QR. Never encode a
+  // giant shareData payload or silently point the customer at the site homepage.
+  const companionQrTooLong = !safeCompanionUrl;
+  const companionQr = safeCompanionUrl ? await loadImgUrlBase64(buildQrImageUrl(safeCompanionUrl)) : null;
 
   // ==========================================
   // PAGE 4+: CHRONOLOGICAL ITINERARY (Vertical Timeline)
@@ -3176,9 +3202,9 @@ export const exportPremiumTravelPDF = async (
   doc.setFont("helvetica", "normal");
   doc.setFontSize(6.5);
   doc.setTextColor(20, 184, 166);
-  const companionLabel = safeCompanionUrl.length > 64 ? `${safeCompanionUrl.slice(0, 61)}...` : safeCompanionUrl;
+  const companionLabel = safeCompanionUrl ? (safeCompanionUrl.length > 64 ? `${safeCompanionUrl.slice(0, 61)}...` : safeCompanionUrl) : "Save this trip to create a scannable companion QR";
   doc.text(companionLabel, marginX + 90, qry + qrSize + 5, { align: "center" });
-  doc.link(marginX + 12, qry + qrSize + 1, 156, 7, { url: safeCompanionUrl });
+  if (safeCompanionUrl) doc.link(marginX + 12, qry + qrSize + 1, 156, 7, { url: safeCompanionUrl });
 
   doc.setDrawColor(30, 41, 59);
   doc.setLineWidth(0.4);
