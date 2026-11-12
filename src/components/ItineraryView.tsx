@@ -732,6 +732,10 @@ export default function ItineraryView({
   // PDF Generation using jsPDF
   const handleExportPDF = async () => {
     if (isExportingPDF) return;
+    if (!tripId) {
+      window.alert("Save this trip first, then export the Premium PDF. A saved trip creates the short, shareable companion link required for a working QR code.");
+      return;
+    }
     try {
       setIsExportingPDF(true);
       const { exportPremiumTravelPDF } = await import("../utils/pdfGenerator");
