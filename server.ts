@@ -812,6 +812,47 @@ app.post("/api/validate-locations", async (req, res) => {
 });
 
 // API Health Check
+// QR image proxy: keeps QR generation same-origin so the PDF canvas can safely embed it.
+app.get("/api/qr-code", async (req, res) => {
+  try {
+    const target = String(req.query?.data || "").trim();
+    if (!target || target.length > 2048) {
+      return res.status(400).json({ error: "A valid QR destination URL is required (maximum 2048 characters)." });
+    }
+    let parsed: URL;
+    try { parsed = new URL(target); } catch {
+      return res.status(400).json({ error: "Invalid QR destination URL." });
+    }
+    if (parsed.protocol !== "https:") {
+      return res.status(400).json({ error: "Only HTTPS destinations can be encoded." });
+    }
+    const qrUrl = new URL("https://api.qrserver.com/v1/create-qr-code/");
+    qrUrl.searchParams.set("size", "360x360");
+    qrUrl.searchParams.set("ecc", "M");
+    qrUrl.searchParams.set("margin", "2");
+    qrUrl.searchParams.set("format", "png");
+    qrUrl.searchParams.set("data", target);
+    const upstream = await fetch(qrUrl.toString(), { headers: { Accept: "image/png" } });
+    if (!upstream.ok) {
+      return res.status(502).json({ error: "QR image provider is temporarily unavailable." });
+    }
+    const contentType = upstream.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("image/png")) {
+      return res.status(502).json({ error: "QR image provider returned an invalid image." });
+    }
+    const image = Buffer.from(await upstream.arrayBuffer());
+    if (!image.length || image.length > 1024 * 1024) {
+      return res.status(502).json({ error: "QR image response was invalid." });
+    }
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    return res.send(image);
+  } catch (error: any) {
+    console.warn("[QR Code] Generation failed:", error?.message || error);
+    return res.status(502).json({ error: "Unable to generate QR image." });
+  }
+});
+
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
