@@ -1977,7 +1977,7 @@ export const exportPremiumTravelPDF = async (
   // A public, saved-trip URL is short enough for a robust QR. Never encode a
   // giant shareData payload or silently point the customer at the site homepage.
   const companionQrTooLong = !safeCompanionUrl;
-  const companionQr = safeCompanionUrl ? await loadImgUrlBase64(buildQrImageUrl(safeCompanionUrl)) : null;
+  const companionQr = companionQrTooLong ? null : await loadImgUrlBase64(buildQrImageUrl(safeCompanionUrl));
 
   // ==========================================
   // PAGE 4+: CHRONOLOGICAL ITINERARY (Vertical Timeline)
